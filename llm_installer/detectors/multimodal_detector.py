@@ -59,12 +59,18 @@ class MultimodalDetector(BaseDetector):
             metadata={}
         )
 
-        # Extract torch_dtype - check main config and sub-configs
-        torch_dtype = config.get('torch_dtype')
-        if not torch_dtype and 'llm_config' in config:
+        # Extract torch_dtype - prefer component configs over main config
+        torch_dtype = None
+        
+        # For multimodal models, the component dtypes are more important
+        # LLM config usually has the actual inference dtype
+        if 'llm_config' in config and config['llm_config'].get('torch_dtype'):
             torch_dtype = config['llm_config'].get('torch_dtype')
-        if not torch_dtype and 'vision_config' in config:
+        elif 'vision_config' in config and config['vision_config'].get('torch_dtype'):
             torch_dtype = config['vision_config'].get('torch_dtype')
+        elif config.get('torch_dtype'):
+            # Fallback to main config (but it's often misleading for multimodal)
+            torch_dtype = config.get('torch_dtype')
 
         if torch_dtype:
             profile.metadata['torch_dtype'] = torch_dtype
