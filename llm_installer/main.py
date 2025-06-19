@@ -153,10 +153,20 @@ def create_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Save token for gated models access:
+  llm-installer login hf_YOUR_TOKEN_HERE
+
+  # Or use environment variable for temporary access:
+  export HF_TOKEN=hf_YOUR_TOKEN_HERE
+
+  # Check model compatibility:
   llm-installer check meta-llama/Llama-3-8B
+
+  # Install model:
   llm-installer install meta-llama/Llama-3-8B --quantization 4bit
+
+  # List installed models:
   llm-installer list
-  llm-installer remove meta-llama/Llama-3-8B
         """
     )
 
@@ -170,18 +180,6 @@ Examples:
         '--debug',
         action='store_true',
         help='Enable debug logging'
-    )
-
-    parser.add_argument(
-        '--token',
-        type=str,
-        help='HuggingFace API token for accessing gated models'
-    )
-
-    parser.add_argument(
-        '--save-token',
-        action='store_true',
-        help='Save the provided token for future use'
     )
 
     subparsers = parser.add_subparsers(
@@ -252,7 +250,8 @@ Examples:
         help='Save HuggingFace token for authentication'
     )
     login_parser.add_argument(
-        '--token',
+        'token',
+        nargs='?',
         type=str,
         help='HuggingFace token (if not provided, will prompt)'
     )
@@ -267,19 +266,10 @@ def main() -> int:
 
     setup_logging(args.debug)
 
-    # Handle token authentication
-    if args.token:
-        set_hf_token(args.token)
-        if args.save_token:
-            if save_hf_token(args.token):
-                logging.info("Token saved for future use")
-            else:
-                logging.warning("Failed to save token")
-    else:
-        # Try to load token from environment or config
-        token = get_hf_token()
-        if token:
-            set_hf_token(token)
+    # Load token from environment or config
+    token = get_hf_token()
+    if token:
+        set_hf_token(token)
 
     # Dispatch to appropriate command handler
     command_handlers = {
