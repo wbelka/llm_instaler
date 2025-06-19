@@ -61,7 +61,7 @@ class MultimodalDetector(BaseDetector):
 
         # Extract torch_dtype - prefer component configs over main config
         torch_dtype = None
-        
+
         # For multimodal models, the component dtypes are more important
         # LLM config usually has the actual inference dtype
         if 'llm_config' in config and config['llm_config'].get('torch_dtype'):
@@ -188,67 +188,75 @@ class MultimodalDetector(BaseDetector):
         total_size = self._calculate_multimodal_size(config, files, model_id)
 
         components = {}
-        calculated_total = 0.0
 
-        # Calculate vision component size
-        if 'vision_config' in config:
-            vision_config = config['vision_config']
-            hidden_size = vision_config.get('hidden_size', 768)
-            num_layers = vision_config.get('depth', vision_config.get('num_hidden_layers', 12))
-            vision_size = (hidden_size * hidden_size * num_layers * 12) / 1e9
-            components['vision'] = round(vision_size, 1)
-            calculated_total += vision_size
+        # For multimodal models, components are often integrated rather than separate
+        # Use more realistic distributions based on model architecture
 
-        # Calculate audio component size
-        if 'audio_config' in config:
-            audio_config = config['audio_config']
-            # Check for encoder size
-            if 'audio_encoder_output_size' in audio_config:
-                components['audio'] = 1.0  # Typical audio encoder
-            else:
-                components['audio'] = 0.5
-            calculated_total += components['audio']
-        elif 'whisper_config' in config:
-            whisper_config = config['whisper_config']
-            if 'whisper_encoder_config' in whisper_config:
-                enc_config = whisper_config['whisper_encoder_config']
-                n_state = enc_config.get('n_state', 1280)
-                n_layer = enc_config.get('n_layer', 32)
-                # Whisper size estimation
-                components['audio'] = round((n_state * n_state * n_layer * 12) / 1e9, 1)
-            else:
-                components['audio'] = 1.5  # Default Whisper size
-            calculated_total += components['audio']
-
-        # Calculate talker/decoder component if present
-        if 'talker_config' in config:
-            components['talker'] = 0.5  # Typically small
-            calculated_total += components['talker']
-
-        # LLM component is the remainder (largest part)
-        if 'llm_config' in config or total_size > calculated_total:
-            components['llm'] = round(total_size - calculated_total, 1)
-            if components['llm'] < 1.0:
-                # Minimum size for LLM
-                components['llm'] = 1.0
-
-        # If no components calculated, estimate from total
-        if not components:
-            if 'ming' in model_id.lower():
-                # Ming-Lite distribution for 80GB model
-                ratio = total_size / 80.0  # Scale to actual size
+        if 'ming' in model_id.lower():
+            # Ming-Lite-Omni specific distribution
+            # These models have a large integrated backbone with smaller adapters
+            if total_size >= 70:  # Large Ming model
                 components = {
-                    'llm': round(65.0 * ratio, 1),  # ~81% for LLM
-                    'vision': round(10.0 * ratio, 1),  # ~12.5% for vision
-                    'audio': round(4.0 * ratio, 1),  # ~5% for audio
-                    'talker': round(1.0 * ratio, 1)  # ~1.5% for talker
+                    'llm': round(total_size * 0.75, 1),  # 75% integrated LLM backbone
+                    'vision': round(total_size * 0.15, 1),  # 15% vision encoder
+                    'audio': round(total_size * 0.08, 1),  # 8% audio encoder
+                    'talker': round(total_size * 0.02, 1)  # 2% talker decoder
                 }
-            else:
-                # Generic multimodal distribution
+            else:  # Smaller Ming model
                 components = {
-                    'llm': round(total_size * 0.7, 1),  # 70% for LLM
-                    'vision': round(total_size * 0.2, 1),  # 20% for vision
-                    'audio': round(total_size * 0.1, 1)  # 10% for audio
+                    'llm': round(total_size * 0.70, 1),  # 70% LLM
+                    'vision': round(total_size * 0.20, 1),  # 20% vision
+                    'audio': round(total_size * 0.08, 1),  # 8% audio
+                    'talker': round(total_size * 0.02, 1)  # 2% talker
                 }
+        else:
+            # Generic multimodal model distribution
+            # Most multimodal models have integrated architectures
+            has_vision = 'vision_config' in config
+            has_audio = 'audio_config' in config or 'whisper_config' in config
+            has_talker = 'talker_config' in config
+
+            # Count modalities
+            num_modalities = 1  # Always have text/LLM
+            if has_vision:
+                num_modalities += 1
+            if has_audio:
+                num_modalities += 1
+            if has_talker:
+                num_modalities += 1
+
+            # For integrated multimodal models, the LLM backbone is shared
+            # Additional modalities add encoders/decoders but share representations
+            if has_vision and has_audio:
+                # Vision + Audio + Text model
+                components['llm'] = round(total_size * 0.60, 1)  # 60% shared backbone
+                components['vision'] = round(total_size * 0.25, 1)  # 25% vision
+                components['audio'] = round(total_size * 0.15, 1)  # 15% audio
+                if has_talker:
+                    # Adjust for talker
+                    components['llm'] = round(total_size * 0.58, 1)
+                    components['vision'] = round(total_size * 0.24, 1)
+                    components['audio'] = round(total_size * 0.14, 1)
+                    components['talker'] = round(total_size * 0.04, 1)
+            elif has_vision:
+                # Vision + Text model (like CLIP, BLIP)
+                components['llm'] = round(total_size * 0.65, 1)  # 65% text/shared
+                components['vision'] = round(total_size * 0.35, 1)  # 35% vision
+            elif has_audio:
+                # Audio + Text model
+                components['llm'] = round(total_size * 0.70, 1)  # 70% text/shared
+                components['audio'] = round(total_size * 0.30, 1)  # 30% audio
+            else:
+                # Fallback - shouldn't happen for multimodal
+                components['llm'] = total_size
+
+        # Ensure components sum to total size (handle rounding)
+        component_sum = sum(components.values())
+        if abs(component_sum - total_size) > 0.1:
+            # Adjust the largest component
+            largest_comp = max(components, key=components.get)
+            components[largest_comp] = round(
+                components[largest_comp] + (total_size - component_sum), 1
+            )
 
         return components
