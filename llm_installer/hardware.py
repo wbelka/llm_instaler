@@ -196,9 +196,12 @@ def calculate_model_requirements(
 
     else:  # training
         # For training: model + gradients + optimizer states + activations
-        if quantization in ['4bit', '8bit']:
-            # QLoRA training - only adapter weights need full precision
+        if quantization == '4bit':
+            # QLoRA 4bit training
             memory_required = quantized_size + 2.0  # Quantized model + LoRA overhead
+        elif quantization == '8bit':
+            # QLoRA 8bit training - slightly more memory than 4bit
+            memory_required = quantized_size + 2.5  # Quantized model + LoRA overhead
         else:
             # Full training needs ~4x model size
             memory_required = model_size_gb * 4

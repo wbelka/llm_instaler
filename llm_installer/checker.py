@@ -236,52 +236,66 @@ class ModelChecker:
 
         # Training compatibility
         print("\nTraining Compatibility:")
-        print(f"{'Method':<12} {'Memory':<12} {'Can Train?':<10} {'Notes'}")
-        print("-" * 45)
+        print(f"{'Method':<15} {'Memory':<10} {'CPU':<8} {'GPU':<8} {'Device':<10}")
+        print("-" * 60)
 
-        # Check QLoRA training
-        qlora_reqs = calculate_model_requirements(
-            profile.estimated_size_gb,
-            '4bit',
-            "training"
-        )
-        qlora_compat = check_model_compatibility(qlora_reqs, hw_info)
+        # Training methods to check
+        training_configs = [
+            ('QLoRA (4bit)', '4bit', True),  # quantization, is_qlora
+            ('QLoRA (8bit)', '8bit', True),  # QLoRA with 8bit
+            ('LoRA (8bit)', '8bit', False),  # Regular LoRA with 8bit
+            ('LoRA (fp16)', 'fp16', False),  # Regular LoRA with fp16
+            ('LoRA (fp32)', 'fp32', False),  # Regular LoRA with fp32
+            ('Full (fp16)', 'fp16', False, True),  # Full training
+            ('Full (fp32)', 'fp32', False, True),  # Full training fp32
+        ]
 
-        print(f"{'QLoRA (4bit)':<12} {qlora_reqs['memory_required_gb']:.1f} GB       "
-              f"{'✓' if qlora_compat['can_run'] else '✗'}          "
-              f"{'Low memory fine-tuning' if qlora_compat['can_run'] else 'Insufficient memory'}")
+        for method_name, quant, *flags in training_configs:
+            # Calculate requirements
+            if 'QLoRA' in method_name:
+                # QLoRA uses quantized base model
+                model_reqs = calculate_model_requirements(
+                    profile.estimated_size_gb, quant, "training"
+                )
+            elif 'LoRA' in method_name and 'QLoRA' not in method_name:
+                # Regular LoRA - base model in specified precision + LoRA weights
+                base_reqs = calculate_model_requirements(
+                    profile.estimated_size_gb, quant, "inference"
+                )
+                # Add LoRA overhead (typically 1-2GB for adapters + gradients)
+                model_reqs = {
+                    'memory_required_gb': base_reqs['memory_required_gb'] + 2.0,
+                    'quantization': quant,
+                    'task': 'training'
+                }
+            else:
+                # Full training
+                model_reqs = calculate_model_requirements(
+                    profile.estimated_size_gb, quant, "training"
+                )
 
-        # Check full training
-        full_reqs = calculate_model_requirements(
-            profile.estimated_size_gb,
-            'fp16',
-            "training"
-        )
-        full_compat = check_model_compatibility(full_reqs, hw_info)
-
-        print(f"{'Full (fp16)':<12} {full_reqs['memory_required_gb']:.1f} GB       "
-              f"{'✓' if full_compat['can_run'] else '✗'}          "
-              f"{'Full parameter training' if full_compat['can_run'] else 'Insufficient memory'}")
-
-        # Recommendations
-        print("\nRecommendations:")
-        best_quant = None
-        for quant in quantizations:
-            model_reqs = calculate_model_requirements(
-                profile.estimated_size_gb, quant, "inference"
-            )
+            # Check compatibility
             compat = check_model_compatibility(model_reqs, hw_info)
-            if compat['can_run'] and not compat['warnings']:
-                best_quant = quant
-                break
 
-        if best_quant:
-            print(f"  ✓ Recommended quantization: {best_quant}")
-            print(f"  ✓ Install command: llm-installer install {profile.model_id} "
-                  f"--quantization {best_quant}")
-        else:
-            print("  ⚠ This model may not run optimally on your hardware")
-            print("  Consider using a smaller model or upgrading your hardware")
+            # Check CPU/GPU separately
+            cpu_ok = "✓" if compat['can_run_cpu'] else "✗"
+            gpu_ok = "✓" if compat['can_run_gpu'] else "✗"
+
+            # Determine best device
+            if compat['can_run']:
+                device = compat['recommended_device']
+                if device == 'cuda':
+                    device = 'CUDA'
+                elif device == 'metal':
+                    device = 'Metal'
+                else:
+                    device = 'CPU'
+            else:
+                device = 'N/A'
+
+            memory_str = f"{model_reqs['memory_required_gb']:.1f} GB"
+
+            print(f"{method_name:<15} {memory_str:<10} {cpu_ok:<8} {gpu_ok:<8} {device:<10}")
 
         print("="*60 + "\n")
 
