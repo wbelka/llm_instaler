@@ -92,7 +92,7 @@ class TransformerDetector(BaseDetector):
         profile.min_vram_gb = mem_reqs['min_vram_gb']
         profile.recommended_ram_gb = mem_reqs['recommended_ram_gb']
         profile.recommended_vram_gb = mem_reqs['recommended_vram_gb']
-        profile.estimated_memory_gb = mem_reqs['recommended_ram_gb']
+        # Don't set estimated_memory_gb - it will be calculated dynamically
 
         # Determine quantization support
         profile.supports_quantization = self._determine_quantization_support(config, model_size)

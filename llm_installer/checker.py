@@ -123,7 +123,7 @@ class ModelChecker:
         if profile.estimated_size_gb == 1.0:
             size_info = estimate_model_size(detection_config, files)
             profile.estimated_size_gb = size_info['size_gb']
-            profile.estimated_memory_gb = size_info['estimated_memory_gb']
+            # Don't set estimated_memory_gb here - calculate it dynamically based on quantization
 
         # Save profile if requested
         if save_profile:
@@ -165,9 +165,28 @@ class ModelChecker:
         print("  - Virtual environment: ~2 GB")
         print(f"  - Total disk space needed: ~{profile.estimated_size_gb + 2:.1f} GB")
 
-        print("\nMemory Requirements (RAM/VRAM):")
-        print(f"  - For inference (fp32): {profile.estimated_memory_gb} GB")
-        print("  - Minimum with quantization: See compatibility table below")
+        # Show memory requirements based on model's default quantization
+        if profile.quantization:
+            # Model has default quantization
+            mem_reqs = calculate_model_requirements(
+                profile.estimated_size_gb,
+                profile.quantization,
+                "inference"
+            )
+            print("\nMemory Requirements (RAM/VRAM):")
+            print(f"  - Default configuration ({profile.quantization}): "
+                  f"{mem_reqs['memory_required_gb']:.1f} GB")
+            print("  - Other quantization options: See compatibility table below")
+        else:
+            # No default quantization, show fp32
+            mem_reqs = calculate_model_requirements(
+                profile.estimated_size_gb,
+                'fp32',
+                "inference"
+            )
+            print("\nMemory Requirements (RAM/VRAM):")
+            print(f"  - Default configuration (fp32): {mem_reqs['memory_required_gb']:.1f} GB")
+            print("  - With quantization: See compatibility table below")
 
         if profile.special_requirements:
             print("\nSpecial Requirements:")
