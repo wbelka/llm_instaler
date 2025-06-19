@@ -9,6 +9,9 @@ import sys
 import logging
 from pathlib import Path
 
+from .checker import ModelChecker
+from .utils import get_models_dir
+
 __version__ = "2.0.0"
 
 
@@ -24,12 +27,22 @@ def setup_logging(debug: bool = False) -> None:
 
 def check_command(args: argparse.Namespace) -> int:
     """Check model compatibility without downloading"""
-    logging.info(f"Checking model: {args.model}")
+    try:
+        checker = ModelChecker()
+        profile = checker.check_model(args.model, save_profile=True)
 
-    # TODO: Implement model checking logic
-    logging.info("Model check functionality not yet implemented")
+        if profile:
+            checker.print_compatibility_report(profile)
+            return 0
+        else:
+            logging.error(f"Failed to check model: {args.model}")
+            return 1
 
-    return 0
+    except Exception as e:
+        logging.error(f"Error checking model: {e}")
+        if args.debug:
+            logging.exception("Full traceback:")
+        return 1
 
 
 def install_command(args: argparse.Namespace) -> int:
@@ -50,12 +63,50 @@ def install_command(args: argparse.Namespace) -> int:
 
 def list_command(args: argparse.Namespace) -> int:
     """List installed models"""
-    logging.info("Listing installed models")
+    try:
+        models_dir = get_models_dir()
 
-    # TODO: Implement listing logic
-    logging.info("Model listing functionality not yet implemented")
+        if not models_dir.exists():
+            print("No models directory found. No models installed yet.")
+            return 0
 
-    return 0
+        # Find all model directories
+        model_dirs = [d for d in models_dir.iterdir() if d.is_dir() and not d.name.startswith('.')]
+
+        if not model_dirs:
+            print("No models installed yet.")
+            return 0
+
+        print(f"\nInstalled models in {models_dir}:")
+        print("=" * 60)
+
+        for model_dir in sorted(model_dirs):
+            # Check if it has model files
+            has_model = (model_dir / "model").exists()
+            has_venv = (model_dir / ".venv").exists()
+
+            status = "✓" if has_model and has_venv else "⚠"
+            print(f"{status} {model_dir.name}")
+
+            # Try to read model info
+            model_info_file = model_dir / "model_info.json"
+            if model_info_file.exists():
+                try:
+                    import json
+                    with open(model_info_file) as f:
+                        info = json.load(f)
+                    print(f"  Type: {info.get('model_type', 'unknown')}")
+                    print(f"  Library: {info.get('library', 'unknown')}")
+                except Exception:
+                    pass
+
+        print("=" * 60)
+        print(f"\nTotal: {len(model_dirs)} models")
+        return 0
+
+    except Exception as e:
+        logging.error(f"Error listing models: {e}")
+        return 1
 
 
 def remove_command(args: argparse.Namespace) -> int:
