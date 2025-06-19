@@ -229,12 +229,11 @@ def estimate_model_size(config: Dict[str, Any], files: List[str]) -> Dict[str, A
     Returns:
         Dict with size_gb and estimated_memory_gb
     """
-    # Default estimates
-    size_gb = 1.0
-    memory_gb = 4.0
+    # First try to estimate from actual files
+    size_gb = estimate_size_from_files(files)
 
-    # Try to estimate from config
-    if config:
+    # If no size from files, try to estimate from config
+    if size_gb == 0 and config:
         # Get model dimensions
         hidden_size = config.get('hidden_size', 0)
         num_layers = config.get('num_hidden_layers', 0)
@@ -246,19 +245,89 @@ def estimate_model_size(config: Dict[str, Any], files: List[str]) -> Dict[str, A
                                vocab_size * hidden_size) / 1e6
             size_gb = params_millions / 250  # Very rough estimate
 
-            # Memory requirement is typically 2-3x model size
-            memory_gb = size_gb * 2.5
+    # Default if still no estimate
+    if size_gb == 0:
+        size_gb = 8.0  # Default
+
+    # Memory requirement is typically 1.2-1.5x model size for inference
+    memory_gb = size_gb * 1.2
 
     # Check for quantized models
     if any('.gguf' in f for f in files):
-        # GGUF models are typically quantized, reduce estimates
-        size_gb *= 0.25
-        memory_gb *= 0.5
+        # GGUF models are typically quantized, already accounted in file size
+        memory_gb = size_gb * 1.1  # Less overhead for quantized
 
     return {
         'size_gb': round(size_gb, 1),
         'estimated_memory_gb': round(memory_gb, 1)
     }
+
+
+def estimate_size_from_files(files: List[str]) -> float:
+    """
+    Estimate model size from file list
+
+    Looks for patterns like:
+    - model-00001-of-00016.safetensors
+    - pytorch_model-00001-of-00005.bin
+    - model.safetensors
+    """
+    import re
+
+    total_size_gb = 0.0
+
+    # Pattern for sharded model files
+    shard_pattern = re.compile(r'model-(\d+)-of-(\d+)\.(safetensors|bin|pt)')
+    pytorch_pattern = re.compile(r'pytorch_model-(\d+)-of-(\d+)\.(bin|pt)')
+
+    # Check for sharded models
+    shard_info = {}
+    for file in files:
+        # Get just the filename without path
+        filename = file.split('/')[-1] if '/' in file else file
+        match = shard_pattern.match(filename) or pytorch_pattern.match(filename)
+        if match:
+            total_shards = int(match.group(2))
+            if 'total_shards' not in shard_info:
+                shard_info['total_shards'] = total_shards
+
+    if shard_info:
+        # Estimate based on number of shards
+        # Most sharded models use ~5GB per shard
+        total_size_gb = shard_info['total_shards'] * 5.0
+    else:
+        # Look for single model files
+        model_files = [f for f in files if any(
+            f.endswith(ext) for ext in ['.safetensors', '.bin', '.pt', '.gguf']
+        ) and any(
+            name in f for name in ['model', 'pytorch_model', 'weights']
+        )]
+
+        if model_files:
+            # Estimate based on number of model files
+            # Single file models are typically 2-15GB
+            if len(model_files) == 1:
+                # Check filename for size hints
+                file = model_files[0]
+                if 'small' in file.lower() or '1b' in file.lower():
+                    total_size_gb = 2.0
+                elif 'medium' in file.lower() or '3b' in file.lower():
+                    total_size_gb = 6.0
+                elif 'large' in file.lower() or '7b' in file.lower():
+                    total_size_gb = 13.0
+                elif '13b' in file.lower():
+                    total_size_gb = 26.0
+                elif '30b' in file.lower() or '33b' in file.lower():
+                    total_size_gb = 65.0
+                elif '65b' in file.lower() or '70b' in file.lower():
+                    total_size_gb = 130.0
+                else:
+                    total_size_gb = 8.0  # Default for single file
+            else:
+                # Multiple model files (not sharded)
+                total_size_gb = len(model_files) * 2.0
+
+    return total_size_gb
 
 
 def format_size(size_bytes: float) -> str:

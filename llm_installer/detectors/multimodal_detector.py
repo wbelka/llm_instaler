@@ -136,6 +136,14 @@ class MultimodalDetector(BaseDetector):
     def _calculate_multimodal_size(self, config: Dict[str, Any],
                                    files: List[str], model_id: str) -> float:
         """Calculate size for multimodal models"""
+        # First try to get size from files (most accurate)
+        from ..utils import estimate_size_from_files
+        file_based_size = estimate_size_from_files(files)
+
+        if file_based_size > 0:
+            return file_based_size
+
+        # Otherwise calculate from config
         total_size = 0.0
 
         # Calculate LLM component size
@@ -170,12 +178,11 @@ class MultimodalDetector(BaseDetector):
     def _calculate_component_sizes(self, config: Dict[str, Any],
                                    files: List[str], model_id: str) -> Dict[str, float]:
         """Calculate individual component sizes"""
-        components = {}
+        # Get total model size first
+        total_size = self._calculate_multimodal_size(config, files, model_id)
 
-        # Calculate LLM component size
-        if 'llm_config' in config:
-            llm_config = config['llm_config']
-            components['llm'] = self._calculate_model_size(llm_config, files, model_id)
+        components = {}
+        calculated_total = 0.0
 
         # Calculate vision component size
         if 'vision_config' in config:
@@ -184,6 +191,7 @@ class MultimodalDetector(BaseDetector):
             num_layers = vision_config.get('depth', vision_config.get('num_hidden_layers', 12))
             vision_size = (hidden_size * hidden_size * num_layers * 12) / 1e9
             components['vision'] = round(vision_size, 1)
+            calculated_total += vision_size
 
         # Calculate audio component size
         if 'audio_config' in config:
@@ -193,6 +201,7 @@ class MultimodalDetector(BaseDetector):
                 components['audio'] = 1.0  # Typical audio encoder
             else:
                 components['audio'] = 0.5
+            calculated_total += components['audio']
         elif 'whisper_config' in config:
             whisper_config = config['whisper_config']
             if 'whisper_encoder_config' in whisper_config:
@@ -203,18 +212,37 @@ class MultimodalDetector(BaseDetector):
                 components['audio'] = round((n_state * n_state * n_layer * 12) / 1e9, 1)
             else:
                 components['audio'] = 1.5  # Default Whisper size
+            calculated_total += components['audio']
 
         # Calculate talker/decoder component if present
         if 'talker_config' in config:
             components['talker'] = 0.5  # Typically small
+            calculated_total += components['talker']
+
+        # LLM component is the remainder (largest part)
+        if 'llm_config' in config or total_size > calculated_total:
+            components['llm'] = round(total_size - calculated_total, 1)
+            if components['llm'] < 1.0:
+                # Minimum size for LLM
+                components['llm'] = 1.0
 
         # If no components calculated, estimate from total
         if not components:
             if 'ming' in model_id.lower():
-                # Ming-Lite typical distribution
-                components = {'llm': 5.0, 'vision': 2.0, 'audio': 1.0}
+                # Ming-Lite distribution for 80GB model
+                ratio = total_size / 80.0  # Scale to actual size
+                components = {
+                    'llm': round(65.0 * ratio, 1),  # ~81% for LLM
+                    'vision': round(10.0 * ratio, 1),  # ~12.5% for vision
+                    'audio': round(4.0 * ratio, 1),  # ~5% for audio
+                    'talker': round(1.0 * ratio, 1)  # ~1.5% for talker
+                }
             else:
                 # Generic multimodal distribution
-                components = {'llm': 6.0, 'vision': 3.0, 'audio': 1.0}
+                components = {
+                    'llm': round(total_size * 0.7, 1),  # 70% for LLM
+                    'vision': round(total_size * 0.2, 1),  # 20% for vision
+                    'audio': round(total_size * 0.1, 1)  # 10% for audio
+                }
 
         return components
