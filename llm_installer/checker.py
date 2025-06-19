@@ -221,8 +221,23 @@ class ModelChecker:
         if profile.is_multimodal and profile.metadata:
             if 'modalities' in profile.metadata:
                 print("\nSupported Modalities:")
+                modality_names = {
+                    'text': 'Text Generation',
+                    'vision': 'Vision',
+                    'vision-understanding': 'Image Understanding',
+                    'image-generation': 'Image Generation',
+                    'audio': 'Audio',
+                    'speech': 'Speech'
+                }
                 for modality in profile.metadata['modalities']:
-                    print(f"  - {modality.capitalize()}")
+                    display_name = modality_names.get(modality, modality.capitalize())
+                    print(f"  - {display_name}")
+
+            if 'capabilities' in profile.metadata:
+                print("\nModel Capabilities:")
+                for capability in profile.metadata['capabilities']:
+                    cap_display = capability.replace('-', ' ').title()
+                    print(f"  - {cap_display}")
 
             if 'component_sizes' in profile.metadata:
                 print("\nComponent Sizes:")

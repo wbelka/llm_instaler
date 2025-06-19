@@ -34,7 +34,7 @@ class MultiModalityDetector(BaseDetector):
 
         # Check for vision components
         if 'vision_config' in config:
-            modalities.append('vision')
+            modalities.append('vision-understanding')
             vision_config = config['vision_config']
             # Vision encoder component
             if 'model_name' in vision_config.get('params', {}):
@@ -48,6 +48,7 @@ class MultiModalityDetector(BaseDetector):
 
         # Check for generation vision components
         if 'gen_vision_config' in config:
+            modalities.append('image-generation')
             # VQ tokenizer for image generation
             components['vision_tokenizer'] = 0.5
 
