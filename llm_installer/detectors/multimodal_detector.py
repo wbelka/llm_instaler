@@ -76,12 +76,24 @@ class MultimodalDetector(BaseDetector):
         model_size = self._calculate_multimodal_size(config, files, model_id)
         profile.estimated_size_gb = model_size
 
-        # Calculate memory requirements
-        mem_reqs = self._calculate_memory_requirements(model_size, None)
-        profile.min_ram_gb = mem_reqs['min_ram_gb']
-        profile.min_vram_gb = mem_reqs['min_vram_gb']
-        profile.recommended_ram_gb = mem_reqs['recommended_ram_gb']
-        profile.recommended_vram_gb = mem_reqs['recommended_vram_gb']
+        # Calculate memory requirements for multimodal models
+        # Components can run on different devices
+        component_sizes = self._calculate_component_sizes(config, files, model_id)
+
+        # Minimum: largest component in VRAM, others can be in RAM
+        largest_component = max(component_sizes.values())
+        total_components = sum(component_sizes.values())
+
+        # For inference: largest component needs to fit in VRAM
+        profile.min_vram_gb = round(largest_component * 1.2, 1)  # 20% overhead
+        profile.min_ram_gb = round(total_components * 1.2, 1)  # All components in RAM
+
+        # Recommended: all components in VRAM for best performance
+        profile.recommended_vram_gb = round(total_components * 1.2, 1)
+        profile.recommended_ram_gb = round(total_components * 1.5, 1)  # Extra headroom
+
+        # Store component info in metadata
+        profile.metadata['component_sizes'] = component_sizes
 
         # Determine quantization support
         profile.supports_quantization = self._determine_quantization_support(config, model_size)
@@ -154,3 +166,55 @@ class MultimodalDetector(BaseDetector):
                 total_size = 10.0  # Default for multimodal
 
         return round(total_size, 1)
+
+    def _calculate_component_sizes(self, config: Dict[str, Any],
+                                   files: List[str], model_id: str) -> Dict[str, float]:
+        """Calculate individual component sizes"""
+        components = {}
+
+        # Calculate LLM component size
+        if 'llm_config' in config:
+            llm_config = config['llm_config']
+            components['llm'] = self._calculate_model_size(llm_config, files, model_id)
+
+        # Calculate vision component size
+        if 'vision_config' in config:
+            vision_config = config['vision_config']
+            hidden_size = vision_config.get('hidden_size', 768)
+            num_layers = vision_config.get('depth', vision_config.get('num_hidden_layers', 12))
+            vision_size = (hidden_size * hidden_size * num_layers * 12) / 1e9
+            components['vision'] = round(vision_size, 1)
+
+        # Calculate audio component size
+        if 'audio_config' in config:
+            audio_config = config['audio_config']
+            # Check for encoder size
+            if 'audio_encoder_output_size' in audio_config:
+                components['audio'] = 1.0  # Typical audio encoder
+            else:
+                components['audio'] = 0.5
+        elif 'whisper_config' in config:
+            whisper_config = config['whisper_config']
+            if 'whisper_encoder_config' in whisper_config:
+                enc_config = whisper_config['whisper_encoder_config']
+                n_state = enc_config.get('n_state', 1280)
+                n_layer = enc_config.get('n_layer', 32)
+                # Whisper size estimation
+                components['audio'] = round((n_state * n_state * n_layer * 12) / 1e9, 1)
+            else:
+                components['audio'] = 1.5  # Default Whisper size
+
+        # Calculate talker/decoder component if present
+        if 'talker_config' in config:
+            components['talker'] = 0.5  # Typically small
+
+        # If no components calculated, estimate from total
+        if not components:
+            if 'ming' in model_id.lower():
+                # Ming-Lite typical distribution
+                components = {'llm': 5.0, 'vision': 2.0, 'audio': 1.0}
+            else:
+                # Generic multimodal distribution
+                components = {'llm': 6.0, 'vision': 3.0, 'audio': 1.0}
+
+        return components

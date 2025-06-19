@@ -208,12 +208,27 @@ class ModelChecker:
             print(f"  - Model page: https://huggingface.co/{profile.model_id}")
             print("  - See compatibility table below for different configurations")
 
-        # Show modalities for multimodal models
-        if profile.is_multimodal and profile.metadata and 'modalities' in profile.metadata:
-            print("\nSupported Modalities:")
-            for modality in profile.metadata['modalities']:
-                print(f"  - {modality.capitalize()}")
-        
+        # Show modalities and components for multimodal models
+        if profile.is_multimodal and profile.metadata:
+            if 'modalities' in profile.metadata:
+                print("\nSupported Modalities:")
+                for modality in profile.metadata['modalities']:
+                    print(f"  - {modality.capitalize()}")
+
+            if 'component_sizes' in profile.metadata:
+                print("\nComponent Sizes:")
+                components = profile.metadata['component_sizes']
+                for comp_name, comp_size in components.items():
+                    print(f"  - {comp_name.upper()}: {comp_size} GB")
+                print(f"  - Total: {sum(components.values()):.1f} GB")
+
+                print("\nDeployment Options:")
+                print("  - Minimum (mixed CPU/GPU):")
+                print(f"    • GPU: {max(components.values()):.1f} GB (largest component)")
+                print(f"    • RAM: {sum(components.values()):.1f} GB (all components)")
+                print("  - Optimal (all GPU):")
+                print(f"    • GPU: {sum(components.values()):.1f} GB (all components)")
+
         if profile.special_requirements:
             print("\nSpecial Requirements:")
             for req in profile.special_requirements:
