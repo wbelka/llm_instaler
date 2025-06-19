@@ -119,12 +119,15 @@ class MoEDetector(BaseDetector):
 
                 profile.estimated_size_gb = round(size_gb, 1)
 
-        # If no size calculated, use file-based estimation
-        if profile.estimated_size_gb == 1.0:
-            from ..utils import estimate_size_from_files
-            file_size = estimate_size_from_files(files)
-            if file_size > 0:
-                profile.estimated_size_gb = file_size
+        # Always use file-based estimation for MoE models
+        # as they often have special weight files (ae.safetensors, ema.safetensors)
+        from ..utils import estimate_size_from_files
+        file_size = estimate_size_from_files(files)
+        if file_size > 0:
+            profile.estimated_size_gb = file_size
+        elif profile.estimated_size_gb == 1.0:
+            # Fallback for MoE models
+            profile.estimated_size_gb = 15.0
 
         # MoE models typically support these quantizations
         profile.supports_quantization = ['fp32', 'fp16', '8bit', '4bit']
