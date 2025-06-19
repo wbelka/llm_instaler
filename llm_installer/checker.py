@@ -165,28 +165,46 @@ class ModelChecker:
         print("  - Virtual environment: ~2 GB")
         print(f"  - Total disk space needed: ~{profile.estimated_size_gb + 2:.1f} GB")
 
-        # Show memory requirements based on model's default quantization
-        if profile.quantization:
-            # Model has default quantization
+        print("\nMemory Requirements (RAM/VRAM):")
+
+        # Check for torch_dtype in profile metadata
+        torch_dtype = None
+        if profile.metadata and 'torch_dtype' in profile.metadata:
+            torch_dtype = profile.metadata['torch_dtype']
+        elif profile.quantization:
+            # Use quantization if specified
+            torch_dtype = profile.quantization
+
+        if torch_dtype:
+            # Map torch dtypes to our quantization names
+            dtype_map = {
+                'float32': 'fp32',
+                'float16': 'fp16',
+                'bfloat16': 'fp16',
+                'int8': '8bit',
+                'int4': '4bit',
+                '4bit': '4bit',
+                '8bit': '8bit',
+                'fp16': 'fp16',
+                'fp32': 'fp32'
+            }
+
+            quant_type = dtype_map.get(torch_dtype, torch_dtype)
+
+            # Calculate memory for the detected type
             mem_reqs = calculate_model_requirements(
                 profile.estimated_size_gb,
-                profile.quantization,
+                quant_type if quant_type in ['fp32', 'fp16', '8bit', '4bit'] else 'fp32',
                 "inference"
             )
-            print("\nMemory Requirements (RAM/VRAM):")
-            print(f"  - Default configuration ({profile.quantization}): "
+            print(f"  - Default configuration ({torch_dtype}): "
                   f"{mem_reqs['memory_required_gb']:.1f} GB")
-            print("  - Other quantization options: See compatibility table below")
+            print("  - Other configurations: See compatibility table below")
         else:
-            # No default quantization, show fp32
-            mem_reqs = calculate_model_requirements(
-                profile.estimated_size_gb,
-                'fp32',
-                "inference"
-            )
-            print("\nMemory Requirements (RAM/VRAM):")
-            print(f"  - Default configuration (fp32): {mem_reqs['memory_required_gb']:.1f} GB")
-            print("  - With quantization: See compatibility table below")
+            # No information available
+            print("  - Default configuration: Unknown")
+            print(f"  - Model page: https://huggingface.co/{profile.model_id}")
+            print("  - See compatibility table below for different configurations")
 
         if profile.special_requirements:
             print("\nSpecial Requirements:")

@@ -32,8 +32,13 @@ class TransformerDetector(BaseDetector):
             model_id=model_id,
             library="transformers",
             architecture=self._get_architecture(config),
-            task=self._extract_task(config)
+            task=self._extract_task(config),
+            metadata={}
         )
+
+        # Extract torch_dtype from config
+        if 'torch_dtype' in config:
+            profile.metadata['torch_dtype'] = config['torch_dtype']
 
         # Check for quantization
         quant_config = config.get('quantization_config', {})
