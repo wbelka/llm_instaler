@@ -8,6 +8,7 @@ from .diffusion_detector import DiffusionDetector
 from .gguf_detector import GGUFDetector
 from .sentence_transformer_detector import SentenceTransformerDetector
 from .multimodal_detector import MultimodalDetector
+from .moe_detector import MoEDetector
 
 __all__ = [
     'BaseDetector',
@@ -17,4 +18,5 @@ __all__ = [
     'GGUFDetector',
     'SentenceTransformerDetector',
     'MultimodalDetector',
+    'MoEDetector',
 ]

@@ -24,6 +24,7 @@ from .detectors.diffusion_detector import DiffusionDetector
 from .detectors.gguf_detector import GGUFDetector
 from .detectors.sentence_transformer_detector import SentenceTransformerDetector
 from .detectors.multimodal_detector import MultimodalDetector
+from .detectors.moe_detector import MoEDetector
 
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ class ModelChecker:
         """Initialize all available detectors in priority order"""
         detector_classes: List[Type[BaseDetector]] = [
             GGUFDetector,  # Check GGUF first (most specific)
+            MoEDetector,  # Then MoE models (before multimodal)
             MultimodalDetector,  # Then multimodal models
             DiffusionDetector,  # Then diffusion models
             SentenceTransformerDetector,  # Then sentence transformers
@@ -71,10 +73,15 @@ class ModelChecker:
         logger.debug("Fetching model configuration...")
         config = fetch_model_config(model_id, "config.json")
 
+        # Try alternative config files
+        if not config:
+            logger.debug("No config.json found, trying llm_config.json...")
+            config = fetch_model_config(model_id, "llm_config.json")
+
         # Try model_index.json for diffusion models
         model_index = None
         if not config:
-            logger.debug("No config.json found, trying model_index.json...")
+            logger.debug("No llm_config.json found, trying model_index.json...")
             model_index = fetch_model_config(model_id, "model_index.json")
 
         # Get list of files
