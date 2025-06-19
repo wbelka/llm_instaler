@@ -106,18 +106,24 @@ class SentenceTransformerDetector(BaseDetector):
             architecture=self._get_embedding_architecture(config)
         )
 
-        # These models are typically small
-        profile.estimated_size_gb = 0.5
-        profile.estimated_memory_gb = 2.0
+        # Get size from API
+        from ..utils import estimate_size_from_files
+        file_sizes = config.get('_file_sizes', {})
+        file_size = estimate_size_from_files(files, file_sizes)
+
+        if file_size > 0:
+            profile.estimated_size_gb = file_size
+            profile.estimated_memory_gb = file_size * 2.0
+        else:
+            # No size info
+            profile.estimated_size_gb = 0.0
+            profile.estimated_memory_gb = 0.0
 
         # Check for specific embedding model types
         model_lower = model_id.lower()
 
         if 'e5' in model_lower:
             profile.metadata = {'family': 'E5'}
-            if 'large' in model_lower:
-                profile.estimated_size_gb = 1.5
-                profile.estimated_memory_gb = 4.0
         elif 'bge' in model_lower:
             profile.metadata = {'family': 'BGE'}
         elif 'gte' in model_lower:
@@ -126,8 +132,6 @@ class SentenceTransformerDetector(BaseDetector):
             profile.metadata = {'family': 'Instructor', 'requires_instruction': True}
         elif 'minilm' in model_lower:
             profile.metadata = {'family': 'MiniLM'}
-            profile.estimated_size_gb = 0.1
-            profile.estimated_memory_gb = 1.0
 
         # Set requirements
         profile.special_requirements = [

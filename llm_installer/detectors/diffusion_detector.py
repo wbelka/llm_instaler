@@ -82,16 +82,10 @@ class DiffusionDetector(BaseDetector):
             # Check SD version
             if 'xl' in model_id.lower() or 'sdxl' in model_id.lower():
                 profile.architecture = "StableDiffusionXL"
-                profile.estimated_size_gb = 6.5
-                profile.estimated_memory_gb = 16.0
             elif '2' in model_id:
                 profile.architecture = "StableDiffusion2"
-                profile.estimated_size_gb = 5.0
-                profile.estimated_memory_gb = 12.0
             else:
                 profile.architecture = "StableDiffusion1"
-                profile.estimated_size_gb = 4.0
-                profile.estimated_memory_gb = 10.0
 
         # Check for ControlNet
         if 'controlnet' in model_id.lower():
@@ -123,6 +117,20 @@ class DiffusionDetector(BaseDetector):
 
         if any('safetensors' in f for f in files):
             profile.special_requirements.append('safetensors')
+
+        # Get size from API
+        from ..utils import estimate_size_from_files
+        file_sizes = config.get('_file_sizes', {})
+        file_size = estimate_size_from_files(files, file_sizes)
+
+        if file_size > 0:
+            profile.estimated_size_gb = file_size
+            # Diffusion models need more memory for generation
+            profile.estimated_memory_gb = file_size * 2.5
+        else:
+            # No size info
+            profile.estimated_size_gb = 0.0
+            profile.estimated_memory_gb = 0.0
 
         # Most diffusion models support TensorRT optimization
         profile.supports_tensorrt = True

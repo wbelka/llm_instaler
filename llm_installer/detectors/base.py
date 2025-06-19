@@ -196,27 +196,8 @@ class BaseDetector(ABC):
             size_gb = params_millions * 4 / 1000  # MB to GB
             return round(size_gb, 1)
 
-        # Default based on architecture
-        arch = config.get('architectures', [''])[0].lower()
-        model_id_lower = model_id.lower()
-        if '7b' in arch or '7b' in model_id_lower:
-            return 13.0
-        elif '13b' in arch or '13b' in model_id_lower:
-            return 26.0
-        elif '70b' in arch or '70b' in model_id_lower:
-            return 140.0
-        elif '1b' in arch or '1b' in model_id_lower:
-            return 2.0
-        elif '3b' in arch or '3b' in model_id_lower:
-            return 6.0
-
-        # Check for GGUF files
-        gguf_files = [f for f in files if f.endswith('.gguf')]
-        if gguf_files:
-            # GGUF models are usually quantized
-            return 4.0  # Default for quantized models
-
-        return 8.0  # Default size
+        # Without API data, we cannot estimate size
+        return 0.0  # Unknown
 
     def _calculate_memory_requirements(self, model_size_gb: float,
                                        quantization: Optional[str] = None,

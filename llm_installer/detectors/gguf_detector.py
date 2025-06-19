@@ -38,10 +38,18 @@ class GGUFDetector(BaseDetector):
             profile.quantization = f"gguf-{quant_info}"
             profile.metadata = {'gguf_files': gguf_files, 'quantization_type': quant_info}
 
-        # Estimate size based on GGUF files
-        # GGUF models are already quantized, so they're smaller
-        profile.estimated_size_gb = self._estimate_gguf_size(gguf_files)
-        profile.estimated_memory_gb = profile.estimated_size_gb * 1.5  # Less overhead for GGUF
+        # Get size from API if available
+        from ..utils import estimate_size_from_files
+        file_sizes = config.get('_file_sizes', {})
+        file_size = estimate_size_from_files(files, file_sizes)
+
+        if file_size > 0:
+            profile.estimated_size_gb = file_size
+            profile.estimated_memory_gb = file_size * 1.5  # Less overhead for GGUF
+        else:
+            # No size info available
+            profile.estimated_size_gb = 0.0
+            profile.estimated_memory_gb = 0.0
 
         # Set requirements for GGUF
         profile.special_requirements = [
@@ -119,45 +127,5 @@ class GGUFDetector(BaseDetector):
         return "Q4_K_M"  # Common default
 
     def _estimate_gguf_size(self, gguf_files: List[str]) -> float:
-        """Estimate total size of GGUF model"""
-        # Very rough estimation based on filename patterns
-        # In practice, would need to check actual file sizes
-
-        total_size_gb = 0.0
-
-        for file in gguf_files:
-            file_lower = file.lower()
-
-            # Estimate based on model size indicators
-            if '70b' in file_lower or '65b' in file_lower:
-                size = 35.0  # ~35GB for Q4 quantized 70B
-            elif '30b' in file_lower or '33b' in file_lower or '34b' in file_lower:
-                size = 20.0  # ~20GB for Q4 quantized 30B
-            elif '13b' in file_lower:
-                size = 8.0   # ~8GB for Q4 quantized 13B
-            elif '7b' in file_lower or '8b' in file_lower:
-                size = 4.5   # ~4.5GB for Q4 quantized 7B
-            elif '3b' in file_lower:
-                size = 2.0   # ~2GB for Q4 quantized 3B
-            else:
-                size = 4.0   # Default assumption
-
-            # Adjust for quantization level
-            if 'q2' in file_lower:
-                size *= 0.5
-            elif 'q3' in file_lower:
-                size *= 0.75
-            elif 'q5' in file_lower:
-                size *= 1.25
-            elif 'q6' in file_lower:
-                size *= 1.5
-            elif 'q8' in file_lower:
-                size *= 2.0
-            elif 'f16' in file_lower:
-                size *= 4.0
-            elif 'f32' in file_lower:
-                size *= 8.0
-
-            total_size_gb += size
-
-        return round(total_size_gb, 1)
+        """Cannot estimate GGUF size without API data"""
+        return 0.0  # Unknown
