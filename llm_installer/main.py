@@ -119,26 +119,15 @@ def remove_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def login_command(args: argparse.Namespace) -> int:
-    """Save HuggingFace token for future use"""
-    import getpass
-
-    if args.token:
-        token = args.token
-    else:
-        token = getpass.getpass("Enter your HuggingFace token: ")
-
-    if not token:
+def save_token_command(args: argparse.Namespace) -> int:
+    """Save HuggingFace token to config"""
+    if not args.token:
         logging.error("No token provided")
         return 1
 
-    # Validate token by setting it
-    set_hf_token(token)
-
-    # Save token
-    if save_hf_token(token):
-        print("\n✓ Token saved successfully!")
-        print("You can now access gated models without providing --token")
+    # Save token to config
+    if save_hf_token(args.token):
+        print("✓ Token saved to config")
         return 0
     else:
         logging.error("Failed to save token")
@@ -153,8 +142,8 @@ def create_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Save token for gated models access:
-  llm-installer login hf_YOUR_TOKEN_HERE
+  # Save token to config for gated models access:
+  llm-installer save-token hf_YOUR_TOKEN_HERE
 
   # Or use environment variable for temporary access:
   export HF_TOKEN=hf_YOUR_TOKEN_HERE
@@ -244,16 +233,15 @@ Examples:
         help='Skip confirmation prompt'
     )
 
-    # Login command
-    login_parser = subparsers.add_parser(
-        'login',
-        help='Save HuggingFace token for authentication'
+    # Save token command
+    save_token_parser = subparsers.add_parser(
+        'save-token',
+        help='Save HuggingFace token to config'
     )
-    login_parser.add_argument(
+    save_token_parser.add_argument(
         'token',
-        nargs='?',
         type=str,
-        help='HuggingFace token (if not provided, will prompt)'
+        help='HuggingFace token to save'
     )
 
     return parser
@@ -277,7 +265,7 @@ def main() -> int:
         'install': install_command,
         'list': list_command,
         'remove': remove_command,
-        'login': login_command,
+        'save-token': save_token_command,
     }
 
     handler = command_handlers.get(args.command)
