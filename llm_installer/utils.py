@@ -276,39 +276,58 @@ def estimate_size_from_files(files: List[str]) -> float:
 
     total_size_gb = 0.0
 
-    # Pattern for sharded model files
+    # Pattern for sharded model files - use search instead of match
     shard_pattern = re.compile(r'model-(\d+)-of-(\d+)\.(safetensors|bin|pt)')
     pytorch_pattern = re.compile(r'pytorch_model-(\d+)-of-(\d+)\.(bin|pt)')
 
     # Check for sharded models
     shard_info = {}
+    shard_count = 0
     for file in files:
         # Get just the filename without path
         filename = file.split('/')[-1] if '/' in file else file
-        match = shard_pattern.match(filename) or pytorch_pattern.match(filename)
+        
+        # Use search to find pattern anywhere in filename
+        match = shard_pattern.search(filename) or pytorch_pattern.search(filename)
         if match:
+            shard_count += 1
             total_shards = int(match.group(2))
-            if 'total_shards' not in shard_info:
-                shard_info['total_shards'] = total_shards
+            shard_info['total_shards'] = total_shards
+            
+    logger.debug(f"Found {shard_count} shard files out of {len(files)} total files")
 
-    if shard_info:
+    if shard_info and 'total_shards' in shard_info:
         # Estimate based on number of shards
-        # Most sharded models use ~5GB per shard
-        total_size_gb = shard_info['total_shards'] * 5.0
+        total_shards = shard_info['total_shards']
+        
+        # Ming-Lite-Omni and similar large models use ~5GB per shard
+        if total_shards >= 10:
+            total_size_gb = total_shards * 5.0
+        else:
+            # Smaller models might use smaller shards
+            total_size_gb = total_shards * 4.0
+            
+        logger.debug(f"Detected {total_shards} shards, estimated size: {total_size_gb}GB")
     else:
-        # Look for single model files
+        # Look for all safetensors/bin files (more inclusive)
         model_files = [f for f in files if any(
             f.endswith(ext) for ext in ['.safetensors', '.bin', '.pt', '.gguf']
-        ) and any(
-            name in f for name in ['model', 'pytorch_model', 'weights']
         )]
+        
+        # Count only files that look like model weights
+        weight_files = []
+        for f in model_files:
+            filename = f.split('/')[-1].lower()
+            # Exclude common non-weight files
+            if not any(skip in filename for skip in ['config', 'tokenizer', 'vocab', 'merges']):
+                weight_files.append(f)
 
-        if model_files:
+        if weight_files:
             # Estimate based on number of model files
             # Single file models are typically 2-15GB
-            if len(model_files) == 1:
+            if len(weight_files) == 1:
                 # Check filename for size hints
-                file = model_files[0]
+                file = weight_files[0]
                 if 'small' in file.lower() or '1b' in file.lower():
                     total_size_gb = 2.0
                 elif 'medium' in file.lower() or '3b' in file.lower():
@@ -324,8 +343,20 @@ def estimate_size_from_files(files: List[str]) -> float:
                 else:
                     total_size_gb = 8.0  # Default for single file
             else:
-                # Multiple model files (not sharded)
-                total_size_gb = len(model_files) * 2.0
+                # Multiple weight files
+                num_files = len(weight_files)
+                
+                # Check if files look like they might be Ming-Lite format
+                # (multiple safetensors files but not numbered shards)
+                if num_files >= 10:
+                    # Large models with many files (like Ming-Lite-Omni)
+                    total_size_gb = num_files * 5.0  # Assume ~5GB per file
+                elif num_files >= 5:
+                    total_size_gb = num_files * 3.0  # Medium models
+                else:
+                    total_size_gb = num_files * 2.0  # Small models
+                    
+                logger.debug(f"Found {num_files} weight files, estimated size: {total_size_gb}GB")
 
     return total_size_gb
 
