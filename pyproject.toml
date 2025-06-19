@@ -1,0 +1,88 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-installer"
+version = "2.0.0"
+description = "Universal installer for HuggingFace models with isolated environments"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "LLM Installer Contributors"},
+]
+keywords = ["llm", "huggingface", "installer", "ai", "machine-learning"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+]
+
+dependencies = [
+    "huggingface_hub>=0.19.0",
+    "requests>=2.31.0",
+    "tqdm>=4.66.0",
+    "pyyaml>=6.0.1",
+    "packaging>=23.2",
+    "psutil>=5.9.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/llm-installer"
+Documentation = "https://github.com/yourusername/llm-installer/wiki"
+Repository = "https://github.com/yourusername/llm-installer"
+Issues = "https://github.com/yourusername/llm-installer/issues"
+
+[project.scripts]
+llm-installer = "llm_installer.main:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.11.0",
+    "flake8>=6.1.0",
+    "mypy>=1.7.0",
+    "isort>=5.12.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["llm_installer*"]
+exclude = ["tests*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py38", "py39", "py310", "py311", "py312"]
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+line_length = 100
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+addopts = "-v --cov=llm_installer --cov-report=html --cov-report=term-missing"
