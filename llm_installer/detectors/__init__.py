@@ -9,6 +9,7 @@ from .gguf_detector import GGUFDetector
 from .sentence_transformer_detector import SentenceTransformerDetector
 from .multimodal_detector import MultimodalDetector
 from .moe_detector import MoEDetector
+from .multi_modality_detector import MultiModalityDetector
 
 __all__ = [
     'BaseDetector',
@@ -19,4 +20,5 @@ __all__ = [
     'SentenceTransformerDetector',
     'MultimodalDetector',
     'MoEDetector',
+    'MultiModalityDetector',
 ]

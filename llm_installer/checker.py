@@ -25,6 +25,7 @@ from .detectors.gguf_detector import GGUFDetector
 from .detectors.sentence_transformer_detector import SentenceTransformerDetector
 from .detectors.multimodal_detector import MultimodalDetector
 from .detectors.moe_detector import MoEDetector
+from .detectors.multi_modality_detector import MultiModalityDetector
 
 
 logger = logging.getLogger(__name__)
@@ -41,8 +42,9 @@ class ModelChecker:
         """Initialize all available detectors in priority order"""
         detector_classes: List[Type[BaseDetector]] = [
             GGUFDetector,  # Check GGUF first (most specific)
-            MoEDetector,  # Then MoE models (before multimodal)
-            MultimodalDetector,  # Then multimodal models
+            MultiModalityDetector,  # Check multi_modality before multimodal
+            MoEDetector,  # Then MoE models
+            MultimodalDetector,  # Then standard multimodal models
             DiffusionDetector,  # Then diffusion models
             SentenceTransformerDetector,  # Then sentence transformers
             TransformerDetector,  # Default fallback
