@@ -160,8 +160,14 @@ class ModelChecker:
         if profile.quantization:
             print(f"Quantization: {profile.quantization}")
 
-        print(f"\nEstimated Size: {profile.estimated_size_gb} GB")
-        print(f"Estimated Memory Required: {profile.estimated_memory_gb} GB")
+        print("\nStorage Requirements:")
+        print(f"  - Model files: {profile.estimated_size_gb} GB")
+        print("  - Virtual environment: ~2 GB")
+        print(f"  - Total disk space needed: ~{profile.estimated_size_gb + 2:.1f} GB")
+
+        print("\nMemory Requirements (RAM/VRAM):")
+        print(f"  - For inference (fp32): {profile.estimated_memory_gb} GB")
+        print("  - Minimum with quantization: See compatibility table below")
 
         if profile.special_requirements:
             print("\nSpecial Requirements:")
