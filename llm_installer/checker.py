@@ -23,6 +23,7 @@ from .detectors.transformer_detector import TransformerDetector
 from .detectors.diffusion_detector import DiffusionDetector
 from .detectors.gguf_detector import GGUFDetector
 from .detectors.sentence_transformer_detector import SentenceTransformerDetector
+from .detectors.multimodal_detector import MultimodalDetector
 
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ class ModelChecker:
         """Initialize all available detectors in priority order"""
         detector_classes: List[Type[BaseDetector]] = [
             GGUFDetector,  # Check GGUF first (most specific)
+            MultimodalDetector,  # Then multimodal models
             DiffusionDetector,  # Then diffusion models
             SentenceTransformerDetector,  # Then sentence transformers
             TransformerDetector,  # Default fallback
@@ -206,6 +208,12 @@ class ModelChecker:
             print(f"  - Model page: https://huggingface.co/{profile.model_id}")
             print("  - See compatibility table below for different configurations")
 
+        # Show modalities for multimodal models
+        if profile.is_multimodal and profile.metadata and 'modalities' in profile.metadata:
+            print("\nSupported Modalities:")
+            for modality in profile.metadata['modalities']:
+                print(f"  - {modality.capitalize()}")
+        
         if profile.special_requirements:
             print("\nSpecial Requirements:")
             for req in profile.special_requirements:

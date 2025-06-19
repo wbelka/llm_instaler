@@ -7,6 +7,7 @@ from .transformer_detector import TransformerDetector
 from .diffusion_detector import DiffusionDetector
 from .gguf_detector import GGUFDetector
 from .sentence_transformer_detector import SentenceTransformerDetector
+from .multimodal_detector import MultimodalDetector
 
 __all__ = [
     'BaseDetector',
@@ -15,4 +16,5 @@ __all__ = [
     'DiffusionDetector',
     'GGUFDetector',
     'SentenceTransformerDetector',
+    'MultimodalDetector',
 ]
