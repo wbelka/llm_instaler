@@ -8,6 +8,7 @@ from typing import List, Optional, Type
 from .utils import (
     fetch_model_config,
     fetch_model_files_list,
+    fetch_model_files_with_sizes,
     estimate_model_size,
     save_json_config
 )
@@ -102,10 +103,23 @@ class ModelChecker:
             logger.info("\nGet your token from: https://huggingface.co/settings/tokens")
             return None
 
+        # Try to get file sizes if possible
+        file_sizes = fetch_model_files_with_sizes(model_id)
+        if file_sizes:
+            logger.debug(f"Got file sizes for {len(file_sizes)} files")
+            # Update estimate_size_from_files to use actual sizes
+            files_with_sizes = list(file_sizes.keys())
+            if files_with_sizes:
+                files = files_with_sizes
+
         logger.debug(f"Found {len(files)} files in repository")
 
         # Pass both config and model_index to detectors
         detection_config = config or model_index or {}
+
+        # Store file sizes in detection config for detectors to use
+        if file_sizes:
+            detection_config['_file_sizes'] = file_sizes
 
         # Run through detector pipeline
         profile = None

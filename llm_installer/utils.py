@@ -183,6 +183,34 @@ def fetch_model_files_list(model_id: str) -> List[str]:
         return []
 
 
+def fetch_model_files_with_sizes(model_id: str) -> Dict[str, float]:
+    """
+    Get files with their sizes from the model repository
+
+    Args:
+        model_id: HuggingFace model ID
+
+    Returns:
+        Dict mapping file paths to sizes in GB
+    """
+    try:
+        from huggingface_hub import repo_info
+
+        token = get_hf_token()
+        info = repo_info(repo_id=model_id, repo_type="model", token=token)
+
+        file_sizes = {}
+        for sibling in info.siblings:
+            # Convert bytes to GB
+            size_gb = sibling.size / (1024 ** 3) if sibling.size else 0
+            file_sizes[sibling.rfilename] = round(size_gb, 3)
+
+        return file_sizes
+    except Exception as e:
+        logger.debug(f"Failed to get file sizes for {model_id}: {e}")
+        return {}
+
+
 def has_file_with_extension(files: List[str], extension: str) -> bool:
     """Check if any file in the list has the given extension"""
     return any(f.endswith(extension) for f in files)
@@ -263,9 +291,14 @@ def estimate_model_size(config: Dict[str, Any], files: List[str]) -> Dict[str, A
     }
 
 
-def estimate_size_from_files(files: List[str]) -> float:
+def estimate_size_from_files(files: List[str], 
+                             file_sizes: Optional[Dict[str, float]] = None) -> float:
     """
     Estimate model size from file list
+
+    Args:
+        files: List of file paths
+        file_sizes: Optional dict mapping file paths to sizes in GB
 
     Looks for patterns like:
     - model-00001-of-00016.safetensors
@@ -275,6 +308,24 @@ def estimate_size_from_files(files: List[str]) -> float:
     """
     import re
 
+    # If we have actual file sizes, use them
+    if file_sizes:
+        # Sum sizes of model weight files
+        total_size_gb = 0.0
+        for file_path, size_gb in file_sizes.items():
+            filename = file_path.split('/')[-1].lower()
+            # Include model weight files
+            if any(ext in filename for ext in ['.safetensors', '.bin', '.pt', '.gguf']):
+                # Exclude non-weight files
+                if not any(skip in filename for skip in ['config', 'tokenizer', 'vocab', 'merges']):
+                    total_size_gb += size_gb
+                    logger.debug(f"Adding {file_path}: {size_gb}GB")
+
+        if total_size_gb > 0:
+            logger.debug(f"Total size from actual file sizes: {total_size_gb}GB")
+            return round(total_size_gb, 1)
+
+    # Fallback to estimation
     total_size_gb = 0.0
 
     # Pattern for sharded model files - use search instead of match
@@ -305,17 +356,13 @@ def estimate_size_from_files(files: List[str]) -> float:
         if total_shards >= 10:
             total_size_gb = total_shards * 5.0
         else:
-            # Smaller models might use smaller shards
-            # 2-shard models are often 7B models split unevenly
-            if total_shards == 2:
-                # 7B models in bfloat16/float16 are typically 13-15GB
-                # Common split: ~10GB + ~5GB
-                total_size_gb = 15.0
-            elif total_shards == 3:
-                # 13B models are typically ~26GB
-                total_size_gb = 26.0
+            # Estimate based on typical shard sizes
+            # Most modern models use ~5GB shards for efficient loading
+            if total_shards <= 6:
+                # Smaller models typically have ~5GB shards
+                total_size_gb = total_shards * 5.0
             else:
-                # Generic estimate for other shard counts
+                # Larger models might have slightly smaller shards
                 total_size_gb = total_shards * 4.0
 
         logger.debug(f"Detected {total_shards} shards, estimated size: {total_size_gb}GB")

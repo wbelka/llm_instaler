@@ -122,7 +122,8 @@ class MoEDetector(BaseDetector):
         # Always use file-based estimation for MoE models
         # as they often have special weight files (ae.safetensors, ema.safetensors)
         from ..utils import estimate_size_from_files
-        file_size = estimate_size_from_files(files)
+        file_sizes = config.get('_file_sizes', {})
+        file_size = estimate_size_from_files(files, file_sizes)
         if file_size > 0:
             profile.estimated_size_gb = file_size
         elif profile.estimated_size_gb == 1.0:

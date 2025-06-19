@@ -79,7 +79,8 @@ class MultimodalDetector(BaseDetector):
         profile.metadata['modalities'] = modalities
 
         # Calculate model size
-        model_size = self._calculate_multimodal_size(config, files, model_id)
+        file_sizes = config.get('_file_sizes', {})
+        model_size = self._calculate_multimodal_size(config, files, model_id, file_sizes)
         profile.estimated_size_gb = model_size
 
         # Calculate memory requirements for multimodal models
@@ -140,11 +141,12 @@ class MultimodalDetector(BaseDetector):
             return 'multimodal'
 
     def _calculate_multimodal_size(self, config: Dict[str, Any],
-                                   files: List[str], model_id: str) -> float:
+                                   files: List[str], model_id: str,
+                                   file_sizes: Optional[Dict[str, float]] = None) -> float:
         """Calculate size for multimodal models"""
         # First try to get size from files (most accurate)
         from ..utils import estimate_size_from_files
-        file_based_size = estimate_size_from_files(files)
+        file_based_size = estimate_size_from_files(files, file_sizes)
 
         if file_based_size > 0:
             return file_based_size

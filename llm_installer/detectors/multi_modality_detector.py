@@ -89,7 +89,9 @@ class MultiModalityDetector(BaseDetector):
 
         # Use file-based estimation if available
         from ..utils import estimate_size_from_files
-        file_size = estimate_size_from_files(files)
+        # Get file sizes from config if available
+        file_sizes = config.get('_file_sizes', {})
+        file_size = estimate_size_from_files(files, file_sizes)
 
         if file_size > 0:
             # Use actual file size
