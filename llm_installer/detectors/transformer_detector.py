@@ -82,6 +82,21 @@ class TransformerDetector(BaseDetector):
         all_requirements = base_requirements + (profile.special_requirements or [])
         profile.special_requirements = list(dict.fromkeys(all_requirements))  # Remove duplicates
 
+        # Calculate model size and memory requirements
+        model_size = self._calculate_model_size(config, files, model_id)
+        profile.estimated_size_gb = model_size
+
+        # Calculate memory requirements
+        mem_reqs = self._calculate_memory_requirements(model_size, profile.quantization)
+        profile.min_ram_gb = mem_reqs['min_ram_gb']
+        profile.min_vram_gb = mem_reqs['min_vram_gb']
+        profile.recommended_ram_gb = mem_reqs['recommended_ram_gb']
+        profile.recommended_vram_gb = mem_reqs['recommended_vram_gb']
+        profile.estimated_memory_gb = mem_reqs['recommended_ram_gb']
+
+        # Determine quantization support
+        profile.supports_quantization = self._determine_quantization_support(config, model_size)
+
         return profile
 
     def _get_architecture(self, config: Dict[str, Any]) -> Optional[str]:

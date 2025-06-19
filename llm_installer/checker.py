@@ -12,6 +12,11 @@ from .utils import (
     save_json_config
 )
 from .detectors.base import BaseDetector, ModelProfile
+from .hardware import (
+    get_hardware_info,
+    calculate_model_requirements,
+    check_model_compatibility
+)
 
 # Import all detectors
 from .detectors.transformer_detector import TransformerDetector
@@ -168,11 +173,115 @@ class ModelChecker:
         print(f"  - TensorRT Support: {'Yes' if profile.supports_tensorrt else 'No'}")
         print(f"  - Multimodal: {'Yes' if profile.is_multimodal else 'No'}")
 
-        print("\nInstallation Command:")
-        install_cmd = f"llm-installer install {profile.model_id}"
-        if profile.quantization:
-            install_cmd += f" --quantization {profile.quantization}"
-        print(f"  {install_cmd}")
+        # Add quantization support info
+        if profile.supports_quantization:
+            print(f"  - Quantization Support: {', '.join(profile.supports_quantization)}")
+
+        # Hardware compatibility check
+        print("\n" + "-"*60)
+        print("Hardware Compatibility Check")
+        print("-"*60)
+
+        # Get hardware info
+        hw_info = get_hardware_info()
+        hw_summary = hw_info.get_summary()
+
+        # Print hardware info
+        print("\nYour Hardware:")
+        print(f"  - CPU: {hw_summary['cpu']['cores']} cores, "
+              f"{hw_summary['cpu']['threads']} threads")
+        print(f"  - RAM: {hw_summary['memory']['total_ram_gb']} GB total, "
+              f"{hw_summary['memory']['available_ram_gb']} GB available")
+
+        if hw_summary['gpu']['gpus']:
+            print("  - GPU(s):")
+            for gpu in hw_summary['gpu']['gpus']:
+                print(f"    • {gpu['name']} ({gpu.get('type', 'Unknown')})")
+                if gpu.get('unified_memory'):
+                    print(f"      Unified Memory: {gpu['total_memory_gb']:.1f} GB")
+                else:
+                    print(f"      VRAM: {gpu['total_memory_gb']:.1f} GB total, "
+                          f"{gpu['free_memory_gb']:.1f} GB free")
+        else:
+            print("  - GPU: None detected (CPU-only mode)")
+
+        # Check compatibility for different quantization levels
+        print("\nCompatibility Analysis:")
+        print(f"{'Quantization':<12} {'Memory':<12} {'Can Run?':<10} {'Device':<10} {'Notes'}")
+        print("-" * 60)
+
+        quantizations = profile.supports_quantization or ['fp32']
+        for quant in quantizations:
+            # Calculate requirements
+            model_reqs = calculate_model_requirements(
+                profile.estimated_size_gb,
+                quant,
+                "inference"
+            )
+
+            # Check compatibility
+            compat = check_model_compatibility(model_reqs, hw_info)
+
+            status = "✓" if compat['can_run'] else "✗"
+            memory = f"{model_reqs['memory_required_gb']:.1f} GB"
+            device = compat['recommended_device'] if compat['can_run'] else "N/A"
+
+            # Create notes
+            notes = []
+            if compat['warnings']:
+                notes.append(compat['warnings'][0].split('.')[0])
+
+            print(f"{quant:<12} {memory:<12} {status:<10} {device:<10} "
+                  f"{notes[0] if notes else ''}")
+
+        # Training compatibility
+        print("\nTraining Compatibility:")
+        print(f"{'Method':<12} {'Memory':<12} {'Can Train?':<10} {'Notes'}")
+        print("-" * 45)
+
+        # Check QLoRA training
+        qlora_reqs = calculate_model_requirements(
+            profile.estimated_size_gb,
+            '4bit',
+            "training"
+        )
+        qlora_compat = check_model_compatibility(qlora_reqs, hw_info)
+
+        print(f"{'QLoRA (4bit)':<12} {qlora_reqs['memory_required_gb']:.1f} GB       "
+              f"{'✓' if qlora_compat['can_run'] else '✗'}          "
+              f"{'Low memory fine-tuning' if qlora_compat['can_run'] else 'Insufficient memory'}")
+
+        # Check full training
+        full_reqs = calculate_model_requirements(
+            profile.estimated_size_gb,
+            'fp16',
+            "training"
+        )
+        full_compat = check_model_compatibility(full_reqs, hw_info)
+
+        print(f"{'Full (fp16)':<12} {full_reqs['memory_required_gb']:.1f} GB       "
+              f"{'✓' if full_compat['can_run'] else '✗'}          "
+              f"{'Full parameter training' if full_compat['can_run'] else 'Insufficient memory'}")
+
+        # Recommendations
+        print("\nRecommendations:")
+        best_quant = None
+        for quant in quantizations:
+            model_reqs = calculate_model_requirements(
+                profile.estimated_size_gb, quant, "inference"
+            )
+            compat = check_model_compatibility(model_reqs, hw_info)
+            if compat['can_run'] and not compat['warnings']:
+                best_quant = quant
+                break
+
+        if best_quant:
+            print(f"  ✓ Recommended quantization: {best_quant}")
+            print(f"  ✓ Install command: llm-installer install {profile.model_id} "
+                  f"--quantization {best_quant}")
+        else:
+            print("  ⚠ This model may not run optimally on your hardware")
+            print("  Consider using a smaller model or upgrading your hardware")
 
         print("="*60 + "\n")
 
