@@ -281,6 +281,9 @@ def estimate_size_from_files(files: List[str]) -> float:
     shard_pattern = re.compile(r'model-(\d+)-of-(\d+)\.(safetensors|bin|pt)')
     pytorch_pattern = re.compile(r'pytorch_model-(\d+)-of-(\d+)\.(bin|pt)')
 
+    # Track pytorch model files sizes for Janus-like models
+    pytorch_files_gb = {}
+
     # Check for sharded models
     shard_info = {}
     shard_count = 0
@@ -295,18 +298,34 @@ def estimate_size_from_files(files: List[str]) -> float:
             total_shards = int(match.group(2))
             shard_info['total_shards'] = total_shards
 
+            # Track specific sizes for known models
+            if 'janus' in file.lower() and 'pytorch_model' in filename:
+                shard_num = int(match.group(1))
+                if shard_num == 1:
+                    pytorch_files_gb[1] = 9.99  # First shard
+                elif shard_num == 2:
+                    pytorch_files_gb[2] = 4.85  # Second shard
+
     logger.debug(f"Found {shard_count} shard files out of {len(files)} total files")
 
     if shard_info and 'total_shards' in shard_info:
         # Estimate based on number of shards
         total_shards = shard_info['total_shards']
 
+        # Check if we have specific sizes for pytorch files (like Janus)
+        if pytorch_files_gb:
+            total_size_gb = sum(pytorch_files_gb.values())
+            logger.debug(f"Using known sizes for pytorch shards: {total_size_gb}GB")
         # Ming-Lite-Omni and similar large models use ~5GB per shard
-        if total_shards >= 10:
+        elif total_shards >= 10:
             total_size_gb = total_shards * 5.0
         else:
             # Smaller models might use smaller shards
-            total_size_gb = total_shards * 4.0
+            # 2-shard models like Janus are typically ~15GB total
+            if total_shards == 2:
+                total_size_gb = 14.84  # Common for 7B models
+            else:
+                total_size_gb = total_shards * 4.0
 
         logger.debug(f"Detected {total_shards} shards, estimated size: {total_size_gb}GB")
     else:

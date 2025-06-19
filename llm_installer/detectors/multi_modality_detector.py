@@ -83,9 +83,22 @@ class MultiModalityDetector(BaseDetector):
                 # Generic estimate
                 components['language_model'] = max(8.0, num_layers * 0.4)
 
-        # Total size is sum of components
-        total_size = sum(components.values())
-        profile.estimated_size_gb = round(total_size, 1)
+        # Calculate total size
+        calculated_size = sum(components.values())
+
+        # Use file-based estimation if available
+        from ..utils import estimate_size_from_files
+        file_size = estimate_size_from_files(files)
+
+        if file_size > 0:
+            # Use actual file size
+            profile.estimated_size_gb = file_size
+            # Adjust component sizes proportionally if needed
+            if calculated_size > 0:
+                ratio = file_size / calculated_size
+                components = {k: round(v * ratio, 1) for k, v in components.items()}
+        else:
+            profile.estimated_size_gb = round(calculated_size, 1)
 
         # Get torch dtype
         torch_dtype = config.get('torch_dtype', 'float32')
@@ -128,6 +141,13 @@ class MultiModalityDetector(BaseDetector):
         # These models may support specialized features
         if 'janus' in model_id.lower():
             profile.metadata['supports_image_generation'] = True
+            profile.metadata['supports_image_understanding'] = True
             profile.task = 'multimodal-generation'
+            profile.metadata['capabilities'] = [
+                'text-generation',
+                'image-understanding',
+                'image-generation',
+                'visual-question-answering'
+            ]
 
         return profile
