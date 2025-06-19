@@ -76,6 +76,14 @@ class ModelChecker:
 
         if not files:
             logger.error(f"Could not fetch file list for {model_id}")
+            logger.info("\nPossible solutions:")
+            logger.info("1. If this is a gated model, provide a HuggingFace token:")
+            logger.info("   llm-installer check <model> --token YOUR_HF_TOKEN")
+            logger.info("2. Save token for future use:")
+            logger.info("   llm-installer check <model> --token YOUR_HF_TOKEN --save-token")
+            logger.info("3. Set environment variable:")
+            logger.info("   export HF_TOKEN=YOUR_HF_TOKEN")
+            logger.info("\nGet your token from: https://huggingface.co/settings/tokens")
             return None
 
         logger.debug(f"Found {len(files)} files in repository")

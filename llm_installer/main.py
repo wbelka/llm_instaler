@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 
 from .checker import ModelChecker
-from .utils import get_models_dir
+from .utils import get_models_dir, set_hf_token, save_hf_token, get_hf_token
 
 __version__ = "2.0.0"
 
@@ -119,6 +119,32 @@ def remove_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def login_command(args: argparse.Namespace) -> int:
+    """Save HuggingFace token for future use"""
+    import getpass
+
+    if args.token:
+        token = args.token
+    else:
+        token = getpass.getpass("Enter your HuggingFace token: ")
+
+    if not token:
+        logging.error("No token provided")
+        return 1
+
+    # Validate token by setting it
+    set_hf_token(token)
+
+    # Save token
+    if save_hf_token(token):
+        print("\n✓ Token saved successfully!")
+        print("You can now access gated models without providing --token")
+        return 0
+    else:
+        logging.error("Failed to save token")
+        return 1
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Create and configure argument parser"""
     parser = argparse.ArgumentParser(
@@ -144,6 +170,18 @@ Examples:
         '--debug',
         action='store_true',
         help='Enable debug logging'
+    )
+
+    parser.add_argument(
+        '--token',
+        type=str,
+        help='HuggingFace API token for accessing gated models'
+    )
+
+    parser.add_argument(
+        '--save-token',
+        action='store_true',
+        help='Save the provided token for future use'
     )
 
     subparsers = parser.add_subparsers(
@@ -208,6 +246,17 @@ Examples:
         help='Skip confirmation prompt'
     )
 
+    # Login command
+    login_parser = subparsers.add_parser(
+        'login',
+        help='Save HuggingFace token for authentication'
+    )
+    login_parser.add_argument(
+        '--token',
+        type=str,
+        help='HuggingFace token (if not provided, will prompt)'
+    )
+
     return parser
 
 
@@ -218,12 +267,27 @@ def main() -> int:
 
     setup_logging(args.debug)
 
+    # Handle token authentication
+    if args.token:
+        set_hf_token(args.token)
+        if args.save_token:
+            if save_hf_token(args.token):
+                logging.info("Token saved for future use")
+            else:
+                logging.warning("Failed to save token")
+    else:
+        # Try to load token from environment or config
+        token = get_hf_token()
+        if token:
+            set_hf_token(token)
+
     # Dispatch to appropriate command handler
     command_handlers = {
         'check': check_command,
         'install': install_command,
         'list': list_command,
         'remove': remove_command,
+        'login': login_command,
     }
 
     handler = command_handlers.get(args.command)
