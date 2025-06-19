@@ -291,7 +291,7 @@ def estimate_model_size(config: Dict[str, Any], files: List[str]) -> Dict[str, A
     }
 
 
-def estimate_size_from_files(files: List[str], 
+def estimate_size_from_files(files: List[str],
                              file_sizes: Optional[Dict[str, float]] = None) -> float:
     """
     Estimate model size from file list
@@ -306,7 +306,6 @@ def estimate_size_from_files(files: List[str],
     - model.safetensors
     - Special MoE files: ema.safetensors, ae.safetensors
     """
-    import re
 
     # If we have actual file sizes, use them
     if file_sizes:
@@ -325,110 +324,10 @@ def estimate_size_from_files(files: List[str],
             logger.debug(f"Total size from actual file sizes: {total_size_gb}GB")
             return round(total_size_gb, 1)
 
-    # Fallback to estimation
-    total_size_gb = 0.0
-
-    # Pattern for sharded model files - use search instead of match
-    shard_pattern = re.compile(r'model-(\d+)-of-(\d+)\.(safetensors|bin|pt)')
-    pytorch_pattern = re.compile(r'pytorch_model-(\d+)-of-(\d+)\.(bin|pt)')
-
-    # Check for sharded models
-    shard_info = {}
-    shard_count = 0
-    for file in files:
-        # Get just the filename without path
-        filename = file.split('/')[-1] if '/' in file else file
-
-        # Use search to find pattern anywhere in filename
-        match = shard_pattern.search(filename) or pytorch_pattern.search(filename)
-        if match:
-            shard_count += 1
-            total_shards = int(match.group(2))
-            shard_info['total_shards'] = total_shards
-
-    logger.debug(f"Found {shard_count} shard files out of {len(files)} total files")
-
-    if shard_info and 'total_shards' in shard_info:
-        # Estimate based on number of shards
-        total_shards = shard_info['total_shards']
-
-        # Ming-Lite-Omni and similar large models use ~5GB per shard
-        if total_shards >= 10:
-            total_size_gb = total_shards * 5.0
-        else:
-            # Estimate based on typical shard sizes
-            # Most modern models use ~5GB shards for efficient loading
-            if total_shards <= 6:
-                # Smaller models typically have ~5GB shards
-                total_size_gb = total_shards * 5.0
-            else:
-                # Larger models might have slightly smaller shards
-                total_size_gb = total_shards * 4.0
-
-        logger.debug(f"Detected {total_shards} shards, estimated size: {total_size_gb}GB")
-    else:
-        # Look for all safetensors/bin files (more inclusive)
-        model_files = [f for f in files if any(
-            f.endswith(ext) for ext in ['.safetensors', '.bin', '.pt', '.gguf']
-        )]
-
-        # Count only files that look like model weights
-        weight_files = []
-        special_moe_files = {}
-
-        for f in model_files:
-            filename = f.split('/')[-1].lower()
-            # Exclude common non-weight files
-            if not any(skip in filename for skip in ['config', 'tokenizer', 'vocab', 'merges']):
-                weight_files.append(f)
-
-                # Track special MoE files
-                if 'ema.safetensors' in filename:
-                    special_moe_files['ema'] = 29.2  # Known size for BAGEL
-                elif 'ae.safetensors' in filename:
-                    special_moe_files['ae'] = 0.335  # Known size for BAGEL
-
-        if weight_files:
-            # If we found special MoE files, use their known sizes
-            if special_moe_files:
-                total_size_gb = sum(special_moe_files.values())
-                logger.debug(f"Found MoE files: {list(special_moe_files.keys())}, "
-                             f"total size: {total_size_gb}GB")
-            # Single file models
-            elif len(weight_files) == 1:
-                # Check filename for size hints
-                file = weight_files[0]
-                if 'small' in file.lower() or '1b' in file.lower():
-                    total_size_gb = 2.0
-                elif 'medium' in file.lower() or '3b' in file.lower():
-                    total_size_gb = 6.0
-                elif 'large' in file.lower() or '7b' in file.lower():
-                    total_size_gb = 13.0
-                elif '13b' in file.lower():
-                    total_size_gb = 26.0
-                elif '30b' in file.lower() or '33b' in file.lower():
-                    total_size_gb = 65.0
-                elif '65b' in file.lower() or '70b' in file.lower():
-                    total_size_gb = 130.0
-                else:
-                    total_size_gb = 8.0  # Default for single file
-            else:
-                # Multiple weight files
-                num_files = len(weight_files)
-
-                # Check if files look like they might be Ming-Lite format
-                # (multiple safetensors files but not numbered shards)
-                if num_files >= 10:
-                    # Large models with many files (like Ming-Lite-Omni)
-                    total_size_gb = num_files * 5.0  # Assume ~5GB per file
-                elif num_files >= 5:
-                    total_size_gb = num_files * 3.0  # Medium models
-                else:
-                    total_size_gb = num_files * 2.0  # Small models
-
-                logger.debug(f"Found {num_files} weight files, estimated size: {total_size_gb}GB")
-
-    return total_size_gb
+    # Without actual file sizes from API, we cannot reliably estimate
+    # Return 0 to indicate no size information available
+    logger.debug("No file size information available, returning 0")
+    return 0.0
 
 
 def format_size(size_bytes: float) -> str:

@@ -2,8 +2,11 @@
 Detector for Mixture of Experts (MoE) models
 """
 
+import logging
 from typing import Dict, List, Optional, Any
 from .base import BaseDetector, ModelProfile
+
+logger = logging.getLogger(__name__)
 
 
 class MoEDetector(BaseDetector):
@@ -126,9 +129,11 @@ class MoEDetector(BaseDetector):
         file_size = estimate_size_from_files(files, file_sizes)
         if file_size > 0:
             profile.estimated_size_gb = file_size
-        elif profile.estimated_size_gb == 1.0:
-            # Fallback for MoE models
-            profile.estimated_size_gb = 15.0
+        else:
+            # No size information - let user know
+            logger.warning(f"Could not determine size for {model_id}")
+            if profile.estimated_size_gb == 1.0:
+                profile.estimated_size_gb = 0.0  # Unknown
 
         # MoE models typically support these quantizations
         profile.supports_quantization = ['fp32', 'fp16', '8bit', '4bit']

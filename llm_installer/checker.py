@@ -186,9 +186,14 @@ class ModelChecker:
             print(f"Quantization: {profile.quantization}")
 
         print("\nStorage Requirements:")
-        print(f"  - Model files: {profile.estimated_size_gb} GB")
-        print("  - Virtual environment: ~2 GB")
-        print(f"  - Total disk space needed: ~{profile.estimated_size_gb + 2:.1f} GB")
+        if profile.estimated_size_gb > 0:
+            print(f"  - Model files: {profile.estimated_size_gb} GB")
+            print("  - Virtual environment: ~2 GB")
+            print(f"  - Total disk space needed: ~{profile.estimated_size_gb + 2:.1f} GB")
+        else:
+            print("  - Model files: Unknown (API did not provide size information)")
+            print("  - Virtual environment: ~2 GB")
+            print(f"  - Check model page: https://huggingface.co/{profile.model_id}")
 
         print("\nMemory Requirements (RAM/VRAM):")
 

@@ -2,8 +2,11 @@
 Detector for multimodal models (vision-language, audio-language, etc.)
 """
 
+import logging
 from typing import Dict, List, Optional, Any
 from .base import BaseDetector, ModelProfile
+
+logger = logging.getLogger(__name__)
 
 
 class MultimodalDetector(BaseDetector):
@@ -174,12 +177,9 @@ class MultimodalDetector(BaseDetector):
             # Audio encoders are typically 0.5-2GB
             total_size += 1.0
 
-        # If we couldn't calculate, use default based on architecture
+        # If we couldn't calculate, return 0 (unknown)
         if total_size == 0:
-            if 'ming' in model_id.lower():
-                total_size = 8.0  # Ming-Lite is around 8GB
-            else:
-                total_size = 10.0  # Default for multimodal
+            logger.debug("Could not calculate multimodal model size from config")
 
         return round(total_size, 1)
 
@@ -192,65 +192,45 @@ class MultimodalDetector(BaseDetector):
         components = {}
 
         # For multimodal models, components are often integrated rather than separate
-        # Use more realistic distributions based on model architecture
+        # Use generic distributions based on detected modalities
 
-        if 'ming' in model_id.lower():
-            # Ming-Lite-Omni specific distribution
-            # These models have a large integrated backbone with smaller adapters
-            if total_size >= 70:  # Large Ming model
-                components = {
-                    'llm': round(total_size * 0.75, 1),  # 75% integrated LLM backbone
-                    'vision': round(total_size * 0.15, 1),  # 15% vision encoder
-                    'audio': round(total_size * 0.08, 1),  # 8% audio encoder
-                    'talker': round(total_size * 0.02, 1)  # 2% talker decoder
-                }
-            else:  # Smaller Ming model
-                components = {
-                    'llm': round(total_size * 0.70, 1),  # 70% LLM
-                    'vision': round(total_size * 0.20, 1),  # 20% vision
-                    'audio': round(total_size * 0.08, 1),  # 8% audio
-                    'talker': round(total_size * 0.02, 1)  # 2% talker
-                }
-        else:
-            # Generic multimodal model distribution
-            # Most multimodal models have integrated architectures
-            has_vision = 'vision_config' in config
-            has_audio = 'audio_config' in config or 'whisper_config' in config
-            has_talker = 'talker_config' in config
+        has_vision = 'vision_config' in config
+        has_audio = 'audio_config' in config or 'whisper_config' in config
+        has_talker = 'talker_config' in config
 
-            # Count modalities
-            num_modalities = 1  # Always have text/LLM
-            if has_vision:
-                num_modalities += 1
-            if has_audio:
-                num_modalities += 1
+        # Count modalities
+        num_modalities = 1  # Always have text/LLM
+        if has_vision:
+            num_modalities += 1
+        if has_audio:
+            num_modalities += 1
+        if has_talker:
+            num_modalities += 1
+
+        # For integrated multimodal models, the LLM backbone is shared
+        # Additional modalities add encoders/decoders but share representations
+        if has_vision and has_audio:
+            # Vision + Audio + Text model
+            components['llm'] = round(total_size * 0.60, 1)  # 60% shared backbone
+            components['vision'] = round(total_size * 0.25, 1)  # 25% vision
+            components['audio'] = round(total_size * 0.15, 1)  # 15% audio
             if has_talker:
-                num_modalities += 1
-
-            # For integrated multimodal models, the LLM backbone is shared
-            # Additional modalities add encoders/decoders but share representations
-            if has_vision and has_audio:
-                # Vision + Audio + Text model
-                components['llm'] = round(total_size * 0.60, 1)  # 60% shared backbone
-                components['vision'] = round(total_size * 0.25, 1)  # 25% vision
-                components['audio'] = round(total_size * 0.15, 1)  # 15% audio
-                if has_talker:
-                    # Adjust for talker
-                    components['llm'] = round(total_size * 0.58, 1)
-                    components['vision'] = round(total_size * 0.24, 1)
-                    components['audio'] = round(total_size * 0.14, 1)
-                    components['talker'] = round(total_size * 0.04, 1)
-            elif has_vision:
-                # Vision + Text model (like CLIP, BLIP)
-                components['llm'] = round(total_size * 0.65, 1)  # 65% text/shared
-                components['vision'] = round(total_size * 0.35, 1)  # 35% vision
-            elif has_audio:
-                # Audio + Text model
-                components['llm'] = round(total_size * 0.70, 1)  # 70% text/shared
-                components['audio'] = round(total_size * 0.30, 1)  # 30% audio
-            else:
-                # Fallback - shouldn't happen for multimodal
-                components['llm'] = total_size
+                # Adjust for talker
+                components['llm'] = round(total_size * 0.58, 1)
+                components['vision'] = round(total_size * 0.24, 1)
+                components['audio'] = round(total_size * 0.14, 1)
+                components['talker'] = round(total_size * 0.04, 1)
+        elif has_vision:
+            # Vision + Text model (like CLIP, BLIP)
+            components['llm'] = round(total_size * 0.65, 1)  # 65% text/shared
+            components['vision'] = round(total_size * 0.35, 1)  # 35% vision
+        elif has_audio:
+            # Audio + Text model
+            components['llm'] = round(total_size * 0.70, 1)  # 70% text/shared
+            components['audio'] = round(total_size * 0.30, 1)  # 30% audio
+        else:
+            # Fallback - shouldn't happen for multimodal
+            components['llm'] = total_size
 
         # Ensure components sum to total size (handle rounding)
         component_sum = sum(components.values())

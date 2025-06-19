@@ -2,8 +2,11 @@
 Detector for multi-modality models (complex multimodal architectures)
 """
 
+import logging
 from typing import Dict, List, Optional, Any
 from .base import BaseDetector, ModelProfile
+
+logger = logging.getLogger(__name__)
 
 
 class MultiModalityDetector(BaseDetector):
@@ -66,23 +69,12 @@ class MultiModalityDetector(BaseDetector):
         # Calculate language model size
         if 'language_config' in config:
             lang_config = config['language_config']
-            model_type = lang_config.get('model_type', '')
             num_layers = lang_config.get('num_hidden_layers', 0)
 
-            # Estimate LLM size based on architecture
-            if 'llama' in model_type:
-                if num_layers == 30:  # 7B model
-                    components['language_model'] = 13.0  # 7B in bfloat16
-                elif num_layers == 32:  # 8B model
-                    components['language_model'] = 15.0
-                elif num_layers == 40:  # 13B model
-                    components['language_model'] = 26.0
-                else:
-                    # Rough estimate
-                    components['language_model'] = num_layers * 0.43
-            else:
-                # Generic estimate
-                components['language_model'] = max(8.0, num_layers * 0.4)
+            # Estimate LLM size based on layers
+            # Most modern models use ~0.4-0.5GB per layer in fp16/bf16
+            # This is a rough estimate when we don't have actual file sizes
+            components['language_model'] = max(5.0, num_layers * 0.45)
 
         # Calculate total size
         calculated_size = sum(components.values())
@@ -101,7 +93,12 @@ class MultiModalityDetector(BaseDetector):
                 ratio = file_size / calculated_size
                 components = {k: round(v * ratio, 1) for k, v in components.items()}
         else:
-            profile.estimated_size_gb = round(calculated_size, 1)
+            # No real size available
+            if calculated_size > 0:
+                profile.estimated_size_gb = round(calculated_size, 1)
+            else:
+                logger.warning(f"Could not determine size for {model_id}")
+                profile.estimated_size_gb = 0.0  # Unknown
 
         # Get torch dtype
         torch_dtype = config.get('torch_dtype', 'float32')
