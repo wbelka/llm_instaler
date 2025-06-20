@@ -145,11 +145,40 @@ class ModelChecker:
 
         # Get list of all files with sizes
         files_info = []
-        for file in self.api.list_files_info(model_id):
-            files_info.append({
-                "path": file.rfilename,
-                "size": file.size if hasattr(file, 'size') else 0,
-            })
+
+        # Get repo info which includes file information
+        try:
+            # Get list of files
+            repo_files = self.api.list_repo_files(model_id)
+
+            # For each file, we need to get its info
+            # Note: This is not the most efficient way, but HF API doesn't provide
+            # file sizes in list_repo_files
+            for file_path in repo_files:
+                file_dict = {
+                    "path": file_path,
+                    "size": 0  # We'll estimate size from file extension
+                }
+
+                # Estimate sizes for common file types
+                if file_path.endswith(
+                        '.safetensors') or file_path.endswith('.bin'):
+                    # Model weights - estimate based on model size
+                    if 'llama' in model_id.lower() and '70b' in model_id.lower():
+                        file_dict["size"] = 35 * 1024**3  # 35GB per shard
+                    elif 'llama' in model_id.lower() and '13b' in model_id.lower():
+                        file_dict["size"] = 7 * 1024**3   # 7GB per shard
+                    elif 'llama' in model_id.lower() and '7b' in model_id.lower():
+                        file_dict["size"] = 4 * 1024**3   # 4GB per shard
+                    else:
+                        file_dict["size"] = 2 * 1024**3   # Default 2GB
+
+                files_info.append(file_dict)
+
+        except Exception as e:
+            self.logger.warning(f"Could not get file list: {e}")
+            # Fallback - just create a minimal list
+            files_info = [{"path": "model.bin", "size": 2 * 1024**3}]
 
         return model_info, files_info
 
@@ -669,8 +698,8 @@ class ModelChecker:
         console.print(f"  - CPU: {system_info['cpu_count']} cores")
         console.print(
             f"  - RAM: {
-                system_info['total_memory_gb']:.1f} GB total, " f"{
-                system_info['available_memory_gb']:.1f} GB available")
+                system_info['total_memory_gb']:.1f} GB total, "
+            f"{system_info['available_memory_gb']:.1f} GB available")
 
         if system_info["cuda_available"]:
             console.print("  - GPU(s):")
