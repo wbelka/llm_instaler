@@ -30,10 +30,10 @@ def check_command(args: argparse.Namespace) -> int:
     """Check model compatibility without downloading"""
     try:
         checker = ModelChecker()
-        profile = checker.check_model(args.model, save_profile=True)
+        model_info = checker.check_model(args.model, save_profile=True)
 
-        if profile:
-            checker.print_compatibility_report(profile)
+        if model_info:
+            checker.print_compatibility_report(model_info)
             return 0
         else:
             logging.error(f"Failed to check model: {args.model}")

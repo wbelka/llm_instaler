@@ -12,14 +12,13 @@ from .utils import (
     estimate_model_size,
     save_json_config
 )
-from .model_profile import ModelProfile
 from .hardware import (
     get_hardware_info,
     calculate_model_requirements,
     check_model_compatibility
 )
 from .model_detector_v2 import ModelDetectorV2
-from .detectors_v2.converter import convert_to_profile
+from .detectors_v2.base import ModelInfo
 
 
 logger = logging.getLogger(__name__)
@@ -79,7 +78,7 @@ class ModelChecker:
         self.detector = ModelDetectorV2()
         logger.debug("Initialized ModelDetectorV2")
 
-    def check_model(self, model_id: str, save_profile: bool = False) -> Optional[ModelProfile]:
+    def check_model(self, model_id: str, save_profile: bool = False) -> Optional[ModelInfo]:
         """
         Check model compatibility and return profile
 
@@ -88,7 +87,7 @@ class ModelChecker:
             save_profile: Whether to save the profile to disk
 
         Returns:
-            ModelProfile if successful, None otherwise
+            ModelInfo if successful, None otherwise
         """
         logger.info(f"Checking model: {model_id}")
 
@@ -139,96 +138,95 @@ class ModelChecker:
         
         if not model_info:
             logger.warning(f"Could not detect model {model_id}")
-            # Create a generic profile as fallback
-            profile = ModelProfile(
-                model_type="unknown",
+            # Create a generic ModelInfo as fallback
+            model_info = ModelInfo(
                 model_id=model_id,
-                library="transformers",  # Safe default
+                model_type="unknown",
+                library_name="transformers",  # Safe default
+                pipeline_tag="text-generation",
                 task="text-generation"
             )
-        else:
-            # Convert ModelInfo to ModelProfile
-            profile = convert_to_profile(model_info)
-            logger.info(f"Model detected: {profile.model_type} ({profile.library})")
+            
+        logger.info(f"Model detected: {model_info.model_type} ({model_info.library_name})")
 
         # Size should already be set by detector v2
         # Only fallback if somehow missing
-        if profile.estimated_size_gb == 0:
+        if model_info.size_gb == 0:
             logger.warning("Size not determined by detector, estimating...")
             size_info = estimate_model_size(config or {}, files)
-            profile.estimated_size_gb = size_info['size_gb']
+            model_info.size_gb = size_info['size_gb']
 
         # Save profile if requested
         if save_profile:
-            self._save_profile(model_id, profile)
+            self._save_profile(model_id, model_info)
 
-        return profile
+        return model_info
 
-    def _save_profile(self, model_id: str, profile: ModelProfile):
+    def _save_profile(self, model_id: str, model_info: ModelInfo):
         """Save model profile to cache"""
         from .utils import get_cache_dir, sanitize_model_name
 
         cache_dir = get_cache_dir()
         cache_dir.mkdir(parents=True, exist_ok=True)
 
-        profile_file = cache_dir / f"{sanitize_model_name(model_id)}_profile.json"
-        save_json_config(profile.to_dict(), profile_file)
+        profile_file = cache_dir / f"{sanitize_model_name(model_id)}_model_info.json"
+        save_json_config(model_info.to_dict(), profile_file)
         logger.debug(f"Saved profile to {profile_file}")
 
-    def print_compatibility_report(self, profile: ModelProfile):
+    def print_compatibility_report(self, model_info: ModelInfo):
         """Print a formatted compatibility report"""
         print("\n" + "="*60)
-        print(f"Model Compatibility Report: {profile.model_id}")
+        print(f"Model Compatibility Report: {model_info.model_id}")
         print("="*60)
 
-        print(f"\nModel Type: {profile.model_type}")
-        print(f"Library: {profile.library}")
+        print(f"\nModel Type: {model_info.model_type}")
+        print(f"Library: {model_info.library_name}")
 
-        if profile.architecture:
-            print(f"Architecture: {profile.architecture}")
+        if model_info.architecture:
+            print(f"Architecture: {model_info.architecture}")
 
-        if profile.task:
-            print(f"Task: {profile.task}")
+        if model_info.task:
+            print(f"Task: {model_info.task}")
 
-        if profile.quantization:
-            print(f"Quantization: {profile.quantization}")
+        if model_info.default_dtype:
+            print(f"Default dtype: {model_info.default_dtype}")
 
         print("\nStorage Requirements:")
         # Special handling for GGUF models with variants
-        if profile.model_type == 'gguf' and profile.metadata.get('variants'):
-            default_variant = profile.metadata.get('default_variant', '')
-            print(f"  - Default variant ({default_variant}): {profile.estimated_size_gb} GB")
-            if profile.metadata.get('total_variants_size'):
-                print(f"  - All variants total: {profile.metadata['total_variants_size']} GB")
+        if model_info.model_type == 'gguf' and model_info.metadata.get('variants'):
+            default_variant = model_info.metadata.get('default_variant', '')
+            print(f"  - Default variant ({default_variant}): {model_info.size_gb} GB")
+            if model_info.metadata.get('total_variants_size'):
+                print(f"  - All variants total: {model_info.metadata['total_variants_size']} GB")
             print("  - Virtual environment: ~2 GB")
-            print(f"  - Disk space for default: ~{profile.estimated_size_gb + 2:.1f} GB")
-        elif profile.estimated_size_gb > 0:
-            print(f"  - Model files: {profile.estimated_size_gb} GB")
+            print(f"  - Disk space for default: ~{model_info.size_gb + 2:.1f} GB")
+        elif model_info.size_gb > 0:
+            print(f"  - Model files: {model_info.size_gb} GB")
             print("  - Virtual environment: ~2 GB")
-            print(f"  - Total disk space needed: ~{profile.estimated_size_gb + 2:.1f} GB")
+            print(f"  - Total disk space needed: ~{model_info.size_gb + 2:.1f} GB")
         else:
             print("  - Model files: Unknown (API did not provide size information)")
             print("  - Virtual environment: ~2 GB")
-            print(f"  - Check model page: https://huggingface.co/{profile.model_id}")
+            print(f"  - Check model page: https://huggingface.co/{model_info.model_id}")
 
         print("\nMemory Requirements (RAM/VRAM):")
 
-        # Check for torch_dtype in profile metadata
+        # Check for torch_dtype in metadata
         torch_dtype = None
-        if profile.metadata and 'torch_dtype' in profile.metadata:
-            torch_dtype = profile.metadata['torch_dtype']
-        elif profile.quantization:
-            # Use quantization if specified
-            torch_dtype = profile.quantization
+        if model_info.metadata and 'torch_dtype' in model_info.metadata:
+            torch_dtype = model_info.metadata['torch_dtype']
+        elif model_info.default_dtype:
+            # Use default dtype if specified
+            torch_dtype = model_info.default_dtype
 
         if torch_dtype:
-            memory_req = calculate_memory_for_dtype(profile.estimated_size_gb, torch_dtype)
+            memory_req = calculate_memory_for_dtype(model_info.size_gb, torch_dtype)
             print(f"  - Default configuration ({torch_dtype}): {memory_req:.1f} GB")
             print("  - Other configurations: See compatibility table below")
         else:
             # Show default configuration from metadata
-            if profile.metadata and 'torch_dtype' in profile.metadata:
-                torch_dtype = profile.metadata['torch_dtype']
+            if model_info.metadata and 'torch_dtype' in model_info.metadata:
+                torch_dtype = model_info.metadata['torch_dtype']
                 # Map torch dtypes to our quantization names
                 dtype_map = {
                     'float32': 'fp32',
@@ -242,11 +240,11 @@ class ModelChecker:
                 # If model is stored in the same dtype as default, use disk size
                 if torch_dtype in ['float16', 'bfloat16']:
                     # Model is already in this format on disk
-                    memory_req = profile.estimated_size_gb * 1.2  # Just add overhead
+                    memory_req = model_info.size_gb * 1.2  # Just add overhead
                 else:
                     # Calculate memory for default dtype
                     mem_reqs = calculate_model_requirements(
-                        profile.estimated_size_gb,
+                        model_info.size_gb,
                         quant_type,
                         "inference"
                     )
@@ -254,12 +252,12 @@ class ModelChecker:
                 
                 print(f"  - Default configuration: {torch_dtype}")
                 print(f"  - Default memory requirement: {memory_req:.1f} GB")
-            print(f"  - Model page: https://huggingface.co/{profile.model_id}")
+            print(f"  - Model page: https://huggingface.co/{model_info.model_id}")
             print("  - See compatibility table below for all configurations")
 
         # Show modalities and components for multimodal models
-        if profile.is_multimodal and profile.metadata:
-            if 'modalities' in profile.metadata:
+        if model_info.is_multimodal and model_info.metadata:
+            if 'modalities' in model_info.metadata:
                 print("\nSupported Modalities:")
                 modality_names = {
                     'text': 'Text Generation',
@@ -269,28 +267,28 @@ class ModelChecker:
                     'audio': 'Audio',
                     'speech': 'Speech'
                 }
-                for modality in profile.metadata['modalities']:
+                for modality in model_info.metadata['modalities']:
                     display_name = modality_names.get(modality, modality.capitalize())
                     print(f"  - {display_name}")
 
-            if 'capabilities' in profile.metadata:
+            if 'capabilities' in model_info.metadata:
                 print("\nModel Capabilities:")
-                for capability in profile.metadata['capabilities']:
+                for capability in model_info.metadata['capabilities']:
                     cap_display = capability.replace('-', ' ').title()
                     print(f"  - {cap_display}")
 
-            if 'component_sizes' in profile.metadata:
+            if 'component_sizes' in model_info.metadata:
                 print("\nComponent Sizes:")
-                components = profile.metadata['component_sizes']
+                components = model_info.metadata['component_sizes']
                 for comp_name, comp_size in components.items():
                     print(f"  - {comp_name.upper()}: {comp_size} GB")
                 component_total = sum(components.values())
                 print(f"  - Total: {component_total:.1f} GB")
 
                 # Show if there's a discrepancy
-                if abs(component_total - profile.estimated_size_gb) > 0.5:
+                if abs(component_total - model_info.size_gb) > 0.5:
                     print(f"  - Note: Model files total is "
-                          f"{profile.estimated_size_gb} GB")
+                          f"{model_info.size_gb} GB")
 
                 print("\nDeployment Options:")
                 print("  - Minimum (mixed CPU/GPU):")
@@ -298,28 +296,28 @@ class ModelChecker:
                 print(f"    • GPU: {largest_comp:.1f} GB (largest component)")
                 # Use actual memory requirement, not just file sizes
                 memory_req = calculate_memory_for_dtype(
-                    profile.estimated_size_gb,
-                    profile.metadata.get('torch_dtype', 'fp32')
+                    model_info.size_gb,
+                    model_info.metadata.get('torch_dtype', 'fp32')
                 )
                 print(f"    • RAM: {memory_req:.1f} GB (with overhead)")
                 print("  - Optimal (all GPU):")
                 print(f"    • GPU: {memory_req:.1f} GB "
                       f"(all components + overhead)")
 
-        if profile.special_requirements:
+        if model_info.special_requirements:
             print("\nSpecial Requirements:")
-            for req in profile.special_requirements:
+            for req in model_info.special_requirements:
                 print(f"  - {req}")
                 
         # Show GGUF variants if available
-        if profile.model_type == 'gguf' and profile.metadata.get('variants'):
+        if model_info.model_type == 'gguf' and model_info.metadata.get('variants'):
             print("\nAvailable GGUF Variants:")
-            if profile.metadata.get('variant_note'):
-                print(f"  Note: {profile.metadata['variant_note']}")
+            if model_info.metadata.get('variant_note'):
+                print(f"  Note: {model_info.metadata['variant_note']}")
             
             # Group variants by quantization type
             variants_by_quant = {}
-            for variant in profile.metadata['variants']:
+            for variant in model_info.metadata['variants']:
                 quant = variant['quantization']
                 if quant not in variants_by_quant:
                     variants_by_quant[quant] = []
@@ -381,7 +379,7 @@ class ModelChecker:
                 quality = quality_map.get(quant, '★★★☆☆')
                 
                 # Check if any is default
-                has_default = any(v['file'] == profile.metadata.get('default_variant') 
+                has_default = any(v['file'] == model_info.metadata.get('default_variant') 
                                 for v in variants)
                 marker = ' *' if has_default else ''
                 
@@ -389,33 +387,33 @@ class ModelChecker:
                       f"{mem_range:<13} {quality}{marker}")
             
             # Show individual files if not too many
-            total_files = len(profile.metadata['variants'])
+            total_files = len(model_info.metadata['variants'])
             if total_files <= 20:
                 print("\n  Individual files:")
                 print("  File" + " " * 50 + "Size      Memory")
                 print("  " + "-" * 70)
-                for variant in sorted(profile.metadata['variants'], 
+                for variant in sorted(model_info.metadata['variants'], 
                                     key=lambda x: x['size_gb']):
                     filename = variant['file']
                     if len(filename) > 50:
                         # Truncate long filenames
                         filename = filename[:47] + "..."
-                    is_default = variant['file'] == profile.metadata.get('default_variant')
+                    is_default = variant['file'] == model_info.metadata.get('default_variant')
                     marker = ' *' if is_default else ''
                     print(f"  {filename:<53} {variant['size_gb']:>6.1f} GB  "
                           f"{variant['memory_required_gb']:>6.1f} GB{marker}")
             
-            if profile.metadata.get('default_variant'):
+            if model_info.metadata.get('default_variant'):
                 print("\n  * = Default variant")
 
         print("\nCapabilities:")
-        print(f"  - VLLM Support: {'Yes' if profile.supports_vllm else 'No'}")
-        print(f"  - TensorRT Support: {'Yes' if profile.supports_tensorrt else 'No'}")
-        print(f"  - Multimodal: {'Yes' if profile.is_multimodal else 'No'}")
+        print(f"  - VLLM Support: {'Yes' if model_info.metadata.get("supports_vllm", False) else 'No'}")
+        print(f"  - TensorRT Support: {'Yes' if model_info.metadata.get("supports_tensorrt", False) else 'No'}")
+        print(f"  - Multimodal: {'Yes' if model_info.is_multimodal else 'No'}")
 
         # Add quantization support info
-        if profile.supports_quantization:
-            print(f"  - Quantization Support: {', '.join(profile.supports_quantization)}")
+        if model_info.supports_quantization:
+            print(f"  - Quantization Support: {', '.join(model_info.supports_quantization)}")
 
         # Hardware compatibility check
         print("\n" + "-"*60)
@@ -449,13 +447,13 @@ class ModelChecker:
         print("\nCompatibility Analysis:")
         
         # Special handling for GGUF models
-        if profile.model_type == 'gguf' and profile.metadata.get('variants'):
+        if model_info.model_type == 'gguf' and model_info.metadata.get('variants'):
             print(f"{'Variant':<15} {'Size':<10} {'Memory':<12} {'Can Run?':<10} {'Device':<10} {'Notes'}")
             print("-" * 80)
             
             # Group by quantization and show summary
             variants_by_quant = {}
-            for variant in profile.metadata['variants']:
+            for variant in model_info.metadata['variants']:
                 quant = variant['quantization']
                 if quant not in variants_by_quant:
                     variants_by_quant[quant] = []
@@ -502,18 +500,18 @@ class ModelChecker:
     
             # Determine storage dtype
             stored_dtype = None
-            if profile.metadata and 'torch_dtype' in profile.metadata:
-                stored_dtype = profile.metadata['torch_dtype']
+            if model_info.metadata and 'torch_dtype' in model_info.metadata:
+                stored_dtype = model_info.metadata['torch_dtype']
             
             # Adjust size calculation based on storage format
             if stored_dtype in ['float16', 'bfloat16']:
                 # Model is stored in half precision, fp32 would be 2x size
-                fp32_size = profile.estimated_size_gb * 2
+                fp32_size = model_info.size_gb * 2
             else:
                 # Model is stored in fp32 or unknown
-                fp32_size = profile.estimated_size_gb
+                fp32_size = model_info.size_gb
             
-            quantizations = profile.supports_quantization or ['fp32']
+            quantizations = model_info.supports_quantization or ['fp32']
             for quant in quantizations:
                 # Calculate requirements based on fp32 size
                 if quant == 'fp32':
@@ -554,7 +552,7 @@ class ModelChecker:
         print("\nTraining Compatibility:")
         
         # Skip training section for GGUF models
-        if profile.model_type == 'gguf':
+        if model_info.model_type == 'gguf':
             print("  GGUF models are pre-quantized and do not support training.")
             print("  To train, use the original model before quantization.")
         else:
@@ -562,7 +560,7 @@ class ModelChecker:
             print("-" * 60)
 
             # Training methods to check - filter based on supported quantizations
-            supported_quants = profile.supports_quantization or ['fp32', 'fp16']
+            supported_quants = model_info.supports_quantization or ['fp32', 'fp16']
             training_configs = []
             # Only add methods for supported quantizations
             if '4bit' in supported_quants:
@@ -633,7 +631,7 @@ class ModelChecker:
         print("="*60 + "\n")
 
 
-def check_model(model_id: str) -> Optional[ModelProfile]:
+def check_model(model_id: str) -> Optional[ModelInfo]:
     """Convenience function to check a model"""
     checker = ModelChecker()
     return checker.check_model(model_id)
