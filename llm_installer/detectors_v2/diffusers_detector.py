@@ -2,7 +2,15 @@
 Detector for diffusers library models
 """
 
+import logging
+from typing import Dict, Any
 from .base import BaseDetector, ModelInfo
+from .diffusers_utils import (
+    estimate_component_parameters,
+    parameters_to_size_gb
+)
+
+logger = logging.getLogger(__name__)
 
 
 class DiffusersDetector(BaseDetector):
@@ -92,9 +100,22 @@ class DiffusersDetector(BaseDetector):
 
             # Estimate component sizes for all diffusion models
             if info.size_gb > 0 and component_types:
-                component_sizes = self._estimate_component_sizes(
-                    info.size_gb, component_types, info.architecture
+                # Try to get component configs for better estimation
+                component_configs = self._fetch_component_configs(
+                    info.model_id, components
                 )
+                
+                if component_configs:
+                    # Use config-based estimation
+                    component_sizes = self._estimate_sizes_from_configs(
+                        component_configs, info.size_gb, component_types
+                    )
+                else:
+                    # Fall back to distribution-based estimation
+                    component_sizes = self._estimate_component_sizes(
+                        info.size_gb, component_types, info.architecture
+                    )
+                    
                 info.metadata['component_sizes'] = component_sizes
 
         # Get scheduler info
@@ -210,4 +231,68 @@ class DiffusersDetector(BaseDetector):
             for comp in unassigned:
                 component_sizes[comp] = round(size_per_component, 1)
 
+        return component_sizes
+    
+    def _fetch_component_configs(self, model_id: str, 
+                                components: Dict[str, str]) -> Dict[str, Any]:
+        """Try to fetch config.json for each component"""
+        from ..utils import fetch_model_config
+        
+        configs = {}
+        for comp_name, comp_class in components.items():
+            # Try to fetch component config
+            config_path = f"{comp_name}/config.json"
+            config = fetch_model_config(model_id, config_path)
+            if config:
+                configs[comp_name] = config
+                logger.debug(f"Fetched config for {comp_name}")
+        
+        return configs
+    
+    def _estimate_sizes_from_configs(self, configs: Dict[str, Any], 
+                                    total_size: float,
+                                    component_types: list) -> Dict[str, float]:
+        """Estimate component sizes based on their configs"""
+        component_params = {}
+        component_sizes = {}
+        
+        # Estimate parameters for each component
+        for comp_name, config in configs.items():
+            params = estimate_component_parameters(comp_name, config)
+            if params:
+                component_params[comp_name] = params
+                # Estimate size (assuming float16 storage)
+                size_gb = parameters_to_size_gb(params, 'float16')
+                component_sizes[comp_name] = size_gb
+        
+        # Handle components without configs
+        for comp in component_types:
+            if comp not in component_sizes:
+                # Use minimal size for scheduler/tokenizer/etc
+                if comp in ['scheduler', 'tokenizer', 'feature_extractor']:
+                    component_sizes[comp] = 0.1
+                else:
+                    # We'll distribute remaining size to these
+                    pass
+        
+        # If total estimated size differs significantly from actual,
+        # scale proportionally
+        estimated_total = sum(component_sizes.values())
+        if estimated_total > 0 and abs(estimated_total - total_size) > 1:
+            # Scale to match actual size
+            scale_factor = total_size / estimated_total
+            for comp in component_sizes:
+                component_sizes[comp] = round(
+                    component_sizes[comp] * scale_factor, 1
+                )
+        
+        # Ensure we don't exceed total
+        current_total = sum(component_sizes.values())
+        if current_total > total_size:
+            # Reduce largest component
+            largest = max(component_sizes.keys(), 
+                         key=lambda k: component_sizes[k])
+            component_sizes[largest] -= (current_total - total_size)
+            component_sizes[largest] = max(0.1, component_sizes[largest])
+        
         return component_sizes
