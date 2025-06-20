@@ -271,14 +271,27 @@ class ModelChecker:
                 components = profile.metadata['component_sizes']
                 for comp_name, comp_size in components.items():
                     print(f"  - {comp_name.upper()}: {comp_size} GB")
-                print(f"  - Total: {sum(components.values()):.1f} GB")
+                component_total = sum(components.values())
+                print(f"  - Total: {component_total:.1f} GB")
+
+                # Show if there's a discrepancy
+                if abs(component_total - profile.estimated_size_gb) > 0.5:
+                    print(f"  - Note: Model files total is "
+                          f"{profile.estimated_size_gb} GB")
 
                 print("\nDeployment Options:")
                 print("  - Minimum (mixed CPU/GPU):")
-                print(f"    • GPU: {max(components.values()):.1f} GB (largest component)")
-                print(f"    • RAM: {sum(components.values()):.1f} GB (all components)")
+                largest_comp = max(components.values())
+                print(f"    • GPU: {largest_comp:.1f} GB (largest component)")
+                # Use actual memory requirement, not just file sizes
+                memory_req = calculate_memory_for_dtype(
+                    profile.estimated_size_gb,
+                    profile.metadata.get('torch_dtype', 'fp32')
+                )
+                print(f"    • RAM: {memory_req:.1f} GB (with overhead)")
                 print("  - Optimal (all GPU):")
-                print(f"    • GPU: {sum(components.values()):.1f} GB (all components)")
+                print(f"    • GPU: {memory_req:.1f} GB "
+                      f"(all components + overhead)")
 
         if profile.special_requirements:
             print("\nSpecial Requirements:")

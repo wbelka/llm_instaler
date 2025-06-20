@@ -15,7 +15,8 @@ from .detectors_v2 import (
     TimmDetector,
     AudioDetector,
     BagelDetector,
-    FluxDetector
+    FluxDetector,
+    CosmosDetector
 )
 from .utils import get_hf_token, fetch_model_files_with_sizes, fetch_model_config
 
@@ -31,6 +32,7 @@ class ModelDetectorV2:
             GGUFDetector(),  # Check GGUF first (most specific)
             BagelDetector(),  # BAGEL models
             FluxDetector(),  # FLUX models (before general diffusers)
+            CosmosDetector(),  # NVIDIA Cosmos models
             DiffusersDetector(),
             SentenceTransformersDetector(),
             TimmDetector(),
