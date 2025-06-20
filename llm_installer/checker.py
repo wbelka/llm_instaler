@@ -204,14 +204,22 @@ class ModelChecker:
                     'int4': '4bit'
                 }
                 quant_type = dtype_map.get(torch_dtype, 'fp32')
-                # Calculate memory for default dtype
-                mem_reqs = calculate_model_requirements(
-                    profile.estimated_size_gb,
-                    quant_type,
-                    "inference"
-                )
+                
+                # If model is stored in the same dtype as default, use disk size
+                if torch_dtype in ['float16', 'bfloat16']:
+                    # Model is already in this format on disk
+                    memory_req = profile.estimated_size_gb * 1.2  # Just add overhead
+                else:
+                    # Calculate memory for default dtype
+                    mem_reqs = calculate_model_requirements(
+                        profile.estimated_size_gb,
+                        quant_type,
+                        "inference"
+                    )
+                    memory_req = mem_reqs['memory_required_gb']
+                
                 print(f"  - Default configuration: {torch_dtype}")
-                print(f"  - Default memory requirement: {mem_reqs['memory_required_gb']:.1f} GB")
+                print(f"  - Default memory requirement: {memory_req:.1f} GB")
             print(f"  - Model page: https://huggingface.co/{profile.model_id}")
             print("  - See compatibility table below for all configurations")
 
@@ -298,14 +306,40 @@ class ModelChecker:
         print(f"{'Quantization':<12} {'Memory':<12} {'Can Run?':<10} {'Device':<10} {'Notes'}")
         print("-" * 60)
 
+        # Determine storage dtype
+        stored_dtype = None
+        if profile.metadata and 'torch_dtype' in profile.metadata:
+            stored_dtype = profile.metadata['torch_dtype']
+        
+        # Adjust size calculation based on storage format
+        if stored_dtype in ['float16', 'bfloat16']:
+            # Model is stored in half precision, fp32 would be 2x size
+            fp32_size = profile.estimated_size_gb * 2
+        else:
+            # Model is stored in fp32 or unknown
+            fp32_size = profile.estimated_size_gb
+        
         quantizations = profile.supports_quantization or ['fp32']
         for quant in quantizations:
-            # Calculate requirements
-            model_reqs = calculate_model_requirements(
-                profile.estimated_size_gb,
-                quant,
-                "inference"
-            )
+            # Calculate requirements based on fp32 size
+            if quant == 'fp32':
+                base_size = fp32_size
+            elif quant == 'fp16':
+                base_size = fp32_size * 0.5
+            elif quant == '8bit':
+                base_size = fp32_size * 0.25
+            elif quant == '4bit':
+                base_size = fp32_size * 0.125
+            else:
+                base_size = fp32_size
+            
+            # Add overhead for inference
+            memory_required = base_size * 1.2
+            
+            model_reqs = {
+                'memory_required_gb': memory_required,
+                'quantization': quant
+            }
 
             # Check compatibility
             compat = check_model_compatibility(model_reqs, hw_info)
@@ -344,28 +378,34 @@ class ModelChecker:
             training_configs.append(('Full (fp32)', 'fp32', False, True))
 
         for method_name, quant, *flags in training_configs:
-            # Calculate requirements
-            if 'QLoRA' in method_name:
-                # QLoRA uses quantized base model
-                model_reqs = calculate_model_requirements(
-                    profile.estimated_size_gb, quant, "training"
-                )
-            elif 'LoRA' in method_name and 'QLoRA' not in method_name:
-                # Regular LoRA - base model in specified precision + LoRA weights
-                base_reqs = calculate_model_requirements(
-                    profile.estimated_size_gb, quant, "inference"
-                )
-                # Add LoRA overhead (10% for adapters + gradients)
-                model_reqs = {
-                    'memory_required_gb': base_reqs['memory_required_gb'] * 1.1,
-                    'quantization': quant,
-                    'task': 'training'
-                }
+            # Calculate requirements using correct base size
+            if quant == 'fp32':
+                base_size = fp32_size
+            elif quant == 'fp16':
+                base_size = fp32_size * 0.5
+            elif quant == '8bit':
+                base_size = fp32_size * 0.25
+            elif quant == '4bit':
+                base_size = fp32_size * 0.125
             else:
-                # Full training
-                model_reqs = calculate_model_requirements(
-                    profile.estimated_size_gb, quant, "training"
-                )
+                base_size = fp32_size
+            
+            # Calculate training memory
+            if 'QLoRA' in method_name:
+                # QLoRA uses quantized base model + small overhead
+                memory_required = base_size * 1.5
+            elif 'LoRA' in method_name and 'QLoRA' not in method_name:
+                # Regular LoRA - base model + 10% for adapters
+                memory_required = base_size * 1.3
+            else:
+                # Full training - need 4x the model size
+                memory_required = base_size * 4
+            
+            model_reqs = {
+                'memory_required_gb': memory_required,
+                'quantization': quant,
+                'task': 'training'
+            }
 
             # Check compatibility
             compat = check_model_compatibility(model_reqs, hw_info)
