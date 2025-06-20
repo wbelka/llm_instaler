@@ -45,6 +45,11 @@ class ModelInfo:
     special_requirements: List[str] = field(default_factory=list)
     is_multimodal: bool = False
     metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert ModelInfo to dictionary"""
+        from dataclasses import asdict
+        return asdict(self)
 
 
 class BaseDetector(ABC):
