@@ -18,7 +18,8 @@ from .hardware import (
     calculate_model_requirements,
     check_model_compatibility
 )
-from .model_detector import ModelDetector
+from .model_detector_v2 import ModelDetectorV2
+from .detectors_v2.converter import convert_to_profile
 
 
 logger = logging.getLogger(__name__)
@@ -28,8 +29,8 @@ class ModelChecker:
     """Main class for checking model compatibility"""
 
     def __init__(self):
-        self.detector = ModelDetector()
-        logger.debug("Initialized ModelDetector")
+        self.detector = ModelDetectorV2()
+        logger.debug("Initialized ModelDetectorV2")
 
     def check_model(self, model_id: str, save_profile: bool = False) -> Optional[ModelProfile]:
         """
@@ -85,10 +86,11 @@ class ModelChecker:
 
         logger.debug(f"Found {len(files)} files in repository")
 
-        # Use new simplified detector
-        logger.debug("Running model detection...")
-        detection_result = self.detector.detect(model_id)
-        if not detection_result:
+        # Use new detector v2
+        logger.debug("Running model detection v2...")
+        model_info = self.detector.detect(model_id)
+        
+        if not model_info:
             logger.warning(f"Could not detect model {model_id}")
             # Create a generic profile as fallback
             profile = ModelProfile(
@@ -98,37 +100,16 @@ class ModelChecker:
                 task="text-generation"
             )
         else:
-            # Convert detection result to ModelProfile
-            profile = ModelProfile(
-                model_type=detection_result['model_type'],
-                model_id=detection_result['model_id'],
-                library=detection_result['library'],
-                architecture=detection_result.get('architecture'),
-                task=detection_result.get('task'),
-                quantization=detection_result.get('quantization'),
-                special_requirements=detection_result.get('special_requirements'),
-                estimated_size_gb=detection_result.get('estimated_size_gb', 1.0),
-                estimated_memory_gb=detection_result.get('estimated_memory_gb', 4.0),
-                supports_vllm=detection_result.get('supports_vllm', False),
-                supports_tensorrt=detection_result.get('supports_tensorrt', False),
-                is_multimodal=detection_result.get('is_multimodal', False),
-                metadata=detection_result.get('metadata', {}),
-                min_ram_gb=detection_result.get('min_ram_gb', 8.0),
-                min_vram_gb=detection_result.get('min_vram_gb', 0.0),
-                recommended_ram_gb=detection_result.get('recommended_ram_gb', 16.0),
-                recommended_vram_gb=detection_result.get('recommended_vram_gb', 0.0),
-                supports_cpu=detection_result.get('supports_cpu', True),
-                supports_cuda=detection_result.get('supports_cuda', True),
-                supports_metal=detection_result.get('supports_metal', True),
-                supports_quantization=detection_result.get('supports_quantization')
-            )
-            logger.info(f"Model detected: {profile.model_type}")
+            # Convert ModelInfo to ModelProfile
+            profile = convert_to_profile(model_info)
+            logger.info(f"Model detected: {profile.model_type} ({profile.library})")
 
-        # Estimate size if not set by detector
-        if profile.estimated_size_gb == 1.0:
+        # Size should already be set by detector v2
+        # Only fallback if somehow missing
+        if profile.estimated_size_gb == 0:
+            logger.warning("Size not determined by detector, estimating...")
             size_info = estimate_model_size(config or {}, files)
             profile.estimated_size_gb = size_info['size_gb']
-            # Don't set estimated_memory_gb here - calculate it dynamically based on quantization
 
         # Save profile if requested
         if save_profile:
