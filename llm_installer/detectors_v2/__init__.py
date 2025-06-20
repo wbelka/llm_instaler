@@ -9,6 +9,7 @@ from .sentence_transformers_detector import SentenceTransformersDetector
 from .gguf_detector import GGUFDetector
 from .timm_detector import TimmDetector
 from .audio_detector import AudioDetector
+from .bagel_detector import BagelDetector
 
 __all__ = [
     'BaseDetector',
@@ -19,4 +20,5 @@ __all__ = [
     'GGUFDetector',
     'TimmDetector',
     'AudioDetector',
+    'BagelDetector',
 ]

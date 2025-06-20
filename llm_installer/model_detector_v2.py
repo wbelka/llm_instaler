@@ -13,7 +13,8 @@ from .detectors_v2 import (
     SentenceTransformersDetector,
     GGUFDetector,
     TimmDetector,
-    AudioDetector
+    AudioDetector,
+    BagelDetector
 )
 from .utils import get_hf_token, fetch_model_files_with_sizes, fetch_model_config
 
@@ -27,6 +28,7 @@ class ModelDetectorV2:
     def __init__(self):
         self.detectors = [
             GGUFDetector(),  # Check GGUF first (most specific)
+            BagelDetector(),  # BAGEL models
             DiffusersDetector(),
             SentenceTransformersDetector(),
             TimmDetector(),
@@ -95,6 +97,11 @@ class ModelDetectorV2:
             config = fetch_model_config(model_id, "config.json")
             if config:
                 info.config = config
+            else:
+                # Try llm_config.json as fallback (some models like BAGEL use this)
+                config = fetch_model_config(model_id, "llm_config.json")
+                if config:
+                    info.config = config
 
             # For diffusers, also get model_index.json
             if info.library_name == 'diffusers' or 'model_index.json' in info.files:
