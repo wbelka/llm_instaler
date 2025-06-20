@@ -197,20 +197,20 @@ def calculate_model_requirements(
     else:  # training
         # For training: model + gradients + optimizer states + activations
         if quantization == '4bit':
-            # QLoRA 4bit training
-            memory_required = quantized_size + 2.0  # Quantized model + LoRA overhead
+            # QLoRA 4bit training - just quantized model + small overhead
+            memory_required = quantized_size * 1.5
         elif quantization == '8bit':
-            # QLoRA 8bit training - slightly more memory than 4bit
-            memory_required = quantized_size + 2.5  # Quantized model + LoRA overhead
+            # QLoRA 8bit training
+            memory_required = quantized_size * 1.5
         else:
-            # Full training needs ~4x model size
+            # Full training needs more memory
             memory_required = model_size_gb * 4
 
     return {
         'model_size_gb': model_size_gb,
         'quantized_size_gb': quantized_size,
         'memory_required_gb': memory_required,
-        'recommended_ram_gb': memory_required + 4,  # Extra for system
+        'recommended_ram_gb': memory_required * 1.2,  # 20% extra
         'quantization': quantization or 'fp32',
         'task': task
     }

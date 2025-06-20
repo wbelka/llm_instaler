@@ -331,16 +331,21 @@ class ModelChecker:
         print(f"{'Method':<15} {'Memory':<10} {'CPU':<8} {'GPU':<8} {'Device':<10}")
         print("-" * 60)
 
-        # Training methods to check
-        training_configs = [
-            ('QLoRA (4bit)', '4bit', True),  # quantization, is_qlora
-            ('QLoRA (8bit)', '8bit', True),  # QLoRA with 8bit
-            ('LoRA (8bit)', '8bit', False),  # Regular LoRA with 8bit
-            ('LoRA (fp16)', 'fp16', False),  # Regular LoRA with fp16
-            ('LoRA (fp32)', 'fp32', False),  # Regular LoRA with fp32
-            ('Full (fp16)', 'fp16', False, True),  # Full training
-            ('Full (fp32)', 'fp32', False, True),  # Full training fp32
-        ]
+        # Training methods to check - filter based on supported quantizations
+        supported_quants = profile.supports_quantization or ['fp32', 'fp16']
+        training_configs = []
+        # Only add methods for supported quantizations
+        if '4bit' in supported_quants:
+            training_configs.append(('QLoRA (4bit)', '4bit', True))
+        if '8bit' in supported_quants:
+            training_configs.append(('QLoRA (8bit)', '8bit', True))
+            training_configs.append(('LoRA (8bit)', '8bit', False))
+        if 'fp16' in supported_quants:
+            training_configs.append(('LoRA (fp16)', 'fp16', False))
+            training_configs.append(('Full (fp16)', 'fp16', False, True))
+        if 'fp32' in supported_quants:
+            training_configs.append(('LoRA (fp32)', 'fp32', False))
+            training_configs.append(('Full (fp32)', 'fp32', False, True))
 
         for method_name, quant, *flags in training_configs:
             # Calculate requirements
@@ -354,9 +359,9 @@ class ModelChecker:
                 base_reqs = calculate_model_requirements(
                     profile.estimated_size_gb, quant, "inference"
                 )
-                # Add LoRA overhead (typically 1-2GB for adapters + gradients)
+                # Add LoRA overhead (10% for adapters + gradients)
                 model_reqs = {
-                    'memory_required_gb': base_reqs['memory_required_gb'] + 2.0,
+                    'memory_required_gb': base_reqs['memory_required_gb'] * 1.1,
                     'quantization': quant,
                     'task': 'training'
                 }
