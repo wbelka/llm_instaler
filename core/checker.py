@@ -156,18 +156,21 @@ class ModelChecker:
                 self.logger.debug(f"Using siblings data for {model_id}")
                 for sibling in model_info.siblings:
                     if hasattr(sibling, 'rfilename'):
+                        # Get size, ensuring it's never None
+                        size = getattr(sibling, 'size', 0)
+                        if size is None:
+                            size = 0
                         file_dict = {
                             "path": sibling.rfilename,
-                            "size": (getattr(sibling, 'size', 0)
-                                     if hasattr(sibling, 'size') else 0)
+                            "size": size
                         }
                         files_info.append(file_dict)
 
                         # Debug: log weight files with sizes
-                        if file_dict["size"] > 0 and (
+                        if size > 0 and (
                                 sibling.rfilename.endswith('.safetensors') or
                                 sibling.rfilename.endswith('.bin')):
-                            size_mb = file_dict["size"] / (1024**2)
+                            size_mb = size / (1024**2)
                             self.logger.debug(
                                 f"Weight file: {sibling.rfilename} - "
                                 f"{size_mb:.1f} MB")
@@ -190,6 +193,8 @@ class ModelChecker:
 
         except Exception as e:
             self.logger.warning(f"Could not get file list: {e}")
+            self.logger.debug(f"Exception type: {type(e).__name__}")
+            self.logger.debug(f"Exception details: {str(e)}", exc_info=True)
             # Fallback - just create a minimal list
             files_info = [{"path": "model.bin", "size": 0}]
 
