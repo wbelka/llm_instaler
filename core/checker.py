@@ -8,6 +8,7 @@ import json
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
 import logging
+import requests
 
 from huggingface_hub import HfApi, ModelInfo, hf_hub_download
 from huggingface_hub.utils import RepositoryNotFoundError, GatedRepoError
@@ -151,7 +152,40 @@ class ModelChecker:
 
         # Get repo info which includes file information
         try:
-            # Use siblings from model_info which contains file sizes
+            # Try to get file info using the tree API endpoint
+            tree_url = (f"https://huggingface.co/api/models/"
+                        f"{model_id}/tree/main")
+            headers = {}
+            if self.config.huggingface_token:
+                headers['Authorization'] = (
+                    f'Bearer {self.config.huggingface_token}')
+            response = requests.get(tree_url, headers=headers)
+
+            if response.status_code == 200:
+                tree_data = response.json()
+                self.logger.debug(f"Got {len(tree_data)} files from tree API")
+
+                for item in tree_data:
+                    if item.get('type') == 'file':
+                        file_dict = {
+                            "path": item.get('path', ''),
+                            "size": item.get('size', 0)
+                        }
+                        files_info.append(file_dict)
+
+                        # Debug: log weight files with sizes
+                        if file_dict["size"] > 0 and (
+                                file_dict["path"].endswith('.safetensors') or
+                                file_dict["path"].endswith('.bin')):
+                            size_mb = file_dict["size"] / (1024**2)
+                            self.logger.debug(
+                                f"Weight file: {file_dict['path']} - "
+                                f"{size_mb:.1f} MB")
+
+                return model_info, files_info
+
+            # Fallback to siblings if tree API fails
+            self.logger.debug("Tree API failed, trying siblings")
             if hasattr(model_info, 'siblings') and model_info.siblings:
                 self.logger.debug(f"Using siblings data for {model_id}")
                 for sibling in model_info.siblings:
@@ -175,7 +209,8 @@ class ModelChecker:
                                 f"Weight file: {sibling.rfilename} - "
                                 f"{size_mb:.1f} MB")
                 return model_info, files_info
-            # Fallback to list_repo_files
+
+            # Final fallback to list_repo_files
             repo_files = self.api.list_repo_files(model_id)
 
             # Debug: log number of files found
