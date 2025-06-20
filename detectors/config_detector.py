@@ -92,8 +92,8 @@ class ConfigDetector(BaseDetector):
                 analysis['model_family'] = model_family
 
                 # Determine architecture type
-                analysis['architecture_type'] = self._determine_architecture_type(
-                    config)
+                arch_type = self._determine_architecture_type(config)
+                analysis['architecture_type'] = arch_type
 
                 # Determine primary library
                 analysis['primary_library'] = self._determine_library(
@@ -135,7 +135,7 @@ class ConfigDetector(BaseDetector):
             arch = architectures[0].lower()
 
             # Language models
-            if 'causallm' in arch:
+            if 'causallm' in arch or 'gemma' in arch:
                 return 'transformer', 'language-model'
             elif 'maskedlm' in arch:
                 return 'transformer-encoder', 'language-model'
@@ -164,7 +164,10 @@ class ConfigDetector(BaseDetector):
             'gptj',
             'llama',
             'mistral',
-                'mixtral']:
+            'mixtral',
+            'gemma',
+            'gemma2'
+        ]:
             return model_type, 'language-model'
 
         # Special architectures

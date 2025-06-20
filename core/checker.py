@@ -101,7 +101,8 @@ class ModelChecker:
 
             if not config_data:
                 print_error(
-                    "No configuration files found. Cannot determine model type.")
+                    "No configuration files found. "
+                    "Cannot determine model type.")
                 return False, None
 
             # Step 3: Determine model type
@@ -111,7 +112,8 @@ class ModelChecker:
 
             # Step 4: Collect requirements
             print_info("Analyzing model requirements...")
-            requirements = self._collect_requirements(model_data, files_info)
+            requirements = self._collect_requirements(
+                model_data, files_info)
 
             # Step 5: Check system compatibility
             print_info("Checking system compatibility...")
@@ -130,7 +132,8 @@ class ModelChecker:
             return False, None
         except GatedRepoError:
             print_error(
-                "This is a private/gated model. Please set HF_TOKEN environment variable.")
+                "This is a private/gated model. "
+                "Please set HF_TOKEN environment variable.")
             return False, None
         except Exception as e:
             print_error(f"Error checking model: {str(e)}")
@@ -148,82 +151,47 @@ class ModelChecker:
 
         # Get repo info which includes file information
         try:
-            # Get list of files
+            # Use siblings from model_info which contains file sizes
+            if hasattr(model_info, 'siblings') and model_info.siblings:
+                self.logger.debug(f"Using siblings data for {model_id}")
+                for sibling in model_info.siblings:
+                    if hasattr(sibling, 'rfilename'):
+                        file_dict = {
+                            "path": sibling.rfilename,
+                            "size": (getattr(sibling, 'size', 0)
+                                     if hasattr(sibling, 'size') else 0)
+                        }
+                        files_info.append(file_dict)
+
+                        # Debug: log weight files with sizes
+                        if file_dict["size"] > 0 and (
+                                sibling.rfilename.endswith('.safetensors') or
+                                sibling.rfilename.endswith('.bin')):
+                            size_mb = file_dict["size"] / (1024**2)
+                            self.logger.debug(
+                                f"Weight file: {sibling.rfilename} - "
+                                f"{size_mb:.1f} MB")
+                return model_info, files_info
+            # Fallback to list_repo_files
             repo_files = self.api.list_repo_files(model_id)
-            
+
             # Debug: log number of files found
-            self.logger.debug(f"Found {len(repo_files)} files in {model_id}")
+            self.logger.debug(
+                f"Found {len(repo_files)} files in {model_id}, "
+                "but no size information available")
 
             # For each file, we need to get its info
-            # Note: This is not the most efficient way, but HF API doesn't provide
-            # file sizes in list_repo_files
+            # Note: list_repo_files doesn't provide file sizes
             for file_path in repo_files:
-                file_dict = {
+                files_info.append({
                     "path": file_path,
-                    "size": 0  # We'll estimate size from file extension
-                }
-
-                # Estimate sizes for common file types
-                if file_path.endswith(
-                        '.safetensors') or file_path.endswith('.bin'):
-                    # Model weights - estimate based on model size and type
-                    model_lower = model_id.lower()
-                    file_lower = file_path.lower()
-
-                    # Language models
-                    if 'llama' in model_lower and '70b' in model_lower:
-                        file_dict["size"] = 35 * 1024**3  # 35GB per shard
-                    elif 'llama' in model_lower and '13b' in model_lower:
-                        file_dict["size"] = 7 * 1024**3   # 7GB per shard
-                    elif 'llama' in model_lower and '7b' in model_lower:
-                        file_dict["size"] = 4 * 1024**3   # 4GB per shard
-
-                    # Stable Diffusion models
-                    elif 'stable-diffusion' in model_lower or 'sd-' in model_lower:
-                        if 'unet' in file_lower:
-                            # UNet is the largest component
-                            if 'xl' in model_lower:
-                                file_dict["size"] = 5 * 1024**3  # 5GB for SDXL
-                            elif 'turbo' in model_lower:
-                                file_dict["size"] = 3.4 * \
-                                    1024**3  # 3.4GB for SD-Turbo
-                            else:
-                                file_dict["size"] = 3.5 * \
-                                    1024**3  # 3.5GB for SD 1.5/2.1
-                        elif 'vae' in file_lower:
-                            file_dict["size"] = 335 * 1024**2  # ~335MB
-                        elif 'text_encoder' in file_lower or 'clip' in file_lower:
-                            file_dict["size"] = 492 * 1024**2  # ~492MB
-                        else:
-                            # Default 500MB for other SD files
-                            file_dict["size"] = 500 * 1024**2
-
-                    # Other models - conservative estimates
-                    elif '7b' in model_lower:
-                        file_dict["size"] = 3.5 * 1024**3  # 3.5GB per file
-                    elif '3b' in model_lower:
-                        file_dict["size"] = 1.5 * 1024**3  # 1.5GB per file
-                    elif '1b' in model_lower or '1.3b' in model_lower:
-                        file_dict["size"] = 0.7 * 1024**3  # 700MB per file
-                    else:
-                        # Default based on file path hints
-                        if 'unet' in file_lower:
-                            # 2GB for unknown UNet
-                            file_dict["size"] = 2 * 1024**3
-                        else:
-                            file_dict["size"] = 1 * 1024**3   # Default 1GB
-
-                files_info.append(file_dict)
-                
-                # Debug: log weight files with sizes
-                if file_dict["size"] > 0 and (file_path.endswith('.safetensors') or file_path.endswith('.bin')):
-                    size_mb = file_dict["size"] / (1024**2)
-                    self.logger.debug(f"Weight file: {file_path} - {size_mb:.1f} MB")
+                    "size": 0  # Size unknown without siblings data
+                })
 
         except Exception as e:
             self.logger.warning(f"Could not get file list: {e}")
             # Fallback - just create a minimal list
-            files_info = [{"path": "model.bin", "size": 2 * 1024**3}]
+            files_info = [{"path": "model.bin", "size": 0}]
 
         return model_info, files_info
 
@@ -255,8 +223,8 @@ class ModelChecker:
                         config_content = json.load(f)
 
                     # Validate config content
-                    if config_name == "model_index.json" or self._is_valid_config(
-                            config_content):
+                    if (config_name == "model_index.json" or
+                            self._is_valid_config(config_content)):
                         config_data[config_name] = config_content
 
                         # For composite models, get component configs
@@ -338,12 +306,14 @@ class ModelChecker:
                         )
 
                         with open(config_file, 'r') as f:
-                            component_configs[f"{component_path}_config"] = json.load(
-                                f)
+                            config = json.load(f)
+                            component_configs[
+                                f"{component_path}_config"] = config
 
                     except Exception as e:
                         self.logger.warning(
-                            f"Failed to load component config {config_path}: {e}")
+                            f"Failed to load component config "
+                            f"{config_path}: {e}")
 
         return component_configs
 
@@ -415,11 +385,10 @@ class ModelChecker:
 
         return inferred
 
-    def _collect_requirements(self,
-                              model_data: Dict[str,
-                                               Any],
-                              files_info: List[Dict[str,
-                                                    Any]]) -> ModelRequirements:
+    def _collect_requirements(
+            self,
+            model_data: Dict[str, Any],
+            files_info: List[Dict[str, Any]]) -> ModelRequirements:
         """Collect all model requirements."""
         requirements = ModelRequirements()
 
@@ -486,7 +455,8 @@ class ModelChecker:
                 # Check for architecture-specific dependencies
                 model_type = config.get("model_type", "")
                 if model_type in ARCHITECTURE_DEPENDENCIES:
-                    special_deps.extend(ARCHITECTURE_DEPENDENCIES[model_type])
+                    special_deps.extend(
+                        ARCHITECTURE_DEPENDENCIES[model_type])
 
                 # Check for config-based dependencies
                 for key, dep_map in CONFIG_DEPENDENCIES.items():
@@ -514,7 +484,8 @@ class ModelChecker:
             # Check if model might benefit from flash attention
             for config in model_data.get("config_data", {}).values():
                 if isinstance(config, dict):
-                    if config.get("max_position_embeddings", 0) >= 2048:
+                    max_pos = config.get("max_position_embeddings", 0)
+                    if max_pos >= 2048:
                         optional.append("flash-attn")
                         break
 
@@ -530,8 +501,9 @@ class ModelChecker:
 
         return model_size_gb + venv_size_gb
 
-    def _estimate_memory_requirements(self, model_data: Dict[str, Any],
-                                      files_info: List[Dict[str, Any]]) -> Dict[str, float]:
+    def _estimate_memory_requirements(
+            self, model_data: Dict[str, Any],
+            files_info: List[Dict[str, Any]]) -> Dict[str, float]:
         """Estimate memory requirements for different configurations."""
         # Get weight files
         weight_files = [
@@ -555,7 +527,8 @@ class ModelChecker:
                     if isinstance(torch_dtype, str):
                         native_dtype = torch_dtype
                         break
-                    elif isinstance(torch_dtype, dict) and "_name_or_path" in torch_dtype:
+                    elif (isinstance(torch_dtype, dict) and
+                          "_name_or_path" in torch_dtype):
                         dtype_str = torch_dtype["_name_or_path"]
                         if "float16" in dtype_str:
                             native_dtype = "float16"
@@ -586,27 +559,38 @@ class ModelChecker:
 
         if native_dtype == "float16":
             memory_reqs = {
-                "int4": base_memory_gb * 0.25 * 1.2,    # 4bit/16bit * overhead
-                "int8": base_memory_gb * 0.5 * 1.3,     # 8bit/16bit * overhead
-                "float16": base_memory_gb * overhead_factor,        # native + overhead
-                "bfloat16": base_memory_gb * overhead_factor,       # same size as float16
-                "float32": base_memory_gb * 2.0 * overhead_factor,  # 32bit/16bit * overhead
+                # 4bit/16bit * overhead
+                "int4": base_memory_gb * 0.25 * 1.2,
+                # 8bit/16bit * overhead
+                "int8": base_memory_gb * 0.5 * 1.3,
+                # native + overhead
+                "float16": base_memory_gb * overhead_factor,
+                # same size as float16
+                "bfloat16": base_memory_gb * overhead_factor,
+                # 32bit/16bit * overhead
+                "float32": base_memory_gb * 2.0 * overhead_factor,
             }
         elif native_dtype == "bfloat16":
             memory_reqs = {
                 "int4": base_memory_gb * 0.25 * 1.2,
                 "int8": base_memory_gb * 0.5 * 1.3,
-                "float16": base_memory_gb * overhead_factor,        # same size as bfloat16
-                "bfloat16": base_memory_gb * overhead_factor,       # native + overhead
+                # same size as bfloat16
+                "float16": base_memory_gb * overhead_factor,
+                # native + overhead
+                "bfloat16": base_memory_gb * overhead_factor,
                 "float32": base_memory_gb * 2.0 * overhead_factor,
             }
         elif native_dtype == "float32":
             memory_reqs = {
-                "int4": base_memory_gb * 0.125 * 1.2,   # 4bit/32bit * overhead
-                "int8": base_memory_gb * 0.25 * 1.3,    # 8bit/32bit * overhead
-                "float16": base_memory_gb * 0.5 * overhead_factor,  # 16bit/32bit * overhead
+                # 4bit/32bit * overhead
+                "int4": base_memory_gb * 0.125 * 1.2,
+                # 8bit/32bit * overhead
+                "int8": base_memory_gb * 0.25 * 1.3,
+                # 16bit/32bit * overhead
+                "float16": base_memory_gb * 0.5 * overhead_factor,
                 "bfloat16": base_memory_gb * 0.5 * overhead_factor,
-                "float32": base_memory_gb * overhead_factor,        # native + overhead
+                # native + overhead
+                "float32": base_memory_gb * overhead_factor,
             }
         else:
             # Fallback to original calculation
@@ -620,7 +604,8 @@ class ModelChecker:
 
         # Check if model has quantization config
         for config in model_data.get("config_data", {}).values():
-            if isinstance(config, dict) and "quantization_config" in config:
+            if (isinstance(config, dict) and
+                    "quantization_config" in config):
                 quant_config = config["quantization_config"]
                 if quant_config.get("bits") == 4:
                     memory_reqs["quantized"] = memory_reqs["int4"]
@@ -659,8 +644,8 @@ class ModelChecker:
 
                     # Check for reasoning models
                     model_type = config.get("model_type", "")
-                    if model_type in [
-                            "o1", "reasoning-llm"] or "reasoning" in model_type:
+                    if (model_type in ["o1", "reasoning-llm"] or
+                            "reasoning" in model_type):
                         capabilities["supports_reasoning"] = True
 
         # Extract native dtype from configs
@@ -672,7 +657,8 @@ class ModelChecker:
                     if isinstance(torch_dtype, str):
                         # Handle string format like "float16", "bfloat16"
                         capabilities["native_dtype"] = torch_dtype
-                    elif isinstance(torch_dtype, dict) and "_name_or_path" in torch_dtype:
+                    elif (isinstance(torch_dtype, dict) and
+                          "_name_or_path" in torch_dtype):
                         # Handle dict format {"_name_or_path": "torch.float16"}
                         dtype_str = torch_dtype["_name_or_path"]
                         if "float16" in dtype_str:
@@ -691,7 +677,8 @@ class ModelChecker:
                     elif quant_config.get("bits") == 8:
                         capabilities["native_dtype"] = "int8"
                     elif "bnb_4bit_compute_dtype" in quant_config:
-                        capabilities["native_dtype"] = quant_config["bnb_4bit_compute_dtype"]
+                        capabilities["native_dtype"] = quant_config[
+                            "bnb_4bit_compute_dtype"]
                     break
 
                 # Check if model name hints at dtype
@@ -706,15 +693,17 @@ class ModelChecker:
                     elif "int4" in model_name or "4bit" in model_name:
                         capabilities["native_dtype"] = "int4"
 
-        # Default to float16 if not specified (most common for modern models)
+        # Default to float16 if not specified
+        # (most common for modern models)
         if not capabilities["native_dtype"]:
             capabilities["native_dtype"] = "float16"
 
         return capabilities
 
-    def _check_compatibility(self,
-                             requirements: ModelRequirements) -> Dict[str,
-                                                                      CompatibilityResult]:
+    def _check_compatibility(
+            self,
+            requirements: ModelRequirements) -> Dict[
+                str, CompatibilityResult]:
         """Check compatibility with system."""
         system_info = check_system_requirements()
         results = {}
@@ -799,9 +788,10 @@ class ModelChecker:
         console.print("[bold]Storage Requirements:[/bold]")
         model_size_gb = requirements.disk_space_gb - 3
         console.print(f"  - Model files: {model_size_gb:.1f} GB")
-        console.print(f"  - Virtual environment: ~3 GB")
+        console.print("  - Virtual environment: ~3 GB")
         console.print(
-            f"  - Total disk space needed: ~{requirements.disk_space_gb:.1f} GB")
+            f"  - Total disk space needed: "
+            f"~{requirements.disk_space_gb:.1f} GB")
         console.print()
 
         # Memory requirements
@@ -866,8 +856,7 @@ class ModelChecker:
         console.print("[bold]Your Hardware:[/bold]")
         console.print(f"  - CPU: {system_info['cpu_count']} cores")
         console.print(
-            f"  - RAM: {
-                system_info['total_memory_gb']:.1f} GB total, "
+            f"  - RAM: {system_info['total_memory_gb']:.1f} GB total, "
             f"{system_info['available_memory_gb']:.1f} GB available")
 
         if system_info["cuda_available"]:
@@ -916,12 +905,14 @@ class ModelChecker:
         train_table.add_column("Device", style="magenta")
 
         # Estimate training memory
-        base_memory = requirements.memory_requirements.get("float16", 16.0)
+        base_memory = requirements.memory_requirements.get(
+            "float16", 16.0)
         lora_memory = base_memory * 1.3
         full_memory = base_memory * 4
 
         # Check LoRA training
-        lora_cpu = "✓" if system_info["available_memory_gb"] >= lora_memory else "✗"
+        lora_cpu = ("✓" if system_info["available_memory_gb"] >= lora_memory
+                    else "✗")
         lora_gpu = "✗"
         lora_device = "cpu" if lora_cpu == "✓" else "N/A"
 
@@ -942,7 +933,8 @@ class ModelChecker:
         )
 
         # Check full training
-        full_cpu = "✓" if system_info["available_memory_gb"] >= full_memory else "✗"
+        full_cpu = ("✓" if system_info["available_memory_gb"] >= full_memory
+                    else "✗")
         full_gpu = "✗"
         full_device = "cpu" if full_cpu == "✓" else "N/A"
 
