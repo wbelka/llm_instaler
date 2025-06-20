@@ -93,30 +93,65 @@ class ModelDetectorV2:
                 gated=getattr(api_info, 'gated', None)
             )
 
-            # Get file info
+            # Step 1: Inventory files - get complete file listing ("map of territory")
             file_sizes = fetch_model_files_with_sizes(model_id)
             info.files = list(file_sizes.keys())
             info.file_sizes = file_sizes
             info.size_gb = round(sum(file_sizes.values()), 1)
 
-            # Try to get config.json
-            config = fetch_model_config(model_id, "config.json")
-            if config:
-                info.config = config
-            else:
-                # Try llm_config.json as fallback (some models like BAGEL use this)
-                config = fetch_model_config(model_id, "llm_config.json")
-                if config:
-                    info.config = config
-
-            # For diffusers, also get model_index.json
-            if info.library_name == 'diffusers' or 'model_index.json' in info.files:
+            # Step 2: Determine model type by indicator files (order matters!)
+            
+            # Scenario 1: Composite model (e.g., Diffusers) - check model_index.json first
+            if 'model_index.json' in info.files:
                 model_index = fetch_model_config(model_id, "model_index.json")
                 if model_index:
                     info.model_index = model_index
+                    logger.debug(f"Found model_index.json - composite model detected")
+            
+            # Scenario 2: Standard Transformers model - check config.json
+            config = fetch_model_config(model_id, "config.json")
+            if config:
+                info.config = config
+                logger.debug(f"Found config.json - standard model configuration")
+            
+            # Scenario 3: Model with non-standard config name
+            elif not info.model_index:  # Only if no model_index.json found
+                # Try alternative config names
+                alternative_configs = ['llm_config.json', 'model_config.json']
+                for alt_config in alternative_configs:
+                    if alt_config in info.files:
+                        config = fetch_model_config(model_id, alt_config)
+                        if config and self._is_architecture_config(config):
+                            info.config = config
+                            logger.debug(f"Found {alt_config} with architecture info")
+                            break
+            
+            # Scenario 4: Unrecognized model
+            if not info.config and not info.model_index:
+                logger.warning(f"No standard configuration files found for {model_id}")
 
             return info
 
         except Exception as e:
             logger.error(f"Failed to fetch API info for {model_id}: {e}")
             return None
+    
+    def _is_architecture_config(self, config: dict) -> bool:
+        """Check if config describes model architecture (not API config)"""
+        # Architecture configs have these keys
+        architecture_keys = [
+            'model_type', 'hidden_size', 'vocab_size', 'num_layers',
+            'num_attention_heads', 'architectures', 'torch_dtype',
+            'num_hidden_layers', 'intermediate_size', 'max_position_embeddings'
+        ]
+        
+        # API configs have these keys
+        api_keys = ['api_key', 'base_url', 'endpoint', 'api_version']
+        
+        # If any API key found, it's not an architecture config
+        if any(key in config for key in api_keys):
+            return False
+        
+        # If at least 2 architecture keys found, it's likely an architecture config
+        found_keys = sum(1 for key in architecture_keys if key in config)
+        return found_keys >= 2
