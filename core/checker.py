@@ -501,14 +501,60 @@ class ModelChecker:
         weight_bytes = sum(f.get("size", 0) for f in weight_files)
         base_memory_gb = weight_bytes / (1024**3)
 
-        # Estimate for different dtypes
-        memory_reqs = {
-            "int4": base_memory_gb * 1.2,
-            "int8": base_memory_gb * 1.3,
-            "float16": base_memory_gb * 1.5,
-            "bfloat16": base_memory_gb * 1.5,
-            "float32": base_memory_gb * 2.0,
-        }
+        # Determine native dtype
+        native_dtype = "float16"  # Default assumption
+        for config in model_data.get("config_data", {}).values():
+            if isinstance(config, dict):
+                torch_dtype = config.get("torch_dtype")
+                if torch_dtype:
+                    if isinstance(torch_dtype, str):
+                        native_dtype = torch_dtype
+                        break
+                    elif isinstance(torch_dtype, dict) and "_name_or_path" in torch_dtype:
+                        dtype_str = torch_dtype["_name_or_path"]
+                        if "float16" in dtype_str:
+                            native_dtype = "float16"
+                        elif "bfloat16" in dtype_str:
+                            native_dtype = "bfloat16"
+                        elif "float32" in dtype_str:
+                            native_dtype = "float32"
+                        break
+
+        # Calculate memory requirements based on native dtype
+        # If model is native float16, base_memory_gb is already the size for float16
+        if native_dtype == "float16":
+            memory_reqs = {
+                "int4": base_memory_gb * 0.25 * 1.2,    # 4bit/16bit * overhead
+                "int8": base_memory_gb * 0.5 * 1.3,     # 8bit/16bit * overhead
+                "float16": base_memory_gb * 1.5,        # native + overhead
+                "bfloat16": base_memory_gb * 1.5,       # same size as float16
+                "float32": base_memory_gb * 2.0 * 1.5,  # 32bit/16bit * overhead
+            }
+        elif native_dtype == "bfloat16":
+            memory_reqs = {
+                "int4": base_memory_gb * 0.25 * 1.2,
+                "int8": base_memory_gb * 0.5 * 1.3,
+                "float16": base_memory_gb * 1.5,        # same size as bfloat16
+                "bfloat16": base_memory_gb * 1.5,       # native + overhead
+                "float32": base_memory_gb * 2.0 * 1.5,
+            }
+        elif native_dtype == "float32":
+            memory_reqs = {
+                "int4": base_memory_gb * 0.125 * 1.2,   # 4bit/32bit * overhead
+                "int8": base_memory_gb * 0.25 * 1.3,    # 8bit/32bit * overhead
+                "float16": base_memory_gb * 0.5 * 1.5,  # 16bit/32bit * overhead
+                "bfloat16": base_memory_gb * 0.5 * 1.5,
+                "float32": base_memory_gb * 1.5,        # native + overhead
+            }
+        else:
+            # Fallback to original calculation
+            memory_reqs = {
+                "int4": base_memory_gb * 1.2,
+                "int8": base_memory_gb * 1.3,
+                "float16": base_memory_gb * 1.5,
+                "bfloat16": base_memory_gb * 1.5,
+                "float32": base_memory_gb * 2.0,
+            }
 
         # Check if model has quantization config
         for config in model_data.get("config_data", {}).values():
