@@ -529,6 +529,7 @@ class ModelChecker:
             "supports_system_prompt": False,
             "supports_reasoning": False,
             "max_context_length": None,
+            "native_dtype": None,
         }
 
         # Check for language model capabilities
@@ -553,6 +554,53 @@ class ModelChecker:
                     if model_type in [
                             "o1", "reasoning-llm"] or "reasoning" in model_type:
                         capabilities["supports_reasoning"] = True
+
+        # Extract native dtype from configs
+        for config in model_data.get("config_data", {}).values():
+            if isinstance(config, dict):
+                # Check torch_dtype field
+                torch_dtype = config.get("torch_dtype")
+                if torch_dtype:
+                    if isinstance(torch_dtype, str):
+                        # Handle string format like "float16", "bfloat16"
+                        capabilities["native_dtype"] = torch_dtype
+                    elif isinstance(torch_dtype, dict) and "_name_or_path" in torch_dtype:
+                        # Handle dict format {"_name_or_path": "torch.float16"}
+                        dtype_str = torch_dtype["_name_or_path"]
+                        if "float16" in dtype_str:
+                            capabilities["native_dtype"] = "float16"
+                        elif "bfloat16" in dtype_str:
+                            capabilities["native_dtype"] = "bfloat16"
+                        elif "float32" in dtype_str:
+                            capabilities["native_dtype"] = "float32"
+                    break
+
+                # Some models specify dtype in quantization_config
+                quant_config = config.get("quantization_config")
+                if quant_config and isinstance(quant_config, dict):
+                    if quant_config.get("bits") == 4:
+                        capabilities["native_dtype"] = "int4"
+                    elif quant_config.get("bits") == 8:
+                        capabilities["native_dtype"] = "int8"
+                    elif "bnb_4bit_compute_dtype" in quant_config:
+                        capabilities["native_dtype"] = quant_config["bnb_4bit_compute_dtype"]
+                    break
+
+                # Check if model name hints at dtype
+                model_name = config.get("_name_or_path", "").lower()
+                if not capabilities["native_dtype"] and model_name:
+                    if "fp16" in model_name or "f16" in model_name:
+                        capabilities["native_dtype"] = "float16"
+                    elif "bf16" in model_name or "bfloat16" in model_name:
+                        capabilities["native_dtype"] = "bfloat16"
+                    elif "int8" in model_name or "8bit" in model_name:
+                        capabilities["native_dtype"] = "int8"
+                    elif "int4" in model_name or "4bit" in model_name:
+                        capabilities["native_dtype"] = "int4"
+
+        # Default to float16 if not specified (most common for modern models)
+        if not capabilities["native_dtype"]:
+            capabilities["native_dtype"] = "float16"
 
         return capabilities
 
@@ -631,6 +679,11 @@ class ModelChecker:
         info_table.add_row("Architecture", requirements.architecture_type)
         info_table.add_row("Task", requirements.model_family)
 
+        # Add native dtype if available
+        native_dtype = requirements.capabilities.get("native_dtype")
+        if native_dtype:
+            info_table.add_row("Native Data Type", native_dtype)
+
         console.print(info_table)
         console.print()
 
@@ -645,8 +698,14 @@ class ModelChecker:
 
         # Memory requirements
         console.print("[bold]Memory Requirements (RAM/VRAM):[/bold]")
+        native_dtype = requirements.capabilities.get("native_dtype", "float16")
         for dtype, memory_gb in requirements.memory_requirements.items():
-            console.print(f"  - {dtype}: {memory_gb:.1f} GB")
+            # Mark native dtype
+            if dtype == native_dtype:
+                console.print(
+                    f"  - {dtype}: {memory_gb:.1f} GB [green](native)[/green]")
+            else:
+                console.print(f"  - {dtype}: {memory_gb:.1f} GB")
         console.print()
 
         # Model capabilities
@@ -657,6 +716,8 @@ class ModelChecker:
                     console.print(f"  - {cap.replace('_', ' ').title()}")
                 elif value and cap == "max_context_length":
                     console.print(f"  - Max Context Length: {value} tokens")
+                elif value and cap == "native_dtype":
+                    console.print(f"  - Native Data Type: {value}")
         console.print()
 
         # Special requirements
