@@ -47,6 +47,14 @@ class DiffusersDetector(BaseDetector):
                     info.metadata['variant'] = 'SD3'
                 else:
                     info.metadata['variant'] = 'SD'
+                    # Check for optimized variants
+                    model_lower = info.model_id.lower()
+                    if 'turbo' in model_lower:
+                        info.metadata['variant'] = 'SD-Turbo'
+                        info.metadata['optimized'] = True
+                    elif 'lcm' in model_lower:
+                        info.metadata['variant'] = 'SD-LCM'
+                        info.metadata['optimized'] = True
             elif 'Flux' in pipeline_class:
                 info.metadata['variant'] = 'FLUX'
 
@@ -71,6 +79,9 @@ class DiffusersDetector(BaseDetector):
             for key, value in info.model_index.items():
                 if isinstance(value, list) and len(value) >= 2:
                     if not key.startswith('_'):
+                        # Skip null components
+                        if value[0] is None or value[1] is None:
+                            continue
                         component_name = key
                         component_class = value[1]
                         components[component_name] = component_class
@@ -167,23 +178,36 @@ class DiffusersDetector(BaseDetector):
                 'unet': 0.70,
                 'text_encoder': 0.20,
                 'vae': 0.10,
-                'safety_checker': 0.05
+                'safety_checker': 0.05,
+                'scheduler': 0.01,  # Very small
+                'tokenizer': 0.01,  # Very small
+                'feature_extractor': 0.01  # Very small
             }
 
-        # Calculate sizes based on distribution
-        for component in components:
-            if component in distributions:
-                component_sizes[component] = round(
-                    total_size * distributions[component], 1
+        # First, filter distributions to only include components that exist
+        actual_distributions = {}
+        for comp in components:
+            if comp in distributions:
+                actual_distributions[comp] = distributions[comp]
+        
+        # If we have distributions for actual components, normalize them
+        if actual_distributions:
+            total_weight = sum(actual_distributions.values())
+            # Normalize to sum to 1.0
+            for comp, weight in actual_distributions.items():
+                normalized_weight = weight / total_weight
+                component_sizes[comp] = round(
+                    total_size * normalized_weight, 1
                 )
-            else:
-                # For unknown components, use equal distribution of remaining
-                remaining = total_size - sum(component_sizes.values())
-                unknown_count = len([c for c in components
-                                     if c not in distributions])
-                if unknown_count > 0:
-                    component_sizes[component] = round(
-                        remaining / unknown_count, 1
-                    )
+        
+        # For any remaining components without distribution
+        assigned_size = sum(component_sizes.values())
+        remaining = total_size - assigned_size
+        unassigned = [c for c in components if c not in component_sizes]
+        
+        if unassigned and remaining > 0:
+            size_per_component = remaining / len(unassigned)
+            for comp in unassigned:
+                component_sizes[comp] = round(size_per_component, 1)
 
         return component_sizes
