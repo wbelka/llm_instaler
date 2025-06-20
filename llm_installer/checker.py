@@ -12,7 +12,7 @@ from .utils import (
     estimate_model_size,
     save_json_config
 )
-from .detectors.base import ModelProfile
+from .model_profile import ModelProfile
 from .hardware import (
     get_hardware_info,
     calculate_model_requirements,
