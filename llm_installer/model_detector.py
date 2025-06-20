@@ -203,25 +203,8 @@ class ModelDetector:
             if 'architectures' in info.config and info.config['architectures']:
                 return info.config['architectures'][0]
 
-        # Check for base model in tags
-        for tag in info.tags:
-            if tag.startswith('base_model:'):
-                # Extract base model architecture
-                base_model = tag.split(':', 1)[1]
-                if 'Janus' in base_model:
-                    return 'Janus'
-                elif 'LLaMA' in base_model or 'Llama' in base_model:
-                    return 'LLaMA'
-                elif 'Mistral' in base_model:
-                    return 'Mistral'
-
-        # From tags
-        arch_tags = ['llama', 'mistral', 'qwen', 'phi', 'gemma', 'gpt2', 'bert', 'roberta', 'janus']
-        for tag in info.tags:
-            tag_lower = tag.lower()
-            for arch in arch_tags:
-                if arch in tag_lower:
-                    return arch.title()
+        # Just return model_type from config if available
+        # Don't try to guess or extract architecture names
 
         return None
 
@@ -269,34 +252,25 @@ class ModelDetector:
         """Calculate hardware requirements"""
         size_gb = info.size_gb
 
-        # If size is unknown, use conservative defaults
+        # If size is unknown, return zeros
         if size_gb == 0:
             return {
-                'min_ram_gb': 16.0,
-                'min_vram_gb': 8.0,
-                'recommended_ram_gb': 32.0,
-                'recommended_vram_gb': 16.0,
+                'min_ram_gb': 0.0,
+                'min_vram_gb': 0.0,
+                'recommended_ram_gb': 0.0,
+                'recommended_vram_gb': 0.0,
                 'supports_cpu': True,
                 'supports_cuda': True,
                 'supports_metal': True,
-                'estimated_memory_gb': 20.0  # Conservative estimate
+                'estimated_memory_gb': 0.0
             }
 
-        # Calculate based on model type and size
-        model_type = profile['model_type']
+        # Calculate based on size
         quantization = profile.get('quantization')
 
-        # Memory multipliers by type
-        memory_multipliers = {
-            'transformer': 1.2,
-            'diffusion': 2.5,
-            'multi_modality': 1.5,
-            'moe': 1.3,
-            'sentence-transformer': 2.0,
-            'gguf': 1.1
-        }
-
-        multiplier = memory_multipliers.get(model_type, 1.2)
+        # Simple memory calculation without hardcoded multipliers
+        # Just use size * 1.2 for all models
+        multiplier = 1.2
 
         # Adjust for quantization
         if quantization:
@@ -310,10 +284,10 @@ class ModelDetector:
         estimated_memory = size_gb * multiplier
 
         return {
-            'min_ram_gb': round(max(8.0, estimated_memory), 1),
-            'min_vram_gb': round(max(4.0, estimated_memory * 0.8), 1),
-            'recommended_ram_gb': round(max(16.0, estimated_memory * 1.5), 1),
-            'recommended_vram_gb': round(max(8.0, estimated_memory * 1.2), 1),
+            'min_ram_gb': round(estimated_memory, 1),
+            'min_vram_gb': round(estimated_memory * 0.8, 1),
+            'recommended_ram_gb': round(estimated_memory * 1.5, 1),
+            'recommended_vram_gb': round(estimated_memory * 1.2, 1),
             'supports_cpu': True,
             'supports_cuda': True,
             'supports_metal': True,
@@ -326,19 +300,9 @@ class ModelDetector:
         if info.pipeline_tag not in ['text-generation', None]:
             return False
 
-        # Check for supported architectures
-        vllm_archs = ['llama', 'mistral', 'qwen', 'phi', 'gemma', 'gpt2', 'opt']
-
-        # Check tags
-        for tag in info.tags:
-            if any(arch in tag.lower() for arch in vllm_archs):
-                return True
-
-        # Check config
-        if info.config and 'model_type' in info.config:
-            model_type = info.config['model_type'].lower()
-            if any(arch in model_type for arch in vllm_archs):
-                return True
+        # Don't guess vLLM support - return False unless explicitly tagged
+        if 'vllm' in info.tags or 'text-generation-inference' in info.tags:
+            return True
 
         return False
 
@@ -362,19 +326,10 @@ class ModelDetector:
         if 'gguf' in info.tags:
             return ['gguf']
 
-        # Most modern models support 8bit
-        if info.size_gb > 1:
+        # Only add quantization options if explicitly supported in tags/config
+        if '8bit' in info.tags or 'int8' in info.tags:
             options.append('8bit')
-
-        # Larger models benefit from 4bit
-        if info.size_gb > 6:
+        if '4bit' in info.tags or 'int4' in info.tags:
             options.append('4bit')
-
-        # Some architectures have better quantization support
-        if info.config and 'model_type' in info.config:
-            model_type = info.config['model_type'].lower()
-            if any(arch in model_type for arch in ['llama', 'mistral', 'qwen']):
-                if '4bit' not in options:
-                    options.append('4bit')
 
         return options
