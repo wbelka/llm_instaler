@@ -54,10 +54,9 @@ class ModelChecker:
             config = fetch_model_config(model_id, "llm_config.json")
 
         # Try model_index.json for diffusion models
-        model_index = None
         if not config:
             logger.debug("No llm_config.json found, trying model_index.json...")
-            model_index = fetch_model_config(model_id, "model_index.json")
+            config = fetch_model_config(model_id, "model_index.json")
 
         # Get list of files
         logger.debug("Fetching file list...")
@@ -89,7 +88,6 @@ class ModelChecker:
         # Use new simplified detector
         logger.debug("Running model detection...")
         detection_result = self.detector.detect(model_id)
-        
         if not detection_result:
             logger.warning(f"Could not detect model {model_id}")
             # Create a generic profile as fallback
@@ -128,7 +126,7 @@ class ModelChecker:
 
         # Estimate size if not set by detector
         if profile.estimated_size_gb == 1.0:
-            size_info = estimate_model_size(detection_config, files)
+            size_info = estimate_model_size(config or {}, files)
             profile.estimated_size_gb = size_info['size_gb']
             # Don't set estimated_memory_gb here - calculate it dynamically based on quantization
 
@@ -213,8 +211,11 @@ class ModelChecker:
                   f"{mem_reqs['memory_required_gb']:.1f} GB")
             print("  - Other configurations: See compatibility table below")
         else:
-            # No information available
-            print("  - Default configuration: Unknown")
+            # Use estimated memory if available
+            if profile.estimated_memory_gb > 0:
+                print(f"  - Estimated memory requirement: {profile.estimated_memory_gb:.1f} GB")
+            else:
+                print("  - Default configuration: Unknown")
             print(f"  - Model page: https://huggingface.co/{profile.model_id}")
             print("  - See compatibility table below for different configurations")
 

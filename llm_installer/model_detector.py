@@ -55,6 +55,7 @@ class ModelDetector:
                 'library': model_info.library_name or 'transformers',
                 'task': model_info.pipeline_tag or 'text-generation',
                 'estimated_size_gb': model_info.size_gb,
+                'estimated_memory_gb': round(model_info.size_gb * 1.2, 1),
                 'is_multimodal': self._is_multimodal(model_info),
                 'quantization': self._detect_quantization(model_info),
                 'architecture': self._detect_architecture(model_info),
@@ -90,7 +91,7 @@ class ModelDetector:
 
             # Get file sizes
             file_sizes = fetch_model_files_with_sizes(model_id)
-            total_size = sum(file_sizes.values())
+            total_size = round(sum(file_sizes.values()), 1)
 
             # Get file list
             files = list(file_sizes.keys()) if file_sizes else []
@@ -195,12 +196,27 @@ class ModelDetector:
         # From config
         if info.config:
             if 'model_type' in info.config:
-                return info.config['model_type']
+                model_type = info.config['model_type']
+                # Don't return generic types as architecture
+                if model_type not in ['multi_modality', 'transformer']:
+                    return model_type
             if 'architectures' in info.config and info.config['architectures']:
                 return info.config['architectures'][0]
 
+        # Check for base model in tags
+        for tag in info.tags:
+            if tag.startswith('base_model:'):
+                # Extract base model architecture
+                base_model = tag.split(':', 1)[1]
+                if 'Janus' in base_model:
+                    return 'Janus'
+                elif 'LLaMA' in base_model or 'Llama' in base_model:
+                    return 'LLaMA'
+                elif 'Mistral' in base_model:
+                    return 'Mistral'
+
         # From tags
-        arch_tags = ['llama', 'mistral', 'qwen', 'phi', 'gemma', 'gpt2', 'bert', 'roberta']
+        arch_tags = ['llama', 'mistral', 'qwen', 'phi', 'gemma', 'gpt2', 'bert', 'roberta', 'janus']
         for tag in info.tags:
             tag_lower = tag.lower()
             for arch in arch_tags:
@@ -263,7 +279,7 @@ class ModelDetector:
                 'supports_cpu': True,
                 'supports_cuda': True,
                 'supports_metal': True,
-                'estimated_memory_gb': 0.0
+                'estimated_memory_gb': 20.0  # Conservative estimate
             }
 
         # Calculate based on model type and size
