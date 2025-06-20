@@ -70,14 +70,15 @@ def check(ctx: click.Context, model_id: str):
     logger = ctx.obj['logger']
     logger.info(f"Checking model: {model_id}")
 
-    # For now, show a placeholder message
-    print_info(f"Checking compatibility for model: {model_id}")
-    console.print("\n[yellow]Note:[/yellow] Check functionality will be implemented in Step 2")
-
-    # Show system info as example
-    print_info("Analyzing system capabilities...")
-    system_info = check_system_requirements()
-    print_system_info(system_info)
+    # Import here to avoid circular imports
+    from core.checker import ModelChecker
+    
+    # Create and run checker
+    checker = ModelChecker()
+    success, requirements = checker.check_model(model_id)
+    
+    if not success:
+        sys.exit(1)
 
 
 @cli.command()
