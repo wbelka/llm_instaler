@@ -165,22 +165,37 @@ class ModelChecker:
                 tree_data = response.json()
                 self.logger.debug(f"Got {len(tree_data)} files from tree API")
 
-                for item in tree_data:
-                    if item.get('type') == 'file':
-                        file_dict = {
-                            "path": item.get('path', ''),
-                            "size": item.get('size', 0)
-                        }
-                        files_info.append(file_dict)
+                # Check if this is a composite model (has model_index.json)
+                has_model_index = any(
+                    item.get('path') == 'model_index.json'
+                    for item in tree_data if item.get('type') == 'file'
+                )
+                if has_model_index:
+                    # Handle composite models (diffusers)
+                    self.logger.debug(
+                        "Detected composite model, fetching components")
+                    files_info = self._fetch_composite_model_files(
+                        model_id, tree_data, headers
+                    )
+                else:
+                    # Handle regular models
+                    for item in tree_data:
+                        if item.get('type') == 'file':
+                            file_dict = {
+                                "path": item.get('path', ''),
+                                "size": item.get('size', 0)
+                            }
+                            files_info.append(file_dict)
 
-                        # Debug: log weight files with sizes
-                        if file_dict["size"] > 0 and (
-                                file_dict["path"].endswith('.safetensors') or
-                                file_dict["path"].endswith('.bin')):
-                            size_mb = file_dict["size"] / (1024**2)
-                            self.logger.debug(
-                                f"Weight file: {file_dict['path']} - "
-                                f"{size_mb:.1f} MB")
+                            # Debug: log weight files with sizes
+                            if file_dict["size"] > 0 and (
+                                    file_dict["path"].endswith(
+                                        '.safetensors') or
+                                    file_dict["path"].endswith('.bin')):
+                                size_mb = file_dict["size"] / (1024**2)
+                                self.logger.debug(
+                                    f"Weight file: {file_dict['path']} - "
+                                    f"{size_mb:.1f} MB")
 
                 return model_info, files_info
 
@@ -234,6 +249,88 @@ class ModelChecker:
             files_info = [{"path": "model.bin", "size": 0}]
 
         return model_info, files_info
+
+    def _fetch_composite_model_files(self, model_id: str,
+                                     tree_data: List[Dict[str, Any]],
+                                     headers: Dict[str, str]) -> List[
+                                         Dict[str, Any]]:
+        """Fetch files for composite models (diffusers)."""
+        files_info = []
+
+        # First, add non-directory files from root
+        for item in tree_data:
+            if item.get('type') == 'file':
+                files_info.append({
+                    "path": item.get('path', ''),
+                    "size": item.get('size', 0)
+                })
+
+        # Then, fetch files from each component directory
+        directories = [item['path'] for item in tree_data
+                       if item.get('type') == 'directory']
+        for directory in directories:
+            self.logger.debug(f"Fetching files from {directory}")
+            dir_url = (f"https://huggingface.co/api/models/"
+                       f"{model_id}/tree/main/{directory}")
+            try:
+                response = requests.get(dir_url, headers=headers)
+                if response.status_code == 200:
+                    dir_data = response.json()
+
+                    for item in dir_data:
+                        if item.get('type') == 'file':
+                            file_path = f"{directory}/{item.get('path', '')}"
+                            file_size = item.get('size', 0)
+
+                            # For diffusers, prefer fp16 versions
+                            # Skip duplicates (fp32 if fp16 exists)
+                            is_weight_file = (
+                                file_path.endswith('.safetensors') or
+                                file_path.endswith('.bin'))
+                            if is_weight_file:
+                                # Check if this is a duplicate
+                                base_name = (file_path
+                                             .replace('.safetensors', '')
+                                             .replace('.bin', ''))
+                                has_fp16 = any(
+                                    f['path'].startswith(base_name) and
+                                    'fp16' in f['path']
+                                    for f in files_info
+                                )
+
+                                # Skip fp32 versions if fp16 exists
+                                if has_fp16 and 'fp16' not in file_path:
+                                    self.logger.debug(
+                                        f"Skipping {file_path} "
+                                        "(fp16 version exists)")
+                                    continue
+
+                                # Skip fp32 if this is fp16 and
+                                # fp32 already added
+                                if 'fp16' in file_path:
+                                    # Remove fp32 version if it exists
+                                    files_info = [
+                                        f for f in files_info
+                                        if not (f['path'].startswith(
+                                                base_name) and
+                                                'fp16' not in f['path'])
+                                    ]
+                            files_info.append({
+                                "path": file_path,
+                                "size": file_size
+                            })
+
+                            if is_weight_file and file_size > 0:
+                                size_gb = file_size / (1024**3)
+                                self.logger.debug(
+                                    f"Weight file: {file_path} - "
+                                    f"{size_gb:.2f} GB"
+                                )
+
+            except Exception as e:
+                self.logger.warning(f"Failed to fetch {directory}: {e}")
+
+        return files_info
 
     def _analyze_configs(self, model_id: str,
                          files_info: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -416,6 +513,12 @@ class ModelChecker:
                     "model_family": "image-generation",
                     "architecture_type": "diffusion",
                 })
+            elif "text-to-video" in pipeline_tag:
+                inferred.update({
+                    "model_type": "video-diffusion",
+                    "model_family": "video-generation",
+                    "architecture_type": "diffusion",
+                })
             elif "automatic-speech-recognition" in pipeline_tag:
                 inferred.update({
                     "model_type": "audio",
@@ -489,6 +592,8 @@ class ModelChecker:
         family = model_data.get("model_family", "")
         if family == "image-generation":
             deps.extend(["pillow", "numpy"])
+        elif family == "video-generation":
+            deps.extend(["pillow", "numpy", "opencv-python", "imageio"])
         elif family in ["audio", "speech-recognition"]:
             deps.extend(["librosa", "soundfile"])
         elif family == "audio-generation":
