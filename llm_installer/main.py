@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 
 from .checker import ModelChecker
+from .installer import ModelInstaller, InstallConfig
 from .utils import get_models_dir, set_hf_token, save_hf_token, get_hf_token
 
 __version__ = "2.0.0"
@@ -47,18 +48,38 @@ def check_command(args: argparse.Namespace) -> int:
 
 def install_command(args: argparse.Namespace) -> int:
     """Install model with all dependencies"""
-    logging.info(f"Installing model: {args.model}")
-
-    if args.quantization:
-        logging.info(f"Using quantization: {args.quantization}")
-
-    if args.path:
-        logging.info(f"Installation path: {args.path}")
-
-    # TODO: Implement model installation logic
-    logging.info("Model installation functionality not yet implemented")
-
-    return 0
+    try:
+        installer = ModelInstaller()
+        
+        # Create installation config
+        config = InstallConfig(
+            model_id=args.model,
+            install_path=args.path,
+            quantization=args.quantization,
+            force_reinstall=args.force,
+            use_vllm=getattr(args, 'vllm', False),
+            use_tensorrt=getattr(args, 'tensorrt', False)
+        )
+        
+        # Run installation
+        success = installer.install(config)
+        
+        if success:
+            print(f"\n✓ Successfully installed {args.model}")
+            print(f"  Location: {config.install_path or installer.base_path / args.model.replace('/', '_')}")
+            print("\nTo start the model:")
+            print(f"  cd {config.install_path or installer.base_path / args.model.replace('/', '_')}")
+            print("  ./start.sh")
+            return 0
+        else:
+            logging.error(f"Failed to install {args.model}")
+            return 1
+            
+    except Exception as e:
+        logging.error(f"Installation error: {e}")
+        if args.debug:
+            logging.exception("Full traceback:")
+        return 1
 
 
 def list_command(args: argparse.Namespace) -> int:
@@ -111,12 +132,40 @@ def list_command(args: argparse.Namespace) -> int:
 
 def remove_command(args: argparse.Namespace) -> int:
     """Remove installed model"""
-    logging.info(f"Removing model: {args.model}")
-
-    # TODO: Implement removal logic
-    logging.info("Model removal functionality not yet implemented")
-
-    return 0
+    try:
+        models_dir = get_models_dir()
+        
+        # Find model directory
+        model_path = None
+        for d in models_dir.iterdir():
+            if d.is_dir() and args.model in d.name:
+                model_path = d
+                break
+        
+        if not model_path or not model_path.exists():
+            logging.error(f"Model {args.model} not found")
+            return 1
+        
+        # Confirm removal
+        if not args.yes:
+            response = input(f"Remove {model_path.name}? [y/N]: ")
+            if response.lower() != 'y':
+                print("Cancelled")
+                return 0
+        
+        # Remove directory
+        logging.info(f"Removing {model_path}")
+        import shutil
+        shutil.rmtree(model_path)
+        
+        print(f"✓ Removed {model_path.name}")
+        return 0
+        
+    except Exception as e:
+        logging.error(f"Error removing model: {e}")
+        if args.debug:
+            logging.exception("Full traceback:")
+        return 1
 
 
 def save_token_command(args: argparse.Namespace) -> int:
@@ -210,6 +259,16 @@ Examples:
         '--force',
         action='store_true',
         help='Force reinstall if model already exists'
+    )
+    install_parser.add_argument(
+        '--vllm',
+        action='store_true',
+        help='Install with vLLM support for high-performance inference'
+    )
+    install_parser.add_argument(
+        '--tensorrt',
+        action='store_true',
+        help='Install with TensorRT support (NVIDIA GPUs only)'
     )
 
     # List command
