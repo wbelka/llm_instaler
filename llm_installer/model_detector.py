@@ -48,6 +48,11 @@ class ModelDetector:
             if not model_info:
                 return None
 
+            # Detect default torch dtype
+            default_dtype = None
+            if model_info.config and 'torch_dtype' in model_info.config:
+                default_dtype = model_info.config['torch_dtype']
+            
             # Create base profile
             profile = {
                 'model_id': model_id,
@@ -55,13 +60,16 @@ class ModelDetector:
                 'library': model_info.library_name or 'transformers',
                 'task': model_info.pipeline_tag or 'text-generation',
                 'estimated_size_gb': model_info.size_gb,
-                'estimated_memory_gb': round(model_info.size_gb * 1.2, 1),
                 'is_multimodal': self._is_multimodal(model_info),
                 'quantization': self._detect_quantization(model_info),
                 'architecture': self._detect_architecture(model_info),
                 'special_requirements': self._get_requirements(model_info),
-                'metadata': {}
+                'metadata': {'torch_dtype': default_dtype} if default_dtype else {}
             }
+            
+            # Store default dtype but don't calculate memory here
+            # Let the hardware module handle memory calculations
+            profile['estimated_memory_gb'] = 0.0  # Will be calculated based on dtype
 
             # Add hardware requirements
             hw_reqs = self._calculate_hardware_requirements(model_info, profile)
@@ -96,10 +104,16 @@ class ModelDetector:
             # Get file list
             files = list(file_sizes.keys()) if file_sizes else []
 
-            # Get config
+            # Get config from API
             config = {}
             if hasattr(info, 'config') and info.config:
                 config = info.config
+            
+            # Also fetch config.json directly for more details
+            from .utils import fetch_model_config
+            detailed_config = fetch_model_config(model_id, "config.json")
+            if detailed_config:
+                config.update(detailed_config)
 
             return ModelInfo(
                 model_id=model_id,

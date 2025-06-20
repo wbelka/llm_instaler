@@ -211,13 +211,28 @@ class ModelChecker:
                   f"{mem_reqs['memory_required_gb']:.1f} GB")
             print("  - Other configurations: See compatibility table below")
         else:
-            # Use estimated memory if available
-            if profile.estimated_memory_gb > 0:
-                print(f"  - Estimated memory requirement: {profile.estimated_memory_gb:.1f} GB")
-            else:
-                print("  - Default configuration: Unknown")
+            # Show default configuration from metadata
+            if profile.metadata and 'torch_dtype' in profile.metadata:
+                torch_dtype = profile.metadata['torch_dtype']
+                # Map torch dtypes to our quantization names
+                dtype_map = {
+                    'float32': 'fp32',
+                    'float16': 'fp16',
+                    'bfloat16': 'fp16',
+                    'int8': '8bit',
+                    'int4': '4bit'
+                }
+                quant_type = dtype_map.get(torch_dtype, 'fp32')
+                # Calculate memory for default dtype
+                mem_reqs = calculate_model_requirements(
+                    profile.estimated_size_gb,
+                    quant_type,
+                    "inference"
+                )
+                print(f"  - Default configuration: {torch_dtype}")
+                print(f"  - Default memory requirement: {mem_reqs['memory_required_gb']:.1f} GB")
             print(f"  - Model page: https://huggingface.co/{profile.model_id}")
-            print("  - See compatibility table below for different configurations")
+            print("  - See compatibility table below for all configurations")
 
         # Show modalities and components for multimodal models
         if profile.is_multimodal and profile.metadata:
