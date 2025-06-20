@@ -163,15 +163,52 @@ class ModelChecker:
                 # Estimate sizes for common file types
                 if file_path.endswith(
                         '.safetensors') or file_path.endswith('.bin'):
-                    # Model weights - estimate based on model size
-                    if 'llama' in model_id.lower() and '70b' in model_id.lower():
+                    # Model weights - estimate based on model size and type
+                    model_lower = model_id.lower()
+                    file_lower = file_path.lower()
+
+                    # Language models
+                    if 'llama' in model_lower and '70b' in model_lower:
                         file_dict["size"] = 35 * 1024**3  # 35GB per shard
-                    elif 'llama' in model_id.lower() and '13b' in model_id.lower():
+                    elif 'llama' in model_lower and '13b' in model_lower:
                         file_dict["size"] = 7 * 1024**3   # 7GB per shard
-                    elif 'llama' in model_id.lower() and '7b' in model_id.lower():
+                    elif 'llama' in model_lower and '7b' in model_lower:
                         file_dict["size"] = 4 * 1024**3   # 4GB per shard
+
+                    # Stable Diffusion models
+                    elif 'stable-diffusion' in model_lower or 'sd-' in model_lower:
+                        if 'unet' in file_lower:
+                            # UNet is the largest component
+                            if 'xl' in model_lower:
+                                file_dict["size"] = 5 * 1024**3  # 5GB for SDXL
+                            elif 'turbo' in model_lower:
+                                file_dict["size"] = 3.4 * \
+                                    1024**3  # 3.4GB for SD-Turbo
+                            else:
+                                file_dict["size"] = 3.5 * \
+                                    1024**3  # 3.5GB for SD 1.5/2.1
+                        elif 'vae' in file_lower:
+                            file_dict["size"] = 335 * 1024**2  # ~335MB
+                        elif 'text_encoder' in file_lower or 'clip' in file_lower:
+                            file_dict["size"] = 492 * 1024**2  # ~492MB
+                        else:
+                            # Default 500MB for other SD files
+                            file_dict["size"] = 500 * 1024**2
+
+                    # Other models - conservative estimates
+                    elif '7b' in model_lower:
+                        file_dict["size"] = 3.5 * 1024**3  # 3.5GB per file
+                    elif '3b' in model_lower:
+                        file_dict["size"] = 1.5 * 1024**3  # 1.5GB per file
+                    elif '1b' in model_lower or '1.3b' in model_lower:
+                        file_dict["size"] = 0.7 * 1024**3  # 700MB per file
                     else:
-                        file_dict["size"] = 2 * 1024**3   # Default 2GB
+                        # Default based on file path hints
+                        if 'unet' in file_lower:
+                            # 2GB for unknown UNet
+                            file_dict["size"] = 2 * 1024**3
+                        else:
+                            file_dict["size"] = 1 * 1024**3   # Default 1GB
 
                 files_info.append(file_dict)
 
@@ -521,30 +558,47 @@ class ModelChecker:
                         break
 
         # Calculate memory requirements based on native dtype
-        # If model is native float16, base_memory_gb is already the size for float16
+        # If model is native float16, base_memory_gb is already the size for
+        # float16
+
+        # Check if this is a diffusion model (lower overhead needed)
+        is_diffusion = False
+        for config_name in model_data.get("config_data", {}).keys():
+            if "model_index.json" in config_name:
+                is_diffusion = True
+                break
+
+        # Different overhead for different model types
+        if is_diffusion:
+            # Diffusion models need less overhead (mainly for latent space)
+            overhead_factor = 1.2
+        else:
+            # Language models need more overhead (KV cache, activations)
+            overhead_factor = 1.5
+
         if native_dtype == "float16":
             memory_reqs = {
                 "int4": base_memory_gb * 0.25 * 1.2,    # 4bit/16bit * overhead
                 "int8": base_memory_gb * 0.5 * 1.3,     # 8bit/16bit * overhead
-                "float16": base_memory_gb * 1.5,        # native + overhead
-                "bfloat16": base_memory_gb * 1.5,       # same size as float16
-                "float32": base_memory_gb * 2.0 * 1.5,  # 32bit/16bit * overhead
+                "float16": base_memory_gb * overhead_factor,        # native + overhead
+                "bfloat16": base_memory_gb * overhead_factor,       # same size as float16
+                "float32": base_memory_gb * 2.0 * overhead_factor,  # 32bit/16bit * overhead
             }
         elif native_dtype == "bfloat16":
             memory_reqs = {
                 "int4": base_memory_gb * 0.25 * 1.2,
                 "int8": base_memory_gb * 0.5 * 1.3,
-                "float16": base_memory_gb * 1.5,        # same size as bfloat16
-                "bfloat16": base_memory_gb * 1.5,       # native + overhead
-                "float32": base_memory_gb * 2.0 * 1.5,
+                "float16": base_memory_gb * overhead_factor,        # same size as bfloat16
+                "bfloat16": base_memory_gb * overhead_factor,       # native + overhead
+                "float32": base_memory_gb * 2.0 * overhead_factor,
             }
         elif native_dtype == "float32":
             memory_reqs = {
                 "int4": base_memory_gb * 0.125 * 1.2,   # 4bit/32bit * overhead
                 "int8": base_memory_gb * 0.25 * 1.3,    # 8bit/32bit * overhead
-                "float16": base_memory_gb * 0.5 * 1.5,  # 16bit/32bit * overhead
-                "bfloat16": base_memory_gb * 0.5 * 1.5,
-                "float32": base_memory_gb * 1.5,        # native + overhead
+                "float16": base_memory_gb * 0.5 * overhead_factor,  # 16bit/32bit * overhead
+                "bfloat16": base_memory_gb * 0.5 * overhead_factor,
+                "float32": base_memory_gb * overhead_factor,        # native + overhead
             }
         else:
             # Fallback to original calculation
