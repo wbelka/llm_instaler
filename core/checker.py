@@ -150,6 +150,9 @@ class ModelChecker:
         try:
             # Get list of files
             repo_files = self.api.list_repo_files(model_id)
+            
+            # Debug: log number of files found
+            self.logger.debug(f"Found {len(repo_files)} files in {model_id}")
 
             # For each file, we need to get its info
             # Note: This is not the most efficient way, but HF API doesn't provide
@@ -211,6 +214,11 @@ class ModelChecker:
                             file_dict["size"] = 1 * 1024**3   # Default 1GB
 
                 files_info.append(file_dict)
+                
+                # Debug: log weight files with sizes
+                if file_dict["size"] > 0 and (file_path.endswith('.safetensors') or file_path.endswith('.bin')):
+                    size_mb = file_dict["size"] / (1024**2)
+                    self.logger.debug(f"Weight file: {file_path} - {size_mb:.1f} MB")
 
         except Exception as e:
             self.logger.warning(f"Could not get file list: {e}")
@@ -789,8 +797,8 @@ class ModelChecker:
 
         # Storage requirements
         console.print("[bold]Storage Requirements:[/bold]")
-        console.print(
-            f"  - Model files: {requirements.disk_space_gb - 3:.1f} GB")
+        model_size_gb = requirements.disk_space_gb - 3
+        console.print(f"  - Model files: {model_size_gb:.1f} GB")
         console.print(f"  - Virtual environment: ~3 GB")
         console.print(
             f"  - Total disk space needed: ~{requirements.disk_space_gb:.1f} GB")
