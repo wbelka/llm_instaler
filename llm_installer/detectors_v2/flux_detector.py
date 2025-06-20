@@ -28,9 +28,23 @@ class FluxDetector(BaseDetector):
     def detect(self, info: ModelInfo) -> ModelInfo:
         """Detect FLUX-specific information"""
         info.model_type = 'diffusion'
-        info.task = 'text-to-image'
         info.is_multimodal = True
-        info.architecture = 'FluxPipeline'
+        
+        # Respect pipeline_tag from API if available
+        if info.pipeline_tag:
+            info.task = info.pipeline_tag
+        else:
+            # Default to text-to-image for standard FLUX
+            info.task = 'text-to-image'
+        
+        # Check for ControlNet
+        if 'controlnet' in info.model_id.lower() or 'controlnet' in info.tags:
+            info.architecture = 'FluxControlNetPipeline'
+            # ControlNet models are always image-to-image
+            if not info.pipeline_tag:
+                info.task = 'image-to-image'
+        else:
+            info.architecture = 'FluxPipeline'
 
         # FLUX variant detection
         model_lower = info.model_id.lower()
@@ -48,12 +62,33 @@ class FluxDetector(BaseDetector):
         # Component analysis is handled by DiffusersDetector
         # We just add FLUX-specific metadata here
 
-        # Model capabilities
-        info.metadata['capabilities'] = [
-            'text-to-image',
-            'high-resolution',
-            'photorealistic'
-        ]
+        # Model capabilities based on type
+        if 'controlnet' in info.model_id.lower() or 'controlnet' in info.tags:
+            # ControlNet capabilities
+            capabilities = ['image-to-image']
+            
+            # Check for specific ControlNet types
+            if 'upscaler' in info.model_id.lower() or 'upscaler' in info.tags:
+                capabilities.extend(['super-resolution', 'upscaling'])
+            elif 'depth' in info.model_id.lower() or 'depth' in info.tags:
+                capabilities.extend(['depth-conditioning', 'structure-preserving'])
+            elif 'canny' in info.model_id.lower() or 'canny' in info.tags:
+                capabilities.extend(['edge-conditioning', 'line-following'])
+            elif 'pose' in info.model_id.lower() or 'pose' in info.tags:
+                capabilities.extend(['pose-conditioning', 'human-pose'])
+            
+            # Check for resolution info
+            if 'super-resolution' in info.tags or 'upscaler' in info.tags:
+                info.metadata['upscale_factor'] = 4  # Common default
+                
+            info.metadata['capabilities'] = capabilities
+        else:
+            # Standard FLUX capabilities
+            info.metadata['capabilities'] = [
+                'text-to-image',
+                'high-resolution',
+                'photorealistic'
+            ]
 
         # FLUX uses flow matching
         info.metadata['scheduler_type'] = 'flow-matching'
@@ -97,9 +132,20 @@ class FluxDetector(BaseDetector):
         }
 
         # Add resolution info
-        info.metadata['resolution'] = {
-            'default': 1024,
-            'supported': [512, 768, 1024, 1280, 1536]
-        }
+        upscaler_check = ('upscaler' in info.model_id.lower() or
+                          'super-resolution' in info.tags)
+        if upscaler_check:
+            # For upscalers, input can be variable, output is higher
+            info.metadata['resolution'] = {
+                'input': 'Variable (low resolution)',
+                'output': 'Up to 4x input resolution',
+                'recommended_input': [256, 512, 768]
+            }
+        else:
+            # Standard FLUX resolution
+            info.metadata['resolution'] = {
+                'default': 1024,
+                'supported': [512, 768, 1024, 1280, 1536]
+            }
 
         return info

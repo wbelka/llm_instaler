@@ -12,6 +12,7 @@ from .audio_detector import AudioDetector
 from .bagel_detector import BagelDetector
 from .flux_detector import FluxDetector
 from .cosmos_detector import CosmosDetector
+from .controlnet_detector import ControlNetDetector
 
 __all__ = [
     'BaseDetector',
@@ -25,4 +26,5 @@ __all__ = [
     'BagelDetector',
     'FluxDetector',
     'CosmosDetector',
+    'ControlNetDetector',
 ]
