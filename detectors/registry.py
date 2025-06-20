@@ -132,6 +132,15 @@ class DetectorRegistry:
         self._auto_discover_detectors()
         return [d.name for d in self._detectors]
     
+    def get_detectors(self) -> List[BaseDetector]:
+        """Get list of all registered detectors.
+        
+        Returns:
+            List of detector instances in priority order.
+        """
+        self._auto_discover_detectors()
+        return self._detectors
+    
     def clear(self) -> None:
         """Clear all registered detectors.
         
@@ -176,3 +185,12 @@ def find_detector(model_info: Dict[str, Any]) -> Optional[BaseDetector]:
         Matching detector instance or None.
     """
     return _registry.find_detector(model_info)
+
+
+def get_detector_registry() -> DetectorRegistry:
+    """Get the global detector registry.
+    
+    Returns:
+        Global DetectorRegistry instance.
+    """
+    return _registry
