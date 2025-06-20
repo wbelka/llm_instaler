@@ -150,6 +150,15 @@ class ConfigDetector(BaseDetector):
             elif 'objectdetection' in arch:
                 return 'object-detector', 'computer-vision'
 
+            # Audio models
+            elif 'audio' in arch or 'waveform' in arch or 'speech' in arch:
+                if 'generation' in arch:
+                    return 'audio-generator', 'audio-generation'
+                else:
+                    return 'audio-model', 'audio'
+            elif 'musicgen' in arch:
+                return 'musicgen', 'audio-generation'
+
             # Multimodal
             elif 'visiontext' in arch or 'multimodal' in arch:
                 return 'multimodal', 'vision-language'
@@ -177,6 +186,12 @@ class ConfigDetector(BaseDetector):
             return 'rwkv', 'language-model'
         elif model_type == 'whisper':
             return 'whisper', 'audio-model'
+        elif model_type == 'musicgen':
+            return 'musicgen', 'audio-generation'
+        elif model_type == 'bark':
+            return 'bark', 'audio-generation'
+        elif model_type == 'audio-craft':
+            return 'audio-craft', 'audio-generation'
         elif model_type == 'clip':
             return 'clip', 'multimodal'
 

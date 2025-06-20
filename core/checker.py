@@ -422,6 +422,18 @@ class ModelChecker:
                     "model_family": "speech-recognition",
                     "architecture_type": "encoder",
                 })
+            elif "text-to-audio" in pipeline_tag:
+                inferred.update({
+                    "model_type": "audio-generator",
+                    "model_family": "audio-generation",
+                    "architecture_type": "encoder-decoder",
+                })
+            elif "audio-to-audio" in pipeline_tag:
+                inferred.update({
+                    "model_type": "audio-processor",
+                    "model_family": "audio",
+                    "architecture_type": "encoder-decoder",
+                })
 
         return inferred
 
@@ -479,6 +491,11 @@ class ModelChecker:
             deps.extend(["pillow", "numpy"])
         elif family in ["audio", "speech-recognition"]:
             deps.extend(["librosa", "soundfile"])
+        elif family == "audio-generation":
+            deps.extend(["scipy", "soundfile", "numpy"])
+            # MusicGen specific
+            if model_data.get("model_type") == "musicgen":
+                deps.extend(["audiocraft"])
         elif family == "computer-vision":
             deps.extend(["pillow", "opencv-python"])
 
