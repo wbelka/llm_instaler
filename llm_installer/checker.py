@@ -182,14 +182,20 @@ class ModelChecker:
 
             quant_type = dtype_map.get(torch_dtype, torch_dtype)
 
-            # Calculate memory for the detected type
-            mem_reqs = calculate_model_requirements(
-                profile.estimated_size_gb,
-                quant_type if quant_type in ['fp32', 'fp16', '8bit', '4bit'] else 'fp32',
-                "inference"
-            )
-            print(f"  - Default configuration ({torch_dtype}): "
-                  f"{mem_reqs['memory_required_gb']:.1f} GB")
+            # If model is stored in the same dtype as default, use disk size
+            if torch_dtype in ['float16', 'bfloat16']:
+                # Model is already in this format on disk
+                memory_req = profile.estimated_size_gb * 1.2  # Just add overhead
+            else:
+                # Calculate memory for the detected type
+                mem_reqs = calculate_model_requirements(
+                    profile.estimated_size_gb,
+                    quant_type if quant_type in ['fp32', 'fp16', '8bit', '4bit'] else 'fp32',
+                    "inference"
+                )
+                memory_req = mem_reqs['memory_required_gb']
+            
+            print(f"  - Default configuration ({torch_dtype}): {memory_req:.1f} GB")
             print("  - Other configurations: See compatibility table below")
         else:
             # Show default configuration from metadata
