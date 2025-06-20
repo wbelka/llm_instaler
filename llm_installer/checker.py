@@ -316,39 +316,97 @@ class ModelChecker:
             print("\nAvailable GGUF Variants:")
             if profile.metadata.get('variant_note'):
                 print(f"  Note: {profile.metadata['variant_note']}")
-            print("\n  Variant      Size     Memory   Quality")
-            print("  " + "-" * 40)
             
-            for variant in profile.metadata['variants'][:10]:  # Show top 10
+            # Group variants by quantization type
+            variants_by_quant = {}
+            for variant in profile.metadata['variants']:
                 quant = variant['quantization']
-                size = variant['size_gb']
-                memory = variant['memory_required_gb']
+                if quant not in variants_by_quant:
+                    variants_by_quant[quant] = []
+                variants_by_quant[quant].append(variant)
+            
+            # Sort quantization types by quality (reverse order)
+            quality_order = ['F32', 'F16', 'Q8_0', 'Q6_K', 'Q5_K_M', 'Q5_K_S', 
+                           'Q5_1', 'Q5_0', 'Q4_K_M', 'Q4_K_S', 'Q4_1', 'Q4_0', 
+                           'Q3_K_L', 'Q3_K_M', 'Q3_K_S', 'Q2_K', 'UNKNOWN']
+            sorted_quants = sorted(variants_by_quant.keys(), 
+                                 key=lambda x: quality_order.index(x) 
+                                 if x in quality_order else len(quality_order))
+            
+            print("\n  Quantization   Files  Size Range    Memory Range  Quality")
+            print("  " + "-" * 70)
+            
+            # Quality indicators
+            quality_map = {
+                'F32': '★★★★★ (Full)',
+                'F16': '★★★★★ (Half)',
+                'Q8_0': '★★★★★',
+                'Q6_K': '★★★★☆',
+                'Q5_K_M': '★★★★☆',
+                'Q5_K_S': '★★★★☆',
+                'Q5_0': '★★★★☆',
+                'Q5_1': '★★★★☆',
+                'Q4_K_M': '★★★☆☆',
+                'Q4_K_S': '★★★☆☆',
+                'Q4_0': '★★★☆☆ (Recommended)',
+                'Q4_1': '★★★☆☆',
+                'Q3_K_L': '★★☆☆☆',
+                'Q3_K_M': '★★☆☆☆',
+                'Q3_K_S': '★★☆☆☆',
+                'Q2_K': '★☆☆☆☆'
+            }
+            
+            for quant in sorted_quants:
+                variants = variants_by_quant[quant]
+                count = len(variants)
                 
-                # Quality indicator based on quantization
-                quality_map = {
-                    'Q8_0': '★★★★★',
-                    'Q6_K': '★★★★☆',
-                    'Q5_K_M': '★★★★☆',
-                    'Q5_0': '★★★★☆',
-                    'Q5_1': '★★★★☆',
-                    'Q4_K_M': '★★★☆☆',
-                    'Q4_0': '★★★☆☆',
-                    'Q4_1': '★★★☆☆',
-                    'Q3_K_M': '★★☆☆☆',
-                    'Q2_K': '★☆☆☆☆'
-                }
+                # Get size range
+                sizes = [v['size_gb'] for v in variants]
+                min_size = min(sizes)
+                max_size = max(sizes)
+                if min_size == max_size:
+                    size_range = f"{min_size:.1f} GB"
+                else:
+                    size_range = f"{min_size:.1f}-{max_size:.1f} GB"
+                
+                # Get memory range
+                memories = [v['memory_required_gb'] for v in variants]
+                min_mem = min(memories)
+                max_mem = max(memories)
+                if min_mem == max_mem:
+                    mem_range = f"{min_mem:.1f} GB"
+                else:
+                    mem_range = f"{min_mem:.1f}-{max_mem:.1f} GB"
+                
                 quality = quality_map.get(quant, '★★★☆☆')
                 
-                # Mark default
-                is_default = variant['file'] == profile.metadata.get('default_variant')
-                marker = ' (default)' if is_default else ''
+                # Check if any is default
+                has_default = any(v['file'] == profile.metadata.get('default_variant') 
+                                for v in variants)
+                marker = ' *' if has_default else ''
                 
-                print(f"  {quant:<12} {size:>6.1f} GB  "
-                      f"{memory:>6.1f} GB  {quality}{marker}")
-
-            if len(profile.metadata['variants']) > 10:
-                remaining = len(profile.metadata['variants']) - 10
-                print(f"\n  ... and {remaining} more variants")
+                print(f"  {quant:<14} {count:>5}  {size_range:<13} "
+                      f"{mem_range:<13} {quality}{marker}")
+            
+            # Show individual files if not too many
+            total_files = len(profile.metadata['variants'])
+            if total_files <= 20:
+                print("\n  Individual files:")
+                print("  File" + " " * 50 + "Size      Memory")
+                print("  " + "-" * 70)
+                for variant in sorted(profile.metadata['variants'], 
+                                    key=lambda x: x['size_gb']):
+                    filename = variant['file']
+                    if len(filename) > 50:
+                        # Truncate long filenames
+                        filename = filename[:47] + "..."
+                    is_default = variant['file'] == profile.metadata.get('default_variant')
+                    marker = ' *' if is_default else ''
+                    print(f"  {filename:<53} {variant['size_gb']:>6.1f} GB  "
+                          f"{variant['memory_required_gb']:>6.1f} GB{marker}")
+            
+            if profile.metadata.get('default_variant'):
+                print("\n  * = Default variant")
 
         print("\nCapabilities:")
         print(f"  - VLLM Support: {'Yes' if profile.supports_vllm else 'No'}")
@@ -389,132 +447,188 @@ class ModelChecker:
 
         # Check compatibility for different quantization levels
         print("\nCompatibility Analysis:")
-        print(f"{'Quantization':<12} {'Memory':<12} {'Can Run?':<10} {'Device':<10} {'Notes'}")
-        print("-" * 60)
-
-        # Determine storage dtype
-        stored_dtype = None
-        if profile.metadata and 'torch_dtype' in profile.metadata:
-            stored_dtype = profile.metadata['torch_dtype']
         
-        # Adjust size calculation based on storage format
-        if stored_dtype in ['float16', 'bfloat16']:
-            # Model is stored in half precision, fp32 would be 2x size
-            fp32_size = profile.estimated_size_gb * 2
+        # Special handling for GGUF models
+        if profile.model_type == 'gguf' and profile.metadata.get('variants'):
+            print(f"{'Variant':<15} {'Size':<10} {'Memory':<12} {'Can Run?':<10} {'Device':<10} {'Notes'}")
+            print("-" * 80)
+            
+            # Group by quantization and show summary
+            variants_by_quant = {}
+            for variant in profile.metadata['variants']:
+                quant = variant['quantization']
+                if quant not in variants_by_quant:
+                    variants_by_quant[quant] = []
+                variants_by_quant[quant].append(variant)
+            
+            # Show compatibility for each quantization type
+            for quant in sorted(variants_by_quant.keys()):
+                variants = variants_by_quant[quant]
+                # Use median size for this quantization
+                sizes = sorted([v['size_gb'] for v in variants])
+                median_size = sizes[len(sizes)//2]
+                median_memory = median_size * 1.2
+                
+                model_reqs = {
+                    'memory_required_gb': median_memory,
+                    'quantization': f'gguf-{quant}'
+                }
+                
+                # Check compatibility
+                compat = check_model_compatibility(model_reqs, hw_info)
+                
+                status = "✓" if compat['can_run'] else "✗"
+                size_str = f"{median_size:.1f} GB"
+                memory = f"{median_memory:.1f} GB"
+                device = compat['recommended_device'] if compat['can_run'] else "N/A"
+                
+                # Create notes
+                notes = []
+                if compat['warnings']:
+                    notes.append(compat['warnings'][0].split('.')[0])
+                
+                # Add count if multiple files
+                if len(variants) > 1:
+                    quant_display = f"{quant} ({len(variants)} files)"
+                else:
+                    quant_display = quant
+                
+                print(f"{quant_display:<15} {size_str:<10} {memory:<12} {status:<10} {device:<10} "
+                      f"{notes[0] if notes else ''}")
         else:
-            # Model is stored in fp32 or unknown
-            fp32_size = profile.estimated_size_gb
-        
-        quantizations = profile.supports_quantization or ['fp32']
-        for quant in quantizations:
-            # Calculate requirements based on fp32 size
-            if quant == 'fp32':
-                base_size = fp32_size
-            elif quant == 'fp16':
-                base_size = fp32_size * 0.5
-            elif quant == '8bit':
-                base_size = fp32_size * 0.25
-            elif quant == '4bit':
-                base_size = fp32_size * 0.125
+            # Standard compatibility table for non-GGUF models
+            print(f"{'Quantization':<12} {'Memory':<12} {'Can Run?':<10} {'Device':<10} {'Notes'}")
+            print("-" * 60)
+    
+            # Determine storage dtype
+            stored_dtype = None
+            if profile.metadata and 'torch_dtype' in profile.metadata:
+                stored_dtype = profile.metadata['torch_dtype']
+            
+            # Adjust size calculation based on storage format
+            if stored_dtype in ['float16', 'bfloat16']:
+                # Model is stored in half precision, fp32 would be 2x size
+                fp32_size = profile.estimated_size_gb * 2
             else:
-                base_size = fp32_size
+                # Model is stored in fp32 or unknown
+                fp32_size = profile.estimated_size_gb
             
-            # Add overhead for inference
-            memory_required = base_size * 1.2
-            
-            model_reqs = {
-                'memory_required_gb': memory_required,
-                'quantization': quant
-            }
-
-            # Check compatibility
-            compat = check_model_compatibility(model_reqs, hw_info)
-
-            status = "✓" if compat['can_run'] else "✗"
-            memory = f"{model_reqs['memory_required_gb']:.1f} GB"
-            device = compat['recommended_device'] if compat['can_run'] else "N/A"
-
-            # Create notes
-            notes = []
-            if compat['warnings']:
-                notes.append(compat['warnings'][0].split('.')[0])
-
-            print(f"{quant:<12} {memory:<12} {status:<10} {device:<10} "
-                  f"{notes[0] if notes else ''}")
+            quantizations = profile.supports_quantization or ['fp32']
+            for quant in quantizations:
+                # Calculate requirements based on fp32 size
+                if quant == 'fp32':
+                    base_size = fp32_size
+                elif quant == 'fp16':
+                    base_size = fp32_size * 0.5
+                elif quant == '8bit':
+                    base_size = fp32_size * 0.25
+                elif quant == '4bit':
+                    base_size = fp32_size * 0.125
+                else:
+                    base_size = fp32_size
+                
+                # Add overhead for inference
+                memory_required = base_size * 1.2
+                
+                model_reqs = {
+                    'memory_required_gb': memory_required,
+                    'quantization': quant
+                }
+    
+                # Check compatibility
+                compat = check_model_compatibility(model_reqs, hw_info)
+    
+                status = "✓" if compat['can_run'] else "✗"
+                memory = f"{model_reqs['memory_required_gb']:.1f} GB"
+                device = compat['recommended_device'] if compat['can_run'] else "N/A"
+    
+                # Create notes
+                notes = []
+                if compat['warnings']:
+                    notes.append(compat['warnings'][0].split('.')[0])
+    
+                print(f"{quant:<12} {memory:<12} {status:<10} {device:<10} "
+                      f"{notes[0] if notes else ''}")
 
         # Training compatibility
         print("\nTraining Compatibility:")
-        print(f"{'Method':<15} {'Memory':<10} {'CPU':<8} {'GPU':<8} {'Device':<10}")
-        print("-" * 60)
+        
+        # Skip training section for GGUF models
+        if profile.model_type == 'gguf':
+            print("  GGUF models are pre-quantized and do not support training.")
+            print("  To train, use the original model before quantization.")
+        else:
+            print(f"{'Method':<15} {'Memory':<10} {'CPU':<8} {'GPU':<8} {'Device':<10}")
+            print("-" * 60)
 
-        # Training methods to check - filter based on supported quantizations
-        supported_quants = profile.supports_quantization or ['fp32', 'fp16']
-        training_configs = []
-        # Only add methods for supported quantizations
-        if '4bit' in supported_quants:
-            training_configs.append(('QLoRA (4bit)', '4bit', True))
-        if '8bit' in supported_quants:
-            training_configs.append(('QLoRA (8bit)', '8bit', True))
-            training_configs.append(('LoRA (8bit)', '8bit', False))
-        if 'fp16' in supported_quants:
-            training_configs.append(('LoRA (fp16)', 'fp16', False))
-            training_configs.append(('Full (fp16)', 'fp16', False, True))
-        if 'fp32' in supported_quants:
-            training_configs.append(('LoRA (fp32)', 'fp32', False))
-            training_configs.append(('Full (fp32)', 'fp32', False, True))
-
-        for method_name, quant, *flags in training_configs:
-            # Calculate requirements using correct base size
-            if quant == 'fp32':
-                base_size = fp32_size
-            elif quant == 'fp16':
-                base_size = fp32_size * 0.5
-            elif quant == '8bit':
-                base_size = fp32_size * 0.25
-            elif quant == '4bit':
-                base_size = fp32_size * 0.125
-            else:
-                base_size = fp32_size
-            
-            # Calculate training memory
-            if 'QLoRA' in method_name:
-                # QLoRA uses quantized base model + small overhead
-                memory_required = base_size * 1.5
-            elif 'LoRA' in method_name and 'QLoRA' not in method_name:
-                # Regular LoRA - base model + 10% for adapters
-                memory_required = base_size * 1.3
-            else:
-                # Full training - need 4x the model size
-                memory_required = base_size * 4
-            
-            model_reqs = {
-                'memory_required_gb': memory_required,
-                'quantization': quant,
-                'task': 'training'
-            }
-
-            # Check compatibility
-            compat = check_model_compatibility(model_reqs, hw_info)
-
-            # Check CPU/GPU separately
-            cpu_ok = "✓" if compat['can_run_cpu'] else "✗"
-            gpu_ok = "✓" if compat['can_run_gpu'] else "✗"
-
-            # Determine best device
-            if compat['can_run']:
-                device = compat['recommended_device']
-                if device == 'cuda':
-                    device = 'CUDA'
-                elif device == 'metal':
-                    device = 'Metal'
+            # Training methods to check - filter based on supported quantizations
+            supported_quants = profile.supports_quantization or ['fp32', 'fp16']
+            training_configs = []
+            # Only add methods for supported quantizations
+            if '4bit' in supported_quants:
+                training_configs.append(('QLoRA (4bit)', '4bit', True))
+            if '8bit' in supported_quants:
+                training_configs.append(('QLoRA (8bit)', '8bit', True))
+                training_configs.append(('LoRA (8bit)', '8bit', False))
+            if 'fp16' in supported_quants:
+                training_configs.append(('LoRA (fp16)', 'fp16', False))
+                training_configs.append(('Full (fp16)', 'fp16', False, True))
+            if 'fp32' in supported_quants:
+                training_configs.append(('LoRA (fp32)', 'fp32', False))
+                training_configs.append(('Full (fp32)', 'fp32', False, True))
+    
+            for method_name, quant, *flags in training_configs:
+                # Calculate requirements using correct base size
+                if quant == 'fp32':
+                    base_size = fp32_size
+                elif quant == 'fp16':
+                    base_size = fp32_size * 0.5
+                elif quant == '8bit':
+                    base_size = fp32_size * 0.25
+                elif quant == '4bit':
+                    base_size = fp32_size * 0.125
                 else:
-                    device = 'CPU'
-            else:
-                device = 'N/A'
-
-            memory_str = f"{model_reqs['memory_required_gb']:.1f} GB"
-
-            print(f"{method_name:<15} {memory_str:<10} {cpu_ok:<8} {gpu_ok:<8} {device:<10}")
+                    base_size = fp32_size
+                
+                # Calculate training memory
+                if 'QLoRA' in method_name:
+                    # QLoRA uses quantized base model + small overhead
+                    memory_required = base_size * 1.5
+                elif 'LoRA' in method_name and 'QLoRA' not in method_name:
+                    # Regular LoRA - base model + 10% for adapters
+                    memory_required = base_size * 1.3
+                else:
+                    # Full training - need 4x the model size
+                    memory_required = base_size * 4
+                
+                model_reqs = {
+                    'memory_required_gb': memory_required,
+                    'quantization': quant,
+                    'task': 'training'
+                }
+    
+                # Check compatibility
+                compat = check_model_compatibility(model_reqs, hw_info)
+    
+                # Check CPU/GPU separately
+                cpu_ok = "✓" if compat['can_run_cpu'] else "✗"
+                gpu_ok = "✓" if compat['can_run_gpu'] else "✗"
+    
+                # Determine best device
+                if compat['can_run']:
+                    device = compat['recommended_device']
+                    if device == 'cuda':
+                        device = 'CUDA'
+                    elif device == 'metal':
+                        device = 'Metal'
+                    else:
+                        device = 'CPU'
+                else:
+                    device = 'N/A'
+    
+                memory_str = f"{model_reqs['memory_required_gb']:.1f} GB"
+    
+                print(f"{method_name:<15} {memory_str:<10} {cpu_ok:<8} {gpu_ok:<8} {device:<10}")
 
         print("="*60 + "\n")
 
