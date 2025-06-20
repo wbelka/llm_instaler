@@ -33,11 +33,50 @@ class GGUFDetector(BaseDetector):
         gguf_files = [f for f in info.files if f.endswith('.gguf')]
         info.metadata['gguf_files'] = gguf_files
 
-        # Detect quantization type from filename
-        quant_info = self._analyze_gguf_files(gguf_files)
-        if quant_info:
-            info.quantization = f"gguf-{quant_info['type']}"
-            info.metadata['quantization_details'] = quant_info
+        # For GGUF models, each file is a complete model variant
+        # We need to handle size differently
+        if gguf_files and info.file_sizes:
+            # Get sizes of individual GGUF files
+            gguf_sizes = [info.file_sizes.get(f, 0) for f in gguf_files]
+            
+            # Find the default/recommended variant
+            # Usually Q4_0 or Q4_K_M is a good default
+            default_file = None
+            for pattern in ['q4_0', 'q4_k_m', 'q4_k', 'q5_0']:
+                for file in gguf_files:
+                    if pattern in file.lower():
+                        default_file = file
+                        break
+                if default_file:
+                    break
+            
+            # If no default found, use the median-sized file
+            if not default_file and gguf_sizes:
+                sorted_files = sorted(
+                    zip(gguf_files, gguf_sizes), 
+                    key=lambda x: x[1]
+                )
+                median_idx = len(sorted_files) // 2
+                default_file = sorted_files[median_idx][0]
+            
+            # Set the size to the default variant size, not sum of all
+            if default_file:
+                info.size_gb = info.file_sizes.get(default_file, 0)
+                info.metadata['default_variant'] = default_file
+                info.metadata['total_variants_size'] = round(sum(gguf_sizes), 1)
+
+        # Detect quantization type from default file or first file
+        default_file = info.metadata.get('default_variant', gguf_files[0] if gguf_files else None)
+        if default_file:
+            quant_type = self._extract_quantization_from_filename(default_file)
+            info.quantization = f"gguf-{quant_type.upper()}"
+            
+            # Parse quantization details
+            info.metadata['quantization_details'] = {
+                'type': quant_type.upper(),
+                'bits': self._get_bits_from_quant(quant_type),
+                'k_quant': '_k' in quant_type.lower()
+            }
         else:
             info.quantization = 'gguf'
 
@@ -65,10 +104,17 @@ class GGUFDetector(BaseDetector):
                 variants.append({
                     'file': file,
                     'size_gb': round(size, 2),
-                    'quantization': quant
+                    'quantization': quant.upper(),
+                    'memory_required_gb': round(size * 1.2, 1)  # GGUF needs ~20% overhead
                 })
             info.metadata['variants'] = sorted(variants, key=lambda x: x['size_gb'])
-        
+            
+            # Add a note about variants
+            info.metadata['variant_note'] = (
+                "Each GGUF file is a complete model. Choose based on your "
+                "memory constraints and quality requirements."
+            )
+
         # GGUF models don't support vLLM or TensorRT
         info.metadata['supports_vllm'] = False
         info.metadata['supports_tensorrt'] = False
@@ -77,25 +123,20 @@ class GGUFDetector(BaseDetector):
 
     def _analyze_gguf_files(self, gguf_files: list) -> dict:
         """Analyze GGUF files to determine quantization details"""
+        # This method is now integrated into detect()
+        # Kept for backwards compatibility
         if not gguf_files:
             return None
 
-        # Take first file as representative
         file = gguf_files[0]
         quant_type = self._extract_quantization_from_filename(file)
 
         if quant_type:
-            # Parse quantization details
-            details = {
+            return {
                 'type': quant_type.upper(),
-                'bits': self._get_bits_from_quant(quant_type)
+                'bits': self._get_bits_from_quant(quant_type),
+                'k_quant': '_k' in quant_type.lower()
             }
-
-            # Check if it's a K-quant
-            if '_k' in quant_type.lower():
-                details['k_quant'] = True
-
-            return details
 
         return None
 
@@ -165,6 +206,8 @@ class GGUFDetector(BaseDetector):
             return 'Phi'
         elif 'gemma' in model_lower:
             return 'Gemma'
+        elif 'cosmos' in model_lower:
+            return 'Cosmos'
 
         # Check base_model tags
         for tag in info.tags:

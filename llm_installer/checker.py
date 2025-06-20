@@ -49,6 +49,11 @@ def calculate_memory_for_dtype(
         'fp16': 'fp16',
         'fp32': 'fp32'
     }
+    # Special handling for GGUF quantizations
+    if dtype and dtype.startswith('gguf-'):
+        # GGUF models only need ~20% overhead for context
+        return disk_size_gb * 1.2
+
     quant_type = dtype_map.get(dtype, 'fp32')
     # If model is stored in half precision format, adjust calculation
     if dtype in ['float16', 'bfloat16']:
@@ -189,7 +194,15 @@ class ModelChecker:
             print(f"Quantization: {profile.quantization}")
 
         print("\nStorage Requirements:")
-        if profile.estimated_size_gb > 0:
+        # Special handling for GGUF models with variants
+        if profile.model_type == 'gguf' and profile.metadata.get('variants'):
+            default_variant = profile.metadata.get('default_variant', '')
+            print(f"  - Default variant ({default_variant}): {profile.estimated_size_gb} GB")
+            if profile.metadata.get('total_variants_size'):
+                print(f"  - All variants total: {profile.metadata['total_variants_size']} GB")
+            print("  - Virtual environment: ~2 GB")
+            print(f"  - Disk space for default: ~{profile.estimated_size_gb + 2:.1f} GB")
+        elif profile.estimated_size_gb > 0:
             print(f"  - Model files: {profile.estimated_size_gb} GB")
             print("  - Virtual environment: ~2 GB")
             print(f"  - Total disk space needed: ~{profile.estimated_size_gb + 2:.1f} GB")
@@ -297,6 +310,45 @@ class ModelChecker:
             print("\nSpecial Requirements:")
             for req in profile.special_requirements:
                 print(f"  - {req}")
+                
+        # Show GGUF variants if available
+        if profile.model_type == 'gguf' and profile.metadata.get('variants'):
+            print("\nAvailable GGUF Variants:")
+            if profile.metadata.get('variant_note'):
+                print(f"  Note: {profile.metadata['variant_note']}")
+            print("\n  Variant      Size     Memory   Quality")
+            print("  " + "-" * 40)
+            
+            for variant in profile.metadata['variants'][:10]:  # Show top 10
+                quant = variant['quantization']
+                size = variant['size_gb']
+                memory = variant['memory_required_gb']
+                
+                # Quality indicator based on quantization
+                quality_map = {
+                    'Q8_0': '★★★★★',
+                    'Q6_K': '★★★★☆',
+                    'Q5_K_M': '★★★★☆',
+                    'Q5_0': '★★★★☆',
+                    'Q5_1': '★★★★☆',
+                    'Q4_K_M': '★★★☆☆',
+                    'Q4_0': '★★★☆☆',
+                    'Q4_1': '★★★☆☆',
+                    'Q3_K_M': '★★☆☆☆',
+                    'Q2_K': '★☆☆☆☆'
+                }
+                quality = quality_map.get(quant, '★★★☆☆')
+                
+                # Mark default
+                is_default = variant['file'] == profile.metadata.get('default_variant')
+                marker = ' (default)' if is_default else ''
+                
+                print(f"  {quant:<12} {size:>6.1f} GB  "
+                      f"{memory:>6.1f} GB  {quality}{marker}")
+
+            if len(profile.metadata['variants']) > 10:
+                remaining = len(profile.metadata['variants']) - 10
+                print(f"\n  ... and {remaining} more variants")
 
         print("\nCapabilities:")
         print(f"  - VLLM Support: {'Yes' if profile.supports_vllm else 'No'}")
