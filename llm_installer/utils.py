@@ -194,16 +194,36 @@ def fetch_model_files_with_sizes(model_id: str) -> Dict[str, float]:
         Dict mapping file paths to sizes in GB
     """
     try:
-        from huggingface_hub import repo_info
+        from huggingface_hub import HfApi
 
+        api = HfApi()
         token = get_hf_token()
-        info = repo_info(repo_id=model_id, repo_type="model", token=token)
+
+        # Use list_repo_files with detailed info
+        files_info = api.list_repo_tree(
+            repo_id=model_id,
+            repo_type="model",
+            token=token,
+            recursive=True
+        )
 
         file_sizes = {}
-        for sibling in info.siblings:
-            # Convert bytes to GB
-            size_gb = sibling.size / (1024 ** 3) if sibling.size else 0
-            file_sizes[sibling.rfilename] = round(size_gb, 3)
+        for item in files_info:
+            if hasattr(item, 'size') and item.size is not None:
+                # Convert bytes to GB
+                size_gb = item.size / (1024 ** 3)
+                file_sizes[item.path] = round(size_gb, 3)
+
+        # If no sizes found, try the repo_info method as fallback
+        if not file_sizes:
+            from huggingface_hub import repo_info
+            info = repo_info(repo_id=model_id, repo_type="model", token=token)
+
+            for sibling in info.siblings:
+                # Convert bytes to GB
+                size_gb = sibling.size / (1024 ** 3) if sibling.size else 0
+                if size_gb > 0:
+                    file_sizes[sibling.rfilename] = round(size_gb, 3)
 
         return file_sizes
     except Exception as e:

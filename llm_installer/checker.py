@@ -3,7 +3,7 @@ Model compatibility checker module
 """
 
 import logging
-from typing import List, Optional, Type
+from typing import Optional
 
 from .utils import (
     fetch_model_config,
@@ -12,21 +12,13 @@ from .utils import (
     estimate_model_size,
     save_json_config
 )
-from .detectors.base import BaseDetector, ModelProfile
+from .detectors.base import ModelProfile
 from .hardware import (
     get_hardware_info,
     calculate_model_requirements,
     check_model_compatibility
 )
-
-# Import all detectors
-from .detectors.transformer_detector import TransformerDetector
-from .detectors.diffusion_detector import DiffusionDetector
-from .detectors.gguf_detector import GGUFDetector
-from .detectors.sentence_transformer_detector import SentenceTransformerDetector
-from .detectors.multimodal_detector import MultimodalDetector
-from .detectors.moe_detector import MoEDetector
-from .detectors.multi_modality_detector import MultiModalityDetector
+from .model_detector import ModelDetector
 
 
 logger = logging.getLogger(__name__)
@@ -36,28 +28,8 @@ class ModelChecker:
     """Main class for checking model compatibility"""
 
     def __init__(self):
-        self.detectors: List[BaseDetector] = []
-        self._initialize_detectors()
-
-    def _initialize_detectors(self):
-        """Initialize all available detectors in priority order"""
-        detector_classes: List[Type[BaseDetector]] = [
-            GGUFDetector,  # Check GGUF first (most specific)
-            MultiModalityDetector,  # Check multi_modality before multimodal
-            MoEDetector,  # Then MoE models
-            MultimodalDetector,  # Then standard multimodal models
-            DiffusionDetector,  # Then diffusion models
-            SentenceTransformerDetector,  # Then sentence transformers
-            TransformerDetector,  # Default fallback
-        ]
-
-        for detector_class in detector_classes:
-            try:
-                detector = detector_class()
-                self.detectors.append(detector)
-                logger.debug(f"Initialized detector: {detector.name}")
-            except Exception as e:
-                logger.error(f"Failed to initialize {detector_class.__name__}: {e}")
+        self.detector = ModelDetector()
+        logger.debug("Initialized ModelDetector")
 
     def check_model(self, model_id: str, save_profile: bool = False) -> Optional[ModelProfile]:
         """
@@ -114,28 +86,12 @@ class ModelChecker:
 
         logger.debug(f"Found {len(files)} files in repository")
 
-        # Pass both config and model_index to detectors
-        detection_config = config or model_index or {}
-
-        # Store file sizes in detection config for detectors to use
-        if file_sizes:
-            detection_config['_file_sizes'] = file_sizes
-
-        # Run through detector pipeline
-        profile = None
-        for detector in self.detectors:
-            logger.debug(f"Running {detector.name}...")
-            try:
-                profile = detector.detect(model_id, detection_config, files)
-                if profile:
-                    logger.info(f"Model detected by {detector.name}: {profile.model_type}")
-                    break
-            except Exception as e:
-                logger.error(f"Error in {detector.name}: {e}")
-                continue
-
-        if not profile:
-            logger.warning(f"No detector could identify model {model_id}")
+        # Use new simplified detector
+        logger.debug("Running model detection...")
+        detection_result = self.detector.detect(model_id)
+        
+        if not detection_result:
+            logger.warning(f"Could not detect model {model_id}")
             # Create a generic profile as fallback
             profile = ModelProfile(
                 model_type="unknown",
@@ -143,6 +99,32 @@ class ModelChecker:
                 library="transformers",  # Safe default
                 task="text-generation"
             )
+        else:
+            # Convert detection result to ModelProfile
+            profile = ModelProfile(
+                model_type=detection_result['model_type'],
+                model_id=detection_result['model_id'],
+                library=detection_result['library'],
+                architecture=detection_result.get('architecture'),
+                task=detection_result.get('task'),
+                quantization=detection_result.get('quantization'),
+                special_requirements=detection_result.get('special_requirements'),
+                estimated_size_gb=detection_result.get('estimated_size_gb', 1.0),
+                estimated_memory_gb=detection_result.get('estimated_memory_gb', 4.0),
+                supports_vllm=detection_result.get('supports_vllm', False),
+                supports_tensorrt=detection_result.get('supports_tensorrt', False),
+                is_multimodal=detection_result.get('is_multimodal', False),
+                metadata=detection_result.get('metadata', {}),
+                min_ram_gb=detection_result.get('min_ram_gb', 8.0),
+                min_vram_gb=detection_result.get('min_vram_gb', 0.0),
+                recommended_ram_gb=detection_result.get('recommended_ram_gb', 16.0),
+                recommended_vram_gb=detection_result.get('recommended_vram_gb', 0.0),
+                supports_cpu=detection_result.get('supports_cpu', True),
+                supports_cuda=detection_result.get('supports_cuda', True),
+                supports_metal=detection_result.get('supports_metal', True),
+                supports_quantization=detection_result.get('supports_quantization')
+            )
+            logger.info(f"Model detected: {profile.model_type}")
 
         # Estimate size if not set by detector
         if profile.estimated_size_gb == 1.0:
