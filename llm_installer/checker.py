@@ -135,7 +135,7 @@ class ModelChecker:
         # Use new detector v2
         logger.debug("Running model detection v2...")
         model_info = self.detector.detect(model_id)
-        
+
         if not model_info:
             logger.warning(f"Could not detect model {model_id}")
             # Create a generic ModelInfo as fallback
@@ -146,7 +146,7 @@ class ModelChecker:
                 pipeline_tag="text-generation",
                 task="text-generation"
             )
-            
+
         logger.info(f"Model detected: {model_info.model_type} ({model_info.library_name})")
 
         # Size should already be set by detector v2
@@ -236,7 +236,6 @@ class ModelChecker:
                     'int4': '4bit'
                 }
                 quant_type = dtype_map.get(torch_dtype, 'fp32')
-                
                 # If model is stored in the same dtype as default, use disk size
                 if torch_dtype in ['float16', 'bfloat16']:
                     # Model is already in this format on disk
@@ -249,7 +248,6 @@ class ModelChecker:
                         "inference"
                     )
                     memory_req = mem_reqs['memory_required_gb']
-                
                 print(f"  - Default configuration: {torch_dtype}")
                 print(f"  - Default memory requirement: {memory_req:.1f} GB")
             print(f"  - Model page: https://huggingface.co/{model_info.model_id}")
@@ -308,7 +306,6 @@ class ModelChecker:
             print("\nSpecial Requirements:")
             for req in model_info.special_requirements:
                 print(f"  - {req}")
-                
         # Show GGUF variants if available
         if model_info.model_type == 'gguf' and model_info.metadata.get('variants'):
             print("\nAvailable GGUF Variants:")
@@ -324,16 +321,14 @@ class ModelChecker:
                 variants_by_quant[quant].append(variant)
             
             # Sort quantization types by quality (reverse order)
-            quality_order = ['F32', 'F16', 'Q8_0', 'Q6_K', 'Q5_K_M', 'Q5_K_S', 
-                           'Q5_1', 'Q5_0', 'Q4_K_M', 'Q4_K_S', 'Q4_1', 'Q4_0', 
+            quality_order = ['F32', 'F16', 'Q8_0', 'Q6_K', 'Q5_K_M', 'Q5_K_S',
+                           'Q5_1', 'Q5_0', 'Q4_K_M', 'Q4_K_S', 'Q4_1', 'Q4_0',
                            'Q3_K_L', 'Q3_K_M', 'Q3_K_S', 'Q2_K', 'UNKNOWN']
-            sorted_quants = sorted(variants_by_quant.keys(), 
-                                 key=lambda x: quality_order.index(x) 
+            sorted_quants = sorted(variants_by_quant.keys(),
+                                 key=lambda x: quality_order.index(x)
                                  if x in quality_order else len(quality_order))
-            
             print("\n  Quantization   Files  Size Range    Memory Range  Quality")
             print("  " + "-" * 70)
-            
             # Quality indicators
             quality_map = {
                 'F32': '★★★★★ (Full)',
@@ -353,11 +348,10 @@ class ModelChecker:
                 'Q3_K_S': '★★☆☆☆',
                 'Q2_K': '★☆☆☆☆'
             }
-            
+
             for quant in sorted_quants:
                 variants = variants_by_quant[quant]
                 count = len(variants)
-                
                 # Get size range
                 sizes = [v['size_gb'] for v in variants]
                 min_size = min(sizes)
@@ -366,7 +360,6 @@ class ModelChecker:
                     size_range = f"{min_size:.1f} GB"
                 else:
                     size_range = f"{min_size:.1f}-{max_size:.1f} GB"
-                
                 # Get memory range
                 memories = [v['memory_required_gb'] for v in variants]
                 min_mem = min(memories)
@@ -375,24 +368,21 @@ class ModelChecker:
                     mem_range = f"{min_mem:.1f} GB"
                 else:
                     mem_range = f"{min_mem:.1f}-{max_mem:.1f} GB"
-                
                 quality = quality_map.get(quant, '★★★☆☆')
-                
                 # Check if any is default
-                has_default = any(v['file'] == model_info.metadata.get('default_variant') 
+                has_default = any(v['file'] == model_info.metadata.get('default_variant')
                                 for v in variants)
                 marker = ' *' if has_default else ''
-                
                 print(f"  {quant:<14} {count:>5}  {size_range:<13} "
                       f"{mem_range:<13} {quality}{marker}")
-            
+
             # Show individual files if not too many
             total_files = len(model_info.metadata['variants'])
             if total_files <= 20:
                 print("\n  Individual files:")
                 print("  File" + " " * 50 + "Size      Memory")
                 print("  " + "-" * 70)
-                for variant in sorted(model_info.metadata['variants'], 
+                for variant in sorted(model_info.metadata['variants'],
                                     key=lambda x: x['size_gb']):
                     filename = variant['file']
                     if len(filename) > 50:
@@ -402,8 +392,7 @@ class ModelChecker:
                     marker = ' *' if is_default else ''
                     print(f"  {filename:<53} {variant['size_gb']:>6.1f} GB  "
                           f"{variant['memory_required_gb']:>6.1f} GB{marker}")
-            
-            if model_info.metadata.get('default_variant'):
+        if model_info.metadata.get('default_variant'):
                 print("\n  * = Default variant")
 
         print("\nCapabilities:")
@@ -445,59 +434,50 @@ class ModelChecker:
 
         # Check compatibility for different quantization levels
         print("\nCompatibility Analysis:")
-        
-        # Special handling for GGUF models
+# Special handling for GGUF models
         if model_info.model_type == 'gguf' and model_info.metadata.get('variants'):
             print(f"{'Variant':<15} {'Size':<10} {'Memory':<12} {'Can Run?':<10} {'Device':<10} {'Notes'}")
             print("-" * 80)
-            
-            # Group by quantization and show summary
+        # Group by quantization and show summary
             variants_by_quant = {}
             for variant in model_info.metadata['variants']:
                 quant = variant['quantization']
                 if quant not in variants_by_quant:
                     variants_by_quant[quant] = []
                 variants_by_quant[quant].append(variant)
-            
-            # Show compatibility for each quantization type
+        # Show compatibility for each quantization type
             for quant in sorted(variants_by_quant.keys()):
                 variants = variants_by_quant[quant]
                 # Use median size for this quantization
                 sizes = sorted([v['size_gb'] for v in variants])
                 median_size = sizes[len(sizes)//2]
                 median_memory = median_size * 1.2
-                
                 model_reqs = {
                     'memory_required_gb': median_memory,
                     'quantization': f'gguf-{quant}'
                 }
-                
                 # Check compatibility
                 compat = check_model_compatibility(model_reqs, hw_info)
-                
                 status = "✓" if compat['can_run'] else "✗"
                 size_str = f"{median_size:.1f} GB"
                 memory = f"{median_memory:.1f} GB"
                 device = compat['recommended_device'] if compat['can_run'] else "N/A"
-                
                 # Create notes
                 notes = []
                 if compat['warnings']:
                     notes.append(compat['warnings'][0].split('.')[0])
-                
                 # Add count if multiple files
                 if len(variants) > 1:
                     quant_display = f"{quant} ({len(variants)} files)"
                 else:
                     quant_display = quant
-                
                 print(f"{quant_display:<15} {size_str:<10} {memory:<12} {status:<10} {device:<10} "
                       f"{notes[0] if notes else ''}")
         else:
             # Standard compatibility table for non-GGUF models
             print(f"{'Quantization':<12} {'Memory':<12} {'Can Run?':<10} {'Device':<10} {'Notes'}")
             print("-" * 60)
-    
+
             # Determine storage dtype
             stored_dtype = None
             if model_info.metadata and 'torch_dtype' in model_info.metadata:
@@ -524,27 +504,25 @@ class ModelChecker:
                     base_size = fp32_size * 0.125
                 else:
                     base_size = fp32_size
-                
                 # Add overhead for inference
                 memory_required = base_size * 1.2
-                
                 model_reqs = {
                     'memory_required_gb': memory_required,
                     'quantization': quant
                 }
-    
+
                 # Check compatibility
                 compat = check_model_compatibility(model_reqs, hw_info)
-    
+
                 status = "✓" if compat['can_run'] else "✗"
                 memory = f"{model_reqs['memory_required_gb']:.1f} GB"
                 device = compat['recommended_device'] if compat['can_run'] else "N/A"
-    
+
                 # Create notes
                 notes = []
                 if compat['warnings']:
                     notes.append(compat['warnings'][0].split('.')[0])
-    
+
                 print(f"{quant:<12} {memory:<12} {status:<10} {device:<10} "
                       f"{notes[0] if notes else ''}")
 
@@ -574,7 +552,7 @@ class ModelChecker:
             if 'fp32' in supported_quants:
                 training_configs.append(('LoRA (fp32)', 'fp32', False))
                 training_configs.append(('Full (fp32)', 'fp32', False, True))
-    
+
             for method_name, quant, *flags in training_configs:
                 # Calculate requirements using correct base size
                 if quant == 'fp32':
@@ -587,7 +565,6 @@ class ModelChecker:
                     base_size = fp32_size * 0.125
                 else:
                     base_size = fp32_size
-                
                 # Calculate training memory
                 if 'QLoRA' in method_name:
                     # QLoRA uses quantized base model + small overhead
@@ -598,20 +575,19 @@ class ModelChecker:
                 else:
                     # Full training - need 4x the model size
                     memory_required = base_size * 4
-                
                 model_reqs = {
                     'memory_required_gb': memory_required,
                     'quantization': quant,
                     'task': 'training'
                 }
-    
+
                 # Check compatibility
                 compat = check_model_compatibility(model_reqs, hw_info)
-    
+
                 # Check CPU/GPU separately
                 cpu_ok = "✓" if compat['can_run_cpu'] else "✗"
                 gpu_ok = "✓" if compat['can_run_gpu'] else "✗"
-    
+
                 # Determine best device
                 if compat['can_run']:
                     device = compat['recommended_device']
@@ -623,9 +599,9 @@ class ModelChecker:
                         device = 'CPU'
                 else:
                     device = 'N/A'
-    
+
                 memory_str = f"{model_reqs['memory_required_gb']:.1f} GB"
-    
+
                 print(f"{method_name:<15} {memory_str:<10} {cpu_ok:<8} {gpu_ok:<8} {device:<10}")
 
         print("="*60 + "\n")
