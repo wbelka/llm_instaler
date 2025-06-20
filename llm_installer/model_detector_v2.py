@@ -14,7 +14,8 @@ from .detectors_v2 import (
     GGUFDetector,
     TimmDetector,
     AudioDetector,
-    BagelDetector
+    BagelDetector,
+    FluxDetector
 )
 from .utils import get_hf_token, fetch_model_files_with_sizes, fetch_model_config
 
@@ -29,6 +30,7 @@ class ModelDetectorV2:
         self.detectors = [
             GGUFDetector(),  # Check GGUF first (most specific)
             BagelDetector(),  # BAGEL models
+            FluxDetector(),  # FLUX models (before general diffusers)
             DiffusersDetector(),
             SentenceTransformersDetector(),
             TimmDetector(),
