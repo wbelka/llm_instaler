@@ -124,12 +124,17 @@ class BaseDetector(ABC):
                 'estimated_memory_gb': 0.0
             }
 
-        # Base calculation without hardcoded multipliers
-        # Just use size for base, let hardware module handle the rest
+        # Import memory calculation function
+        from ..checker import calculate_memory_for_dtype
+
+        # Use the reusable function for memory calculations
+        dtype = info.default_dtype or 'fp32'
+        estimated_memory = calculate_memory_for_dtype(info.size_gb, dtype)
+
         return {
             'min_ram_gb': info.size_gb,
             'min_vram_gb': info.size_gb * 0.8,  # GPU more efficient
-            'recommended_ram_gb': info.size_gb * 1.5,
-            'recommended_vram_gb': info.size_gb * 1.2,
-            'estimated_memory_gb': info.size_gb * 1.2
+            'recommended_ram_gb': estimated_memory * 1.25,  # 25% extra
+            'recommended_vram_gb': estimated_memory,
+            'estimated_memory_gb': estimated_memory
         }

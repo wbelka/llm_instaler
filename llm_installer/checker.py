@@ -25,6 +25,48 @@ from .detectors_v2.converter import convert_to_profile
 logger = logging.getLogger(__name__)
 
 
+def calculate_memory_for_dtype(
+    disk_size_gb: float, dtype: str, task: str = "inference"
+) -> float:
+    """
+    Calculate memory requirement for a specific dtype
+    Args:
+        disk_size_gb: Model size on disk
+        dtype: Target dtype (float32, float16, bfloat16, etc)
+        task: "inference" or "training"
+    Returns:
+        Memory requirement in GB
+    """
+    # Map torch dtypes to our quantization names
+    dtype_map = {
+        'float32': 'fp32',
+        'float16': 'fp16',
+        'bfloat16': 'fp16',
+        'int8': '8bit',
+        'int4': '4bit',
+        '4bit': '4bit',
+        '8bit': '8bit',
+        'fp16': 'fp16',
+        'fp32': 'fp32'
+    }
+    quant_type = dtype_map.get(dtype, 'fp32')
+    # If model is stored in half precision format, adjust calculation
+    if dtype in ['float16', 'bfloat16']:
+        # Model is already in this format on disk
+        if task == "inference":
+            return disk_size_gb * 1.2  # Just add overhead
+        else:
+            return disk_size_gb * 1.3  # Training overhead for LoRA
+    else:
+        # Use standard calculation
+        mem_reqs = calculate_model_requirements(
+            disk_size_gb,
+            quant_type,
+            task
+        )
+        return mem_reqs['memory_required_gb']
+
+
 class ModelChecker:
     """Main class for checking model compatibility"""
 
@@ -167,34 +209,7 @@ class ModelChecker:
             torch_dtype = profile.quantization
 
         if torch_dtype:
-            # Map torch dtypes to our quantization names
-            dtype_map = {
-                'float32': 'fp32',
-                'float16': 'fp16',
-                'bfloat16': 'fp16',
-                'int8': '8bit',
-                'int4': '4bit',
-                '4bit': '4bit',
-                '8bit': '8bit',
-                'fp16': 'fp16',
-                'fp32': 'fp32'
-            }
-
-            quant_type = dtype_map.get(torch_dtype, torch_dtype)
-
-            # If model is stored in the same dtype as default, use disk size
-            if torch_dtype in ['float16', 'bfloat16']:
-                # Model is already in this format on disk
-                memory_req = profile.estimated_size_gb * 1.2  # Just add overhead
-            else:
-                # Calculate memory for the detected type
-                mem_reqs = calculate_model_requirements(
-                    profile.estimated_size_gb,
-                    quant_type if quant_type in ['fp32', 'fp16', '8bit', '4bit'] else 'fp32',
-                    "inference"
-                )
-                memory_req = mem_reqs['memory_required_gb']
-            
+            memory_req = calculate_memory_for_dtype(profile.estimated_size_gb, torch_dtype)
             print(f"  - Default configuration ({torch_dtype}): {memory_req:.1f} GB")
             print("  - Other configurations: See compatibility table below")
         else:

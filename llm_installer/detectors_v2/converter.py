@@ -12,6 +12,9 @@ def convert_to_profile(info: Optional[ModelInfo]) -> Optional[ModelProfile]:
     if not info:
         return None
 
+    # Import memory calculation function
+    from ..checker import calculate_memory_for_dtype
+
     # Calculate hardware requirements
     hw_reqs = info.metadata.get('hardware_requirements', {})
 
@@ -24,15 +27,33 @@ def convert_to_profile(info: Optional[ModelInfo]) -> Optional[ModelProfile]:
         quantization=info.quantization,
         special_requirements=info.special_requirements,
         estimated_size_gb=info.size_gb,
-        estimated_memory_gb=hw_reqs.get('estimated_memory_gb', info.size_gb * 1.2),
+        estimated_memory_gb=hw_reqs.get(
+            'estimated_memory_gb',
+            calculate_memory_for_dtype(
+                info.size_gb,
+                info.default_dtype or 'fp32'
+            )
+        ),
         supports_vllm=info.metadata.get('supports_vllm', False),
         supports_tensorrt=info.metadata.get('supports_tensorrt', False),
         is_multimodal=info.is_multimodal,
         metadata=info.metadata,
         min_ram_gb=hw_reqs.get('min_ram_gb', info.size_gb),
         min_vram_gb=hw_reqs.get('min_vram_gb', info.size_gb * 0.8),
-        recommended_ram_gb=hw_reqs.get('recommended_ram_gb', info.size_gb * 1.5),
-        recommended_vram_gb=hw_reqs.get('recommended_vram_gb', info.size_gb * 1.2),
+        recommended_ram_gb=hw_reqs.get(
+            'recommended_ram_gb',
+            calculate_memory_for_dtype(
+                info.size_gb,
+                info.default_dtype or 'fp32'
+            ) * 1.25
+        ),
+        recommended_vram_gb=hw_reqs.get(
+            'recommended_vram_gb',
+            calculate_memory_for_dtype(
+                info.size_gb,
+                info.default_dtype or 'fp32'
+            )
+        ),
         supports_cpu=True,
         supports_cuda=True,
         supports_metal=True,
