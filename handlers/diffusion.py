@@ -5,7 +5,8 @@ diffusion techniques.
 """
 
 from typing import Dict, Any, List
-from handlers.base import BaseHandler, ModelRequirements
+from handlers.base import BaseHandler
+from core.checker import ModelRequirements
 
 
 class DiffusionHandler(BaseHandler):
