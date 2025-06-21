@@ -93,8 +93,11 @@ def load_model(
             load_in_8bit, load_in_4bit, **kwargs
         )
     elif primary_lib == "diffusers":
+        # Remove lora_path from kwargs as diffusers doesn't expect it
+        diffusers_kwargs = kwargs.copy()
+        diffusers_kwargs.pop('lora_path', None)
         return _load_diffusers_model(
-            model_info, model_path, device, dtype, **kwargs
+            model_info, model_path, device, dtype, **diffusers_kwargs
         )
     else:
         raise ValueError(f"Unsupported library: {primary_lib}")
@@ -300,7 +303,14 @@ def _load_diffusers_model(
 
     # Enable optimizations
     if device == "cuda":
-        pipeline.enable_xformers_memory_efficient_attention()
+        try:
+            pipeline.enable_xformers_memory_efficient_attention()
+            logging.info("Enabled xformers memory efficient attention")
+        except Exception as e:
+            logging.warning(f"Could not enable xformers: {e}")
+            logging.info("Falling back to standard attention")
+            # Use attention slicing as fallback
+            pipeline.enable_attention_slicing()
     elif device == "mps":
         # MPS optimizations
         pipeline.enable_attention_slicing()
