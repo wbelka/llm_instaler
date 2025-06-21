@@ -11,10 +11,24 @@ import logging
 from typing import Dict, Any, Optional, Tuple, Union
 from pathlib import Path
 
-# Add installer to path
-installer_path = os.path.expanduser("~/LLM/installer")
-if os.path.exists(installer_path):
-    sys.path.insert(0, installer_path)
+# Try to add installer to path - check multiple possible locations
+possible_paths = [
+    os.path.expanduser("~/LLM/installer"),
+    os.path.expanduser("~/llm_installer"),
+    os.path.expanduser("~/llm_instaler"),
+    "/home/wblk/llm_instaler",  # Direct path
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),  # Parent of scripts dir
+]
+
+installer_found = False
+for installer_path in possible_paths:
+    if os.path.exists(installer_path) and os.path.exists(os.path.join(installer_path, "handlers")):
+        sys.path.insert(0, installer_path)
+        installer_found = True
+        break
+
+if not installer_found:
+    logging.warning("Could not find LLM installer path with handlers module")
 
 
 def get_handler(model_info: Dict[str, Any]):
@@ -224,12 +238,53 @@ def _load_diffusers_model(
         }
         torch_dtype = dtype_map.get(dtype, torch.float32)
 
-    # Load pipeline
-    pipeline = DiffusionPipeline.from_pretrained(
-        model_path,
-        torch_dtype=torch_dtype,
-        **kwargs
-    )
+    # Check if model has a specific pipeline class defined
+    model_index_path = os.path.join(model_path, "model_index.json")
+    if os.path.exists(model_index_path):
+        with open(model_index_path, 'r') as f:
+            model_index = json.load(f)
+            pipeline_class_name = model_index.get("_class_name", None)
+            
+            if pipeline_class_name:
+                # Try to get the specific pipeline class
+                try:
+                    from diffusers import pipelines
+                    pipeline_class = getattr(pipelines, pipeline_class_name, None)
+                    if pipeline_class:
+                        pipeline = pipeline_class.from_pretrained(
+                            model_path,
+                            torch_dtype=torch_dtype,
+                            **kwargs
+                        )
+                    else:
+                        # Fallback to auto-detection
+                        pipeline = DiffusionPipeline.from_pretrained(
+                            model_path,
+                            torch_dtype=torch_dtype,
+                            **kwargs
+                        )
+                except Exception as e:
+                    logging.warning(f"Failed to load specific pipeline class {pipeline_class_name}: {e}")
+                    # Fallback to auto-detection
+                    pipeline = DiffusionPipeline.from_pretrained(
+                        model_path,
+                        torch_dtype=torch_dtype,
+                        **kwargs
+                    )
+            else:
+                # Use auto-detection
+                pipeline = DiffusionPipeline.from_pretrained(
+                    model_path,
+                    torch_dtype=torch_dtype,
+                    **kwargs
+                )
+    else:
+        # Use auto-detection
+        pipeline = DiffusionPipeline.from_pretrained(
+            model_path,
+            torch_dtype=torch_dtype,
+            **kwargs
+        )
 
     # Move to device
     pipeline = pipeline.to(device)
