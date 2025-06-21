@@ -36,7 +36,6 @@ PORT=8000
 HOST="0.0.0.0"
 DTYPE="auto"
 DEVICE="auto"
-NO_BROWSER=false
 EXTRA_ARGS=""
 
 while [[ $# -gt 0 ]]; do
@@ -56,10 +55,6 @@ while [[ $# -gt 0 ]]; do
         --device)
             DEVICE="$2"
             shift 2
-            ;;
-        --no-browser)
-            NO_BROWSER=true
-            shift
             ;;
         --load-lora)
             EXTRA_ARGS="$EXTRA_ARGS --load-lora $2"
@@ -105,15 +100,13 @@ for i in {1..30}; do
     sleep 1
 done
 
-# Open browser if not disabled
-if [ "$NO_BROWSER" = false ]; then
-    echo "Opening browser..."
-    if command -v xdg-open > /dev/null; then
-        xdg-open "http://localhost:$PORT" 2>/dev/null &
-    elif command -v open > /dev/null; then
-        open "http://localhost:$PORT" 2>/dev/null &
-    fi
-fi
+# Show API URL
+echo ""
+echo "API is running at: http://localhost:$PORT"
+echo "Web UI available at: http://localhost:$PORT"
+echo "API docs at: http://localhost:$PORT/docs"
+echo ""
+echo "Press Ctrl+C to stop the server"
 
 # Wait for API process
 wait $API_PID
