@@ -382,8 +382,6 @@ class ModelInstaller:
                     repo_id=model_id,
                     local_dir=str(local_dir),
                     cache_dir=str(cache_dir),
-                    local_dir_use_symlinks=False,
-                    resume_download=True,
                     max_workers=self.config.max_download_workers,
                     token=self.config.huggingface_token
                 )
