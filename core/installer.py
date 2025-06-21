@@ -176,9 +176,13 @@ class ModelInstaller:
                     from core.checker import ModelRequirements
 
                     req_data = cached_data.get('requirements', {})
-                    # Remove compatibility_result if it exists (not in original ModelRequirements)
-                    req_data.pop('compatibility_result', None)
+                    # Save compatibility_result before removing it
+                    compatibility_result = req_data.pop('compatibility_result', None)
                     requirements = ModelRequirements(**req_data)
+
+                    # Add compatibility_result back as attribute
+                    if compatibility_result:
+                        setattr(requirements, 'compatibility_result', compatibility_result)
 
                     return cached_data.get('model_info'), requirements
 
@@ -206,21 +210,35 @@ class ModelInstaller:
         """
         # Check if model can run on this system
         compatibility = getattr(requirements, 'compatibility_result', None)
-        
+
         # Handle both dict (from cache) and object forms
         if compatibility is None:
             print_error("No compatibility information available")
             return False
-            
+
         # Check can_run - handle both dict and object
-        can_run = compatibility.get('can_run', False) if isinstance(compatibility, dict) else getattr(compatibility, 'can_run', False)
+        can_run = compatibility.get(
+            'can_run',
+            False) if isinstance(
+            compatibility,
+            dict) else getattr(
+            compatibility,
+            'can_run',
+            False)
         if not can_run:
             print_error("Model is not compatible with your system")
             print_info("See the compatibility report above for details")
             return False
 
         # Show warnings if any - handle both dict and object
-        notes = compatibility.get('notes', []) if isinstance(compatibility, dict) else getattr(compatibility, 'notes', [])
+        notes = compatibility.get(
+            'notes',
+            []) if isinstance(
+            compatibility,
+            dict) else getattr(
+            compatibility,
+            'notes',
+            [])
         if notes:
             for note in notes:
                 print_warning(f"Note: {note}")
@@ -495,25 +513,25 @@ class ModelInstaller:
             if not self._install_special_dependency(dep, pip_path, model_dir, log_path):
                 # Special dependencies might fail but shouldn't block installation
                 print_warning(f"Failed to install {dep}, continuing...")
-        
+
         # Install optional dependencies
         optional_deps = getattr(requirements, 'optional_dependencies', [])
         if optional_deps:
             print_info(f"Installing optional dependencies: {', '.join(optional_deps)}")
-            
+
             # Get torch info once for all dependencies
             torch_info = self._get_torch_info(pip_path)
-            
+
             for dep in optional_deps:
                 try:
                     # Build install command
                     install_cmd = [str(pip_path), "install", dep]
-                    
+
                     # Add index URL for CUDA-dependent packages
                     cuda_deps = ["xformers", "triton", "ninja", "flash-attn", "deepspeed", "bitsandbytes"]
                     if dep in cuda_deps and torch_info.get("index_url"):
                         install_cmd.extend(["--index-url", torch_info["index_url"]])
-                    
+
                     subprocess.run(
                         install_cmd,
                         check=True,
@@ -524,7 +542,7 @@ class ModelInstaller:
                 except subprocess.CalledProcessError:
                     # Optional dependencies can fail silently
                     self._log_install(log_path, "INFO", f"Skipped optional dependency: {dep}")
-                    
+
                     # Try special handling for xformers
                     if dep == "xformers":
                         self._install_xformers_with_cuda(pip_path, log_path)
@@ -625,7 +643,7 @@ class ModelInstaller:
 
         try:
             print_info(f"Installing PyTorch for {system} "
-                      f"{'with CUDA ' + cuda_version if cuda_available else 'CPU only'}")
+                       f"{'with CUDA ' + cuda_version if cuda_available else 'CPU only'}")
 
             cmd = [str(pip_path), "install"] + torch_cmd
             if index_url:
@@ -661,7 +679,7 @@ class ModelInstaller:
         """
         # First get torch and CUDA information
         torch_info = self._get_torch_info(pip_path)
-        
+
         special_instructions = {
             "mamba-ssm": f"""
 This model requires mamba-ssm which needs additional setup:
@@ -708,19 +726,19 @@ To install manually:
 
         try:
             print_info(f"Installing {dep}...")
-            
+
             # Build install command based on dependency type
             install_cmd = [str(pip_path), "install", dep]
-            
+
             # Add special handling for CUDA-dependent packages
             if dep in ["mamba-ssm", "flash-attn", "causal-conv1d"]:
                 if torch_info.get("index_url"):
                     install_cmd.extend(["--index-url", torch_info["index_url"]])
-                    
+
                 # For flash-attn, use specific build options
                 if dep == "flash-attn":
                     install_cmd.extend(["--no-build-isolation"])
-                    
+
                 # For mamba-ssm, ensure we don't upgrade torch
                 if dep == "mamba-ssm":
                     install_cmd.extend(["--no-deps"])
@@ -730,7 +748,7 @@ To install manually:
                         capture_output=True,
                         text=True
                     )
-            
+
             subprocess.run(
                 install_cmd,
                 check=True,
@@ -749,13 +767,13 @@ To install manually:
                 print_info(special_instructions[dep].format(model_dir=model_dir))
 
             return False
-    
+
     def _get_torch_info(self, pip_path: Path) -> Dict[str, str]:
         """Get information about installed torch version and CUDA.
-        
+
         Args:
             pip_path: Path to pip executable.
-            
+
         Returns:
             Dictionary with torch_version, cuda_suffix, and index_url.
         """
@@ -764,7 +782,7 @@ To install manually:
             "cuda_suffix": None,
             "index_url": "https://download.pytorch.org/whl/cu118"  # Default
         }
-        
+
         try:
             # Check installed torch version
             result = subprocess.run(
@@ -772,18 +790,18 @@ To install manually:
                 capture_output=True,
                 text=True
             )
-            
+
             if result.returncode == 0:
                 # Extract torch version
                 for line in result.stdout.split('\n'):
                     if line.startswith('Version:'):
                         info["torch_version"] = line.split(':')[1].strip()
                         break
-                
+
                 # Extract CUDA version from torch
                 if info["torch_version"] and '+cu' in info["torch_version"]:
                     info["cuda_suffix"] = info["torch_version"].split('+')[1]
-                    
+
                     # Map to index URL
                     index_urls = {
                         "cu121": "https://download.pytorch.org/whl/cu121",
@@ -798,7 +816,7 @@ To install manually:
                         capture_output=True,
                         text=True
                     )
-                    
+
                     if result.returncode == 0:
                         for line in result.stdout.split('\n'):
                             if 'release' in line:
@@ -812,27 +830,27 @@ To install manually:
                                 break
         except Exception:
             pass
-            
+
         return info
-    
+
     def _install_xformers_with_cuda(self, pip_path: Path, log_path: Path) -> bool:
         """Try to install xformers with appropriate CUDA version.
-        
+
         Args:
             pip_path: Path to pip executable.
             log_path: Path to installation log.
-            
+
         Returns:
             True if installed successfully, False otherwise.
         """
         try:
             torch_info = self._get_torch_info(pip_path)
-            
+
             if not torch_info["torch_version"]:
                 return False
-                
+
             print_info(f"Installing xformers compatible with torch {torch_info['torch_version']}...")
-            
+
             # Try to install compatible xformers
             subprocess.run(
                 [str(pip_path), "install", "xformers", "--index-url", torch_info["index_url"]],
@@ -842,14 +860,14 @@ To install manually:
             )
             self._log_install(log_path, "INFO", f"Installed xformers for {torch_info.get('cuda_suffix', 'unknown')}")
             return True
-                
+
         except Exception as e:
             # Silent fail for optional dependency
             self._log_install(log_path, "INFO", f"Could not install xformers: {str(e)}")
             pass
-        
+
         return False
-    
+
     def fix_dependencies(
         self,
         model_dir: str,
@@ -858,52 +876,52 @@ To install manually:
         fix_cuda: bool = False
     ) -> bool:
         """Fix dependencies in an existing model installation.
-        
+
         Args:
             model_dir: Path to the model installation.
             reinstall: Whether to reinstall all dependencies.
             fix_torch: Whether to fix torch/torchvision/torchaudio versions.
             fix_cuda: Whether to fix CUDA dependencies.
-            
+
         Returns:
             True if fix was successful, False otherwise.
         """
         model_path = Path(model_dir).resolve()
-        
+
         # Validate model directory
         if not model_path.exists():
             print_error(f"Model directory not found: {model_path}")
             return False
-            
+
         if not (model_path / ".venv").exists():
             print_error("No virtual environment found. Is this a valid model installation?")
             return False
-            
+
         if not (model_path / "model_info.json").exists():
             print_error("No model_info.json found. Is this a valid model installation?")
             return False
-        
+
         # Load model info
         with open(model_path / "model_info.json", 'r') as f:
             model_info = json.load(f)
-        
+
         print_info(f"Fixing dependencies for: {model_info.get('model_id', 'Unknown model')}")
-        
+
         # Setup paths
         venv_path = model_path / ".venv"
         pip_path = venv_path / "bin" / "pip"
         if not pip_path.exists():  # Windows
             pip_path = venv_path / "Scripts" / "pip.exe"
-        
+
         log_path = model_path / "fix_log.txt"
-        
+
         # Get current torch info
         torch_info = self._get_torch_info(pip_path)
         if torch_info["torch_version"]:
             print_info(f"Current torch version: {torch_info['torch_version']}")
             if torch_info["cuda_suffix"]:
                 print_info(f"CUDA version: {torch_info['cuda_suffix']}")
-        
+
         try:
             # If no specific fix requested, detect issues
             if not any([reinstall, fix_torch, fix_cuda]):
@@ -917,28 +935,28 @@ To install manually:
                 else:
                     print_success("No dependency issues detected!")
                 return True
-            
+
             # Fix torch if requested
             if fix_torch:
                 print_info("Fixing torch/torchvision/torchaudio versions...")
                 self._fix_torch_versions(pip_path, torch_info.get("cuda_suffix", "cpu"), torch_info["index_url"])
-            
+
             # Fix CUDA dependencies if requested
             if fix_cuda:
                 print_info("Fixing CUDA dependencies...")
                 self._fix_cuda_dependencies(pip_path, model_path, model_info)
-            
+
             # Reinstall all if requested
             if reinstall:
                 print_info("Reinstalling all dependencies...")
-                
+
                 # Save current sys.path
                 original_path = sys.path.copy()
-                
+
                 # Remove model directory from sys.path to avoid conflicts
                 model_path_str = str(model_path)
                 sys.path = [p for p in sys.path if not p.startswith(model_path_str)]
-                
+
                 try:
                     # Get requirements from model using system handlers
                     from handlers import get_handler_class
@@ -951,25 +969,25 @@ To install manually:
                 finally:
                     # Restore original sys.path
                     sys.path = original_path
-            
+
             print_success("Dependencies fixed successfully!")
             return True
-            
+
         except Exception as e:
             print_error(f"Error fixing dependencies: {e}")
             return False
-    
+
     def _detect_dependency_issues(self, pip_path: Path) -> list:
         """Detect dependency issues in the environment.
-        
+
         Args:
             pip_path: Path to pip executable.
-            
+
         Returns:
             List of detected issues.
         """
         issues = []
-        
+
         try:
             # Check for dependency conflicts
             result = subprocess.run(
@@ -977,20 +995,20 @@ To install manually:
                 capture_output=True,
                 text=True
             )
-            
+
             if result.returncode != 0 and result.stdout:
                 # Parse pip check output
                 for line in result.stdout.split('\n'):
                     if 'requires' in line and 'but you have' in line:
                         issues.append(line.strip())
-            
+
             # Check for missing xformers
             result = subprocess.run(
                 [str(pip_path), "show", "xformers"],
                 capture_output=True,
                 text=True
             )
-            
+
             if result.returncode != 0:
                 # Check if this is a diffusion model
                 try:
@@ -1003,15 +1021,15 @@ To install manually:
                         issues.append("xformers not installed (recommended for diffusion models)")
                 except Exception:
                     pass
-            
+
         except Exception as e:
             issues.append(f"Error checking dependencies: {e}")
-        
+
         return issues
-    
+
     def _fix_torch_versions(self, pip_path: Path, cuda_suffix: str, index_url: str):
         """Fix torch, torchvision, and torchaudio versions.
-        
+
         Args:
             pip_path: Path to pip executable.
             cuda_suffix: CUDA version suffix (e.g., cu121).
@@ -1023,11 +1041,11 @@ To install manually:
             capture_output=True,
             text=True
         )
-        
+
         # Determine versions based on CUDA
         if cuda_suffix == "cu121":
             torch_version = "torch==2.5.1"
-            vision_version = "torchvision==0.20.1" 
+            vision_version = "torchvision==0.20.1"
             audio_version = "torchaudio==2.5.1"
         elif cuda_suffix == "cu118":
             torch_version = "torch==2.5.1"
@@ -1038,7 +1056,7 @@ To install manually:
             torch_version = "torch"
             vision_version = "torchvision"
             audio_version = "torchaudio"
-        
+
         print_info(f"Installing torch packages for {cuda_suffix}...")
         subprocess.run(
             [str(pip_path), "install", torch_version, vision_version, audio_version, "--index-url", index_url],
@@ -1046,26 +1064,26 @@ To install manually:
             capture_output=True,
             text=True
         )
-        
+
         print_success("Torch packages fixed!")
-    
+
     def _fix_cuda_dependencies(self, pip_path: Path, model_path: Path, model_info: Dict[str, Any]):
         """Fix CUDA-dependent packages.
-        
+
         Args:
             pip_path: Path to pip executable.
             model_path: Path to model directory.
             model_info: Model information.
         """
         torch_info = self._get_torch_info(pip_path)
-        
+
         if not torch_info["index_url"]:
             print_warning("No CUDA version detected, skipping CUDA dependencies")
             return
-        
+
         # List of CUDA dependencies to fix
         cuda_deps = ["xformers", "flash-attn", "triton", "mamba-ssm", "deepspeed", "bitsandbytes"]
-        
+
         for dep in cuda_deps:
             # Check if installed
             result = subprocess.run(
@@ -1073,17 +1091,17 @@ To install manually:
                 capture_output=True,
                 text=True
             )
-            
+
             if result.returncode == 0:
                 print_info(f"Reinstalling {dep} for {torch_info.get('cuda_suffix', 'CUDA')}...")
-                
+
                 # Uninstall first
                 subprocess.run(
                     [str(pip_path), "uninstall", dep, "-y"],
                     capture_output=True,
                     text=True
                 )
-                
+
                 # Reinstall with correct index
                 if dep == "xformers":
                     self._install_xformers_with_cuda(pip_path, model_path / "fix_log.txt")
@@ -1091,7 +1109,7 @@ To install manually:
                     install_cmd = [str(pip_path), "install", dep, "--index-url", torch_info["index_url"]]
                     if dep == "flash-attn":
                         install_cmd.append("--no-build-isolation")
-                    
+
                     try:
                         subprocess.run(install_cmd, check=True, capture_output=True, text=True)
                         print_success(f"Fixed {dep}")
@@ -1161,7 +1179,7 @@ To install manually:
             core_utils_src = installer_root / "core" / "utils.py"
             core_dst = model_dir / "core"
             core_dst.mkdir(exist_ok=True)
-            
+
             if core_utils_src.exists():
                 shutil.copy2(core_utils_src, core_dst / "utils.py")
                 # Create __init__.py
@@ -1366,35 +1384,35 @@ except Exception as e:
             if item.is_file():
                 total_size += item.stat().st_size
         return total_size
-    
+
     def update_scripts(self, model_dir: str) -> bool:
         """Update scripts and libraries in an existing model installation.
-        
+
         Args:
             model_dir: Path to model directory to update.
-            
+
         Returns:
             True if update successful, False otherwise.
         """
         model_path = Path(model_dir).resolve()
-        
+
         # Check if directory exists
         if not model_path.exists():
             print_error(f"Model directory not found: {model_path}")
             return False
-            
+
         # Check if it's a valid model installation
         if not (model_path / ".install_complete").exists():
             print_error(f"Not a valid model installation: {model_path}")
             return False
-            
+
         print_info(f"Updating scripts in: {model_path}")
-        
+
         # Create a temporary log file
         log_path = model_path / "logs" / "update.log"
         log_path.parent.mkdir(exist_ok=True)
         self._init_install_log(log_path, f"Update for {model_path.name}")
-        
+
         # Use the existing copy scripts method
         if self._copy_scripts(model_path, log_path):
             print_success("Scripts and libraries updated successfully!")
@@ -1403,4 +1421,3 @@ except Exception as e:
         else:
             print_error("Failed to update scripts")
             return False
-

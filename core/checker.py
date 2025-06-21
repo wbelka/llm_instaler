@@ -129,6 +129,23 @@ class ModelChecker:
             # Store model info for installer
             self._last_model_info = requirements.__dict__.copy()
 
+            # Add compatibility result to requirements
+            # Find best compatible option
+            best_compat = None
+            for dtype in ['int4', 'int8', 'float16', 'bfloat16', 'float32']:
+                if dtype in compatibility and compatibility[dtype].can_run:
+                    best_compat = compatibility[dtype]
+                    break
+
+            if best_compat:
+                setattr(requirements, 'compatibility_result', {
+                    'can_run': best_compat.can_run,
+                    'device': best_compat.device,
+                    'memory_required_gb': best_compat.memory_required_gb,
+                    'memory_available_gb': best_compat.memory_available_gb,
+                    'notes': best_compat.notes
+                })
+
             return True, requirements
 
         except RepositoryNotFoundError:
@@ -1123,10 +1140,10 @@ class ModelChecker:
 
     def _serialize_compatibility_result(self, result: Optional[CompatibilityResult]) -> Dict[str, Any]:
         """Serialize a CompatibilityResult object to a dictionary.
-        
+
         Args:
             result: CompatibilityResult object or None.
-            
+
         Returns:
             Dictionary representation of the result.
         """
@@ -1138,7 +1155,7 @@ class ModelChecker:
                 "memory_available_gb": 0,
                 "notes": []
             }
-        
+
         return {
             "can_run": result.can_run,
             "device": result.device,
@@ -1146,7 +1163,7 @@ class ModelChecker:
             "memory_available_gb": result.memory_available_gb,
             "notes": result.notes
         }
-    
+
     def _save_results(self, model_id: str, requirements: ModelRequirements,
                       compatibility: Dict[str, CompatibilityResult]):
         """Save check results for later use."""
