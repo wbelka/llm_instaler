@@ -736,43 +736,73 @@ To install manually:
             True if installed successfully, False otherwise.
         """
         try:
-            # Check if CUDA is available
+            # First check installed torch version
             result = subprocess.run(
-                ["nvcc", "--version"],
+                [str(pip_path), "show", "torch"],
                 capture_output=True,
                 text=True
             )
             
-            if result.returncode == 0:
-                # Extract CUDA version
-                cuda_version = None
-                for line in result.stdout.split('\n'):
-                    if 'release' in line:
-                        # Extract version like "11.8" from "release 11.8, V11.8.89"
-                        parts = line.split('release')[1].split(',')[0].strip()
-                        cuda_version = parts
-                        break
+            if result.returncode != 0:
+                return False
                 
-                if cuda_version:
-                    # Determine appropriate index URL
-                    if cuda_version.startswith("12.1"):
-                        index_url = "https://download.pytorch.org/whl/cu121"
-                    elif cuda_version.startswith("11.8"):
-                        index_url = "https://download.pytorch.org/whl/cu118"
-                    else:
-                        index_url = "https://download.pytorch.org/whl/cu118"  # Default
-                    
-                    print_info(f"Installing xformers for CUDA {cuda_version}...")
-                    subprocess.run(
-                        [str(pip_path), "install", "xformers", "--index-url", index_url],
-                        check=True,
-                        capture_output=True,
-                        text=True
-                    )
-                    self._log_install(log_path, "INFO", f"Installed xformers for CUDA {cuda_version}")
-                    return True
-        except:
+            # Extract torch version
+            torch_version = None
+            for line in result.stdout.split('\n'):
+                if line.startswith('Version:'):
+                    torch_version = line.split(':')[1].strip()
+                    break
+            
+            if not torch_version:
+                return False
+            
+            # Check CUDA version from torch
+            cuda_suffix = None
+            if '+cu' in torch_version:
+                # Extract CUDA version from torch version (e.g., "2.5.1+cu121" -> "cu121")
+                cuda_suffix = torch_version.split('+')[1]
+            else:
+                # Try to detect from system
+                result = subprocess.run(
+                    ["nvcc", "--version"],
+                    capture_output=True,
+                    text=True
+                )
+                
+                if result.returncode == 0:
+                    for line in result.stdout.split('\n'):
+                        if 'release' in line:
+                            cuda_version = line.split('release')[1].split(',')[0].strip()
+                            if cuda_version.startswith("12.1"):
+                                cuda_suffix = "cu121"
+                            elif cuda_version.startswith("11.8"):
+                                cuda_suffix = "cu118"
+                            break
+            
+            if cuda_suffix:
+                # Map CUDA suffix to index URL
+                index_urls = {
+                    "cu121": "https://download.pytorch.org/whl/cu121",
+                    "cu118": "https://download.pytorch.org/whl/cu118",
+                    "cu117": "https://download.pytorch.org/whl/cu117",
+                }
+                index_url = index_urls.get(cuda_suffix, "https://download.pytorch.org/whl/cu118")
+                
+                print_info(f"Installing xformers compatible with torch {torch_version}...")
+                
+                # Try to install compatible xformers
+                subprocess.run(
+                    [str(pip_path), "install", "xformers", "--index-url", index_url],
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+                self._log_install(log_path, "INFO", f"Installed xformers for {cuda_suffix}")
+                return True
+                
+        except Exception as e:
             # Silent fail for optional dependency
+            self._log_install(log_path, "INFO", f"Could not install xformers: {str(e)}")
             pass
         
         return False
