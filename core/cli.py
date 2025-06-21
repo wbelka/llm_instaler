@@ -187,6 +187,39 @@ def update(ctx: click.Context, model_dir: str):
 
 
 @cli.command()
+@click.argument('model_dir', type=click.Path(exists=True))
+@click.option('--reinstall', '-r', is_flag=True, help='Reinstall all dependencies')
+@click.option('--fix-torch', is_flag=True, help='Fix torch/torchvision/torchaudio versions')
+@click.option('--fix-cuda', is_flag=True, help='Fix CUDA dependencies')
+@click.pass_context
+def fix(ctx: click.Context, model_dir: str, reinstall: bool, fix_torch: bool, fix_cuda: bool):
+    """Fix dependencies in an installed model.
+
+    MODEL_DIR: Path to the model installation directory.
+
+    This command fixes dependency issues in existing model installations,
+    including version conflicts and CUDA compatibility problems.
+    """
+    logger = ctx.obj['logger']
+    logger.info(f"Fixing dependencies in: {model_dir}")
+
+    # Import here to avoid circular imports
+    from core.installer import ModelInstaller
+    
+    # Create installer and run fix
+    installer = ModelInstaller()
+    success = installer.fix_dependencies(
+        model_dir,
+        reinstall=reinstall,
+        fix_torch=fix_torch,
+        fix_cuda=fix_cuda
+    )
+    
+    if not success:
+        sys.exit(1)
+
+
+@cli.command()
 @click.option('--show-paths', is_flag=True, help='Show expanded paths')
 @click.pass_context
 def config(ctx: click.Context, show_paths: bool):
