@@ -69,6 +69,14 @@ class DiffusionHandler(BaseHandler):
         if 'sdxl' in model_id:
             requirements.capabilities["sdxl"] = True
             requirements.special_dependencies.append("invisible-watermark")
+            
+        # Wan models need specific dependencies
+        if 'wan' in model_id.lower():
+            # Ensure transformers is in the list (if not already)
+            if 'transformers' not in requirements.base_dependencies:
+                requirements.base_dependencies.append("transformers")
+            # Wan models also benefit from these
+            requirements.optional_dependencies.append("scipy")
         
         # Optional dependencies
         requirements.optional_dependencies = [

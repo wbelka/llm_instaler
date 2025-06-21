@@ -490,8 +490,11 @@ class ModelInstaller:
         if any('torch' in dep for dep in base_deps):
             if not self._install_pytorch(pip_path, log_path):
                 return False
-            # Remove torch from base_deps to avoid reinstalling
-            base_deps = [dep for dep in base_deps if 'torch' not in dep]
+            # Remove only torch-related packages from base_deps to avoid reinstalling
+            # Keep transformers and other non-torch packages
+            base_deps = [dep for dep in base_deps if not any(
+                torch_pkg in dep for torch_pkg in ['torch==', 'torchvision', 'torchaudio', 'torch>=', 'torch<']
+            ) and dep != 'torch']
 
         # Install base dependencies
         if base_deps:
