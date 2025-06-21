@@ -7,7 +7,6 @@ management, and parameter configuration.
 
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Tuple
-from pathlib import Path
 
 
 class BaseHandler(ABC):

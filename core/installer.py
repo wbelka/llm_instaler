@@ -810,7 +810,7 @@ To install manually:
                                     info["cuda_suffix"] = "cu118"
                                     info["index_url"] = "https://download.pytorch.org/whl/cu118"
                                 break
-        except:
+        except Exception:
             pass
             
         return info
@@ -1001,7 +1001,7 @@ To install manually:
                     )
                     if result.returncode == 0:
                         issues.append("xformers not installed (recommended for diffusion models)")
-                except:
+                except Exception:
                     pass
             
         except Exception as e:
@@ -1095,7 +1095,7 @@ To install manually:
                     try:
                         subprocess.run(install_cmd, check=True, capture_output=True, text=True)
                         print_success(f"Fixed {dep}")
-                    except:
+                    except Exception:
                         print_warning(f"Could not reinstall {dep}")
 
     def _copy_scripts(self, model_dir: Path, log_path: Path) -> bool:

@@ -4,7 +4,7 @@ This package contains handlers for various model architectures and provides
 a unified interface for loading and working with different model types.
 """
 
-from typing import Dict, Any, Type, Optional
+from typing import Dict, Any, Type
 from handlers.base import BaseHandler
 
 

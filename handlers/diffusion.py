@@ -271,7 +271,7 @@ class DiffusionHandler(BaseHandler):
         if device == "cuda":
             try:
                 pipeline.enable_xformers_memory_efficient_attention()
-            except:
+            except Exception:
                 pipeline.enable_attention_slicing()
         
         return pipeline, None
