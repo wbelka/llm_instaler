@@ -58,7 +58,9 @@ class DiffusionHandler(BaseHandler):
             "accelerate",
             "pillow",
             "numpy",
-            "safetensors"
+            "safetensors",
+            "ftfy",  # Text fixing library used by some models
+            "beautifulsoup4",  # Sometimes needed with ftfy
         ]
         
         # Check for specific model requirements
@@ -82,6 +84,9 @@ class DiffusionHandler(BaseHandler):
             # Ensure transformers is in the list (if not already)
             if 'transformers' not in requirements.base_dependencies:
                 requirements.base_dependencies.append("transformers")
+            # Ensure ftfy is in the list
+            if 'ftfy' not in requirements.base_dependencies:
+                requirements.base_dependencies.append("ftfy")
             # Wan models also benefit from these
             requirements.optional_dependencies.append("scipy")
         
