@@ -4,7 +4,7 @@ This handler manages image and video generation models that use
 diffusion techniques.
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple, Optional
 from handlers.base import BaseHandler
 from core.checker import ModelRequirements
 
@@ -151,3 +151,95 @@ class DiffusionHandler(BaseHandler):
                 size_gb = 5.0  # Default for unknown diffusion models
         
         return size_gb
+    
+    def get_dependencies(self) -> List[str]:
+        """Get Python dependencies for diffusion models.
+        
+        Returns:
+            List of required pip packages.
+        """
+        return self.analyze().base_dependencies
+    
+    def get_system_dependencies(self) -> List[str]:
+        """Get system-level dependencies.
+        
+        Returns:
+            List of system packages or requirements.
+        """
+        # Most diffusion models need CUDA
+        return ["cuda>=11.0"]
+    
+    def get_inference_params(self) -> Dict[str, Any]:
+        """Get optimal inference parameters.
+        
+        Returns:
+            Dictionary of inference parameters.
+        """
+        return {
+            "num_inference_steps": 50,
+            "guidance_scale": 7.5,
+            "negative_prompt": "",
+            "width": 512,
+            "height": 512,
+            "seed": None,
+        }
+    
+    def get_training_params(self) -> Dict[str, Any]:
+        """Get optimal training parameters.
+        
+        Returns:
+            Dictionary of training parameters.
+        """
+        return {
+            "learning_rate": 1e-4,
+            "train_batch_size": 1,
+            "gradient_accumulation_steps": 4,
+            "num_train_epochs": 100,
+            "checkpointing_steps": 500,
+            "validation_epochs": 10,
+            "enable_xformers_memory_efficient_attention": True,
+        }
+    
+    def load_model(self, model_path: str, **kwargs):
+        """Load diffusion model.
+        
+        Args:
+            model_path: Path to the model directory.
+            **kwargs: Additional loading parameters.
+            
+        Returns:
+            Loaded model (pipeline) and tokenizer/processor (None for diffusion).
+        """
+        from model_loader import _load_diffusers_model
+        return _load_diffusers_model(self.model_info, model_path, **kwargs)
+    
+    def validate_model_files(self, model_path: str) -> Tuple[bool, Optional[str]]:
+        """Validate model files.
+        
+        Args:
+            model_path: Path to the model directory.
+            
+        Returns:
+            Tuple of (is_valid, error_message).
+        """
+        from pathlib import Path
+        model_dir = Path(model_path)
+        
+        # Check for model_index.json
+        if not (model_dir / "model_index.json").exists():
+            return False, "Missing model_index.json file"
+        
+        # Check for essential components
+        required_components = ["unet", "vae", "text_encoder", "tokenizer", "scheduler"]
+        missing = []
+        
+        for component in required_components:
+            component_path = model_dir / component
+            if not component_path.exists():
+                # Some models might have it in config only
+                continue
+                
+        if missing:
+            return False, f"Missing components: {', '.join(missing)}"
+            
+        return True, None
