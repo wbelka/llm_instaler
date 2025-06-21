@@ -399,6 +399,11 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
 
     if not request.prompt:
         raise HTTPException(status_code=400, detail="No prompt provided")
+    
+    # Log incoming request parameters
+    logger.info(f"Received generation request: width={request.width}, height={request.height}, "
+                f"steps={request.num_inference_steps}, guidance={request.guidance_scale}, "
+                f"num_frames={request.num_frames}")
 
     # Set seed if provided
     if request.seed is not None:
@@ -440,17 +445,12 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
     if is_video_model:
         # Video models often have specific size requirements
         # Default to smaller sizes for video to avoid CUDA errors
-        gen_kwargs["width"] = min(request.width, 256)
-        gen_kwargs["height"] = min(request.height, 256)
-
-        # Some video models need num_frames parameter
-        if hasattr(MODEL, "unet") and hasattr(MODEL.unet, "config"):
-            if hasattr(MODEL.unet.config, "sample_size"):
-                # Use model's preferred size if available
-                sample_size = MODEL.unet.config.sample_size
-                if isinstance(sample_size, int):
-                    gen_kwargs["width"] = sample_size
-                    gen_kwargs["height"] = sample_size
+        gen_kwargs["width"] = min(request.width, 512)  # Allow up to 512 for video
+        gen_kwargs["height"] = min(request.height, 512)
+        
+        # Log if we're limiting the size
+        if request.width > 512 or request.height > 512:
+            logger.info(f"Limiting video size from {request.width}x{request.height} to {gen_kwargs['width']}x{gen_kwargs['height']}")
 
         # Add num_frames if the model supports it
         gen_kwargs["num_frames"] = request.num_frames

@@ -885,11 +885,20 @@
             image.style.display = 'none';
             
             // Gather parameters
+            const numStepsEl = document.getElementById('numSteps');
+            const guidanceScaleEl = document.getElementById('guidanceScale');
+            
+            // Debug log
+            console.log('UI Elements:', {
+                numSteps: numStepsEl ? numStepsEl.value : 'not found',
+                guidanceScale: guidanceScaleEl ? guidanceScaleEl.value : 'not found'
+            });
+            
             const params = {
                 prompt: prompt,
                 negative_prompt: document.getElementById('negativePrompt').value,
-                num_inference_steps: parseInt(document.getElementById('numSteps').value),
-                guidance_scale: parseFloat(document.getElementById('guidanceScale').value),
+                num_inference_steps: numStepsEl ? parseInt(numStepsEl.value) : 50,
+                guidance_scale: guidanceScaleEl ? parseFloat(guidanceScaleEl.value) : 7.5,
                 width: parseInt(document.getElementById('imageWidth').value),
                 height: parseInt(document.getElementById('imageHeight').value)
             };
@@ -904,6 +913,9 @@
             if (document.getElementById('videoControls').style.display !== 'none') {
                 params.num_frames = parseInt(document.getElementById('numFrames').value);
             }
+            
+            // Log parameters being sent
+            console.log('Sending params:', params);
             
             try {
                 const response = await fetch('/generate', {
