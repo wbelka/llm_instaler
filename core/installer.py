@@ -173,24 +173,11 @@ class ModelInstaller:
                     cached_data = json.load(f)
 
                     # Convert requirements dict back to object
-                    from dataclasses import dataclass, field
-
-                    @dataclass
-                    class ModelRequirements:
-                        model_type: str = ""
-                        model_family: str = ""
-                        architecture_type: str = ""
-                        primary_library: str = ""
-                        base_dependencies: list = field(default_factory=list)
-                        special_dependencies: list = field(default_factory=list)
-                        optional_dependencies: list = field(default_factory=list)
-                        disk_space_gb: float = 0.0
-                        memory_requirements: dict = field(default_factory=dict)
-                        capabilities: dict = field(default_factory=dict)
-                        special_config: dict = field(default_factory=dict)
-                        compatibility_result: dict = field(default_factory=dict)
+                    from core.checker import ModelRequirements
 
                     req_data = cached_data.get('requirements', {})
+                    # Remove compatibility_result if it exists (not in original ModelRequirements)
+                    req_data.pop('compatibility_result', None)
                     requirements = ModelRequirements(**req_data)
 
                     return cached_data.get('model_info'), requirements
