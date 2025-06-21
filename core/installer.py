@@ -219,14 +219,23 @@ class ModelInstaller:
         """
         # Check if model can run on this system
         compatibility = getattr(requirements, 'compatibility_result', None)
-        if not compatibility or not compatibility.can_run:
+        
+        # Handle both dict (from cache) and object forms
+        if compatibility is None:
+            print_error("No compatibility information available")
+            return False
+            
+        # Check can_run - handle both dict and object
+        can_run = compatibility.get('can_run', False) if isinstance(compatibility, dict) else getattr(compatibility, 'can_run', False)
+        if not can_run:
             print_error("Model is not compatible with your system")
             print_info("See the compatibility report above for details")
             return False
 
-        # Show warnings if any
-        if compatibility.notes:
-            for note in compatibility.notes:
+        # Show warnings if any - handle both dict and object
+        notes = compatibility.get('notes', []) if isinstance(compatibility, dict) else getattr(compatibility, 'notes', [])
+        if notes:
+            for note in notes:
                 print_warning(f"Note: {note}")
 
         return True
