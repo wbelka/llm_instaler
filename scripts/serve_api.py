@@ -72,7 +72,7 @@ class GenerateRequest(BaseModel):
     width: int = Field(512, ge=64, le=2048)
     height: int = Field(512, ge=64, le=2048)
     seed: Optional[int] = None
-    
+
     # Video generation parameters
     num_frames: int = Field(16, ge=1, le=128, description="Number of frames for video generation")
 
@@ -85,14 +85,14 @@ class GenerateRequest(BaseModel):
     max_thinking_tokens: int = Field(10000, ge=1)
     max_answer_tokens: int = Field(2000, ge=1)
     show_thinking: bool = Field(True, description="Show thinking process")
-    
+
     # Multimodal inputs
     image_data: Optional[str] = Field(None, description="Base64 encoded image")
     audio_data: Optional[str] = Field(None, description="Base64 encoded audio")
-    
+
     # Additional options
     return_all_scores: bool = Field(False, description="Return all class scores for classification")
-    
+
     class Config:
         extra = "allow"  # Allow extra fields for flexibility
 
@@ -182,11 +182,24 @@ async def get_model_info():
     if not MODEL_INFO:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
+    # Check if it's a video model
+    model_id = MODEL_INFO.get("model_id", "").lower()
+    model_family = MODEL_INFO.get("model_family", "")
+    model_class = MODEL_INFO.get("config", {}).get("_class_name", "").lower()
+
+    # Override model_family for video models if needed
+    if ('video' in model_id or 'video' in model_class) and model_family == "image-generation":
+        model_family = "video-generation"
+
+    # Add UI-specific capabilities
+    capabilities = MODEL_INFO.get("capabilities", {})
+    capabilities["is_video_model"] = model_family == "video-generation" or 'video' in model_id
+
     return ModelInfoResponse(
         model_id=MODEL_INFO.get("model_id", "unknown"),
         model_type=MODEL_INFO.get("model_type", "unknown"),
-        model_family=MODEL_INFO.get("model_family", "unknown"),
-        capabilities=MODEL_INFO.get("capabilities", {}),
+        model_family=model_family,
+        capabilities=capabilities,
         device=str(DEVICE),
         dtype=str(DTYPE)
     )
@@ -205,27 +218,27 @@ async def generate(request: GenerateRequest):
         # Text generation models
         if model_family in ["language-model", "text-classifier"]:
             return await generate_text(request)
-        
+
         # Image/video generation models
         elif model_family in ["image-generation", "video-generation", "text-to-image", "text-to-video"]:
             return await generate_image(request)
-        
+
         # Embedding models
         elif model_family in ["embedding", "text-embedding"]:
             return await generate_embeddings(request)
-        
+
         # Vision models
         elif model_family in ["vision", "image-classification", "object-detection"]:
             return await generate_vision(request)
-        
-        # Audio models  
+
+        # Audio models
         elif model_family in ["audio", "speech-to-text", "text-to-speech"]:
             return await generate_audio(request)
-        
+
         # Multimodal models
         elif model_family in ["multimodal", "vision-language"]:
             return await generate_multimodal(request)
-        
+
         else:
             raise HTTPException(
                 status_code=400,
@@ -244,7 +257,7 @@ async def generate_text(request: GenerateRequest) -> GenerateResponse:
     # Check if this is a reasoning model
     capabilities = MODEL_INFO.get("capabilities", {})
     supports_reasoning = capabilities.get("reasoning", False)
-    
+
     if request.reasoning_mode and supports_reasoning:
         return await generate_with_reasoning(request)
 
@@ -302,7 +315,7 @@ async def generate_text(request: GenerateRequest) -> GenerateResponse:
 async def generate_with_reasoning(request: GenerateRequest) -> GenerateResponse:
     """Generate text with reasoning/thinking process."""
     import torch
-    
+
     # Prepare input with thinking tags
     if request.messages:
         text = TOKENIZER.apply_chat_template(
@@ -312,16 +325,16 @@ async def generate_with_reasoning(request: GenerateRequest) -> GenerateResponse:
         )
     else:
         text = request.prompt
-    
+
     # Add thinking instruction if not present
     if "<thinking>" not in text:
         text = f"{text}\n\nPlease think step by step about this problem."
-    
+
     # Tokenize
     inputs = TOKENIZER(text, return_tensors="pt")
     if hasattr(MODEL, "device"):
         inputs = {k: v.to(MODEL.device) for k, v in inputs.items()}
-    
+
     # Generate with extended limits for thinking
     with torch.no_grad():
         generation_kwargs = {
@@ -332,19 +345,19 @@ async def generate_with_reasoning(request: GenerateRequest) -> GenerateResponse:
             "do_sample": request.temperature > 0,
             "pad_token_id": TOKENIZER.eos_token_id,
         }
-        
+
         outputs = MODEL.generate(**inputs, **generation_kwargs)
-    
+
     # Decode full output
     full_output = TOKENIZER.decode(
         outputs[0][inputs["input_ids"].shape[1]:],
         skip_special_tokens=True
     )
-    
+
     # Parse thinking and answer
     thinking = ""
     answer = full_output
-    
+
     # Try to extract thinking process
     if "<thinking>" in full_output and "</thinking>" in full_output:
         start = full_output.find("<thinking>") + len("<thinking>")
@@ -358,23 +371,23 @@ async def generate_with_reasoning(request: GenerateRequest) -> GenerateResponse:
         if end > start:
             thinking = full_output[start:end].strip()
             answer = full_output[end + 3:].strip()
-    
+
     # Calculate usage
     usage = {
         "prompt_tokens": inputs["input_ids"].shape[1],
         "completion_tokens": outputs.shape[1] - inputs["input_ids"].shape[1],
         "total_tokens": outputs.shape[1]
     }
-    
+
     response = GenerateResponse(
         text=answer if not request.show_thinking else full_output,
         usage=usage
     )
-    
+
     if request.show_thinking:
         response.thinking = thinking
         response.answer = answer
-    
+
     return response
 
 
@@ -398,16 +411,22 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
     model_family = model_info.get('model_family', '').lower()
     model_id = model_info.get('model_id', '').lower()
     model_class = model_info.get('config', {}).get('_class_name', '').lower()
-    
+
     # Multiple ways to detect video models
     is_video_model = (
         'video' in model_family or
         any(indicator in model_id for indicator in ['video', 'text2video', 'text-to-video', 't2v']) or
         'video' in model_class
     )
-    
-    logger.info(f"Model detection: model_family={model_info.get('model_family')}, model_id={model_info.get('model_id')}, _class_name={model_info.get('config', {}).get('_class_name')}, is_video_model={is_video_model}")
-    
+
+    logger.info(
+        f"Model detection: model_family={
+            model_info.get('model_family')}, model_id={
+            model_info.get('model_id')}, _class_name={
+                model_info.get(
+                    'config',
+                    {}).get('_class_name')}, is_video_model={is_video_model}")
+
     # Prepare generation kwargs
     gen_kwargs = {
         "prompt": request.prompt,
@@ -416,14 +435,14 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
         "guidance_scale": request.guidance_scale,
         "generator": generator
     }
-    
+
     # For video models, we need to be more careful with dimensions
     if is_video_model:
         # Video models often have specific size requirements
         # Default to smaller sizes for video to avoid CUDA errors
         gen_kwargs["width"] = min(request.width, 256)
         gen_kwargs["height"] = min(request.height, 256)
-        
+
         # Some video models need num_frames parameter
         if hasattr(MODEL, "unet") and hasattr(MODEL.unet, "config"):
             if hasattr(MODEL.unet.config, "sample_size"):
@@ -432,23 +451,32 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
                 if isinstance(sample_size, int):
                     gen_kwargs["width"] = sample_size
                     gen_kwargs["height"] = sample_size
-        
+
         # Add num_frames if the model supports it
         gen_kwargs["num_frames"] = request.num_frames
     else:
         gen_kwargs["width"] = request.width
         gen_kwargs["height"] = request.height
-    
+
     # Generate image/video
     try:
-        logger.info(f"Generating with params: width={gen_kwargs.get('width')}, height={gen_kwargs.get('height')}, num_frames={gen_kwargs.get('num_frames', 'N/A')}")
+        logger.info(
+            f"Generating with params: width={
+                gen_kwargs.get('width')}, height={
+                gen_kwargs.get('height')}, num_frames={
+                gen_kwargs.get(
+                    'num_frames',
+                    'N/A')}")
         output = MODEL(**gen_kwargs)
     except RuntimeError as e:
         error_msg = str(e)
         if "CUDA" in error_msg:
             if is_video_model:
                 # Try with even smaller dimensions
-                logger.warning(f"CUDA error with dimensions {gen_kwargs['width']}x{gen_kwargs['height']}, trying smaller")
+                logger.warning(
+                    f"CUDA error with dimensions {
+                        gen_kwargs['width']}x{
+                        gen_kwargs['height']}, trying smaller")
                 gen_kwargs["width"] = 128
                 gen_kwargs["height"] = 128
                 gen_kwargs["num_frames"] = 8
@@ -467,7 +495,7 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
                 )
         else:
             raise
-    
+
     # Handle different output types
     if hasattr(output, 'images') and output.images is not None:
         # Standard image generation
@@ -477,19 +505,19 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
         frames = output.frames[0]  # Shape: [num_frames, height, width, channels]
         if isinstance(frames, torch.Tensor):
             frames = frames.cpu().numpy()
-        
+
         # Take the first frame
         first_frame = frames[0]
-        
+
         # Convert to PIL Image
         if first_frame.dtype != np.uint8:
             # Normalize to 0-255 range
             if first_frame.min() < 0:
                 first_frame = (first_frame + 1) / 2  # From [-1, 1] to [0, 1]
             first_frame = (first_frame * 255).astype(np.uint8)
-        
+
         image = Image.fromarray(first_frame)
-        
+
         # Log that this was a video
         logger.info(f"Generated video with {len(frames)} frames, returning first frame")
     else:
@@ -540,14 +568,14 @@ async def generate_vision(request: GenerateRequest) -> GenerateResponse:
     import torch
     from PIL import Image
     import numpy as np
-    
+
     # Vision models expect image input
     if not hasattr(request, 'image_data'):
         raise HTTPException(
             status_code=400,
             detail="Vision models require image input"
         )
-    
+
     # Decode base64 image
     try:
         import base64
@@ -558,7 +586,7 @@ async def generate_vision(request: GenerateRequest) -> GenerateResponse:
             status_code=400,
             detail=f"Invalid image data: {str(e)}"
         )
-    
+
     # Process image through model
     if TOKENIZER:  # Some vision models have processors
         inputs = TOKENIZER(images=image, return_tensors="pt")
@@ -571,32 +599,32 @@ async def generate_vision(request: GenerateRequest) -> GenerateResponse:
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
         inputs = {"pixel_values": transform(image).unsqueeze(0)}
-    
+
     if hasattr(MODEL, "device"):
         inputs = {k: v.to(MODEL.device) for k, v in inputs.items()}
-    
+
     # Generate predictions
     with torch.no_grad():
         outputs = MODEL(**inputs)
-    
+
     # Process outputs based on model type
     model_family = MODEL_INFO.get("model_family", "")
-    
+
     if model_family == "image-classification":
         # Get predicted class
         logits = outputs.logits
         predicted_class_idx = logits.argmax(-1).item()
-        
+
         # Get class labels if available
         if hasattr(MODEL.config, "id2label"):
             predicted_class = MODEL.config.id2label[predicted_class_idx]
         else:
             predicted_class = f"class_{predicted_class_idx}"
-        
+
         # Get confidence scores
         probs = torch.nn.functional.softmax(logits, dim=-1)
         confidence = probs[0][predicted_class_idx].item()
-        
+
         return GenerateResponse(
             text=predicted_class,
             metadata={
@@ -605,7 +633,7 @@ async def generate_vision(request: GenerateRequest) -> GenerateResponse:
                 "all_scores": probs[0].tolist() if request.get("return_all_scores", False) else None
             }
         )
-    
+
     elif model_family == "object-detection":
         # Process detection outputs
         # This is a simplified version - actual implementation depends on model
@@ -616,7 +644,7 @@ async def generate_vision(request: GenerateRequest) -> GenerateResponse:
                 "scores": outputs.get("scores", [])
             }
         )
-    
+
     else:
         # Generic vision output
         return GenerateResponse(
@@ -630,38 +658,38 @@ async def generate_audio(request: GenerateRequest) -> GenerateResponse:
     import numpy as np
     import tempfile
     import os
-    
+
     try:
         import soundfile as sf
     except ImportError:
         logger.warning("soundfile not installed, audio processing will be limited")
         sf = None
-    
+
     model_family = MODEL_INFO.get("model_family", "")
-    
+
     if model_family == "text-to-speech":
         # TTS: text input -> audio output
         if not request.prompt:
             raise HTTPException(status_code=400, detail="No text provided for TTS")
-        
+
         # Generate speech
         if TOKENIZER:
             inputs = TOKENIZER(request.prompt, return_tensors="pt")
         else:
             inputs = {"input_text": request.prompt}
-        
+
         with torch.no_grad():
             if hasattr(MODEL, "generate_speech"):
                 audio_output = MODEL.generate_speech(**inputs)
             else:
                 audio_output = MODEL(**inputs)
-        
+
         # Convert to audio file
         if isinstance(audio_output, torch.Tensor):
             audio_np = audio_output.cpu().numpy()
         else:
             audio_np = audio_output
-        
+
         # Save as audio file
         if sf:
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
@@ -672,7 +700,7 @@ async def generate_audio(request: GenerateRequest) -> GenerateResponse:
         else:
             # Return raw numpy array as base64 if soundfile not available
             audio_data = base64.b64encode(audio_np.tobytes()).decode()
-        
+
         return GenerateResponse(
             metadata={
                 "audio": audio_data,
@@ -680,7 +708,7 @@ async def generate_audio(request: GenerateRequest) -> GenerateResponse:
                 "sample_rate": 22050
             }
         )
-    
+
     elif model_family == "speech-to-text":
         # STT: audio input -> text output
         if not hasattr(request, 'audio_data'):
@@ -688,11 +716,11 @@ async def generate_audio(request: GenerateRequest) -> GenerateResponse:
                 status_code=400,
                 detail="Audio models require audio input"
             )
-        
+
         # Decode audio
         try:
             audio_data = base64.b64decode(request.audio_data)
-            
+
             if sf:
                 # Load audio with soundfile
                 with tempfile.NamedTemporaryFile(suffix='.wav', delete=True) as tmp_file:
@@ -713,24 +741,24 @@ async def generate_audio(request: GenerateRequest) -> GenerateResponse:
                 status_code=400,
                 detail=f"Invalid audio data: {str(e)}"
             )
-        
+
         # Process audio through model
         if TOKENIZER:
             inputs = TOKENIZER(audio_input, sampling_rate=sample_rate, return_tensors="pt")
         else:
             inputs = {"input_values": torch.tensor(audio_input).unsqueeze(0)}
-        
+
         with torch.no_grad():
             outputs = MODEL(**inputs)
-        
+
         # Decode transcription
         if hasattr(TOKENIZER, "decode"):
             transcription = TOKENIZER.decode(outputs.logits.argmax(-1)[0])
         else:
             transcription = "Transcription not available"
-        
+
         return GenerateResponse(text=transcription)
-    
+
     else:
         raise HTTPException(
             status_code=400,
@@ -742,11 +770,11 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
     """Generate for multimodal models."""
     import torch
     from PIL import Image
-    
+
     # Multimodal models typically take both text and image inputs
     if not request.prompt:
         raise HTTPException(status_code=400, detail="No prompt provided")
-    
+
     # Check if image is provided
     image = None
     if hasattr(request, 'image_data') and request.image_data:
@@ -755,7 +783,7 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
             image = Image.open(BytesIO(image_data))
         except Exception as e:
             logger.warning(f"Failed to decode image: {e}")
-    
+
     # Process inputs
     if TOKENIZER:
         if image:
@@ -776,10 +804,10 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
             status_code=500,
             detail="No tokenizer/processor available for multimodal model"
         )
-    
+
     if hasattr(MODEL, "device"):
         inputs = {k: v.to(MODEL.device) for k, v in inputs.items()}
-    
+
     # Generate
     with torch.no_grad():
         generation_kwargs = {
@@ -788,22 +816,22 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
             "top_p": request.top_p,
             "do_sample": request.temperature > 0,
         }
-        
+
         if hasattr(MODEL, "generate"):
             outputs = MODEL.generate(**inputs, **generation_kwargs)
-            
+
             # Decode output
             generated_text = TOKENIZER.decode(outputs[0], skip_special_tokens=True)
-            
+
             # Remove input prompt from output if present
             if request.prompt in generated_text:
                 generated_text = generated_text.replace(request.prompt, "").strip()
-            
+
             return GenerateResponse(text=generated_text)
         else:
             # Non-generative multimodal model (e.g., CLIP)
             outputs = MODEL(**inputs)
-            
+
             # Return embeddings or similarity scores
             return GenerateResponse(
                 metadata={
@@ -913,21 +941,21 @@ async def generate_video(request: GenerateRequest):
             status_code=400,
             detail="Video generation only supported for video models"
         )
-    
+
     import torch
     import numpy as np
     import tempfile
     import os
-    
+
     if not request.prompt:
         raise HTTPException(status_code=400, detail="No prompt provided")
-    
+
     # Set seed if provided
     if request.seed is not None:
         generator = torch.Generator(device=MODEL.device).manual_seed(request.seed)
     else:
         generator = None
-    
+
     # Generate video
     output = MODEL(
         prompt=request.prompt,
@@ -938,50 +966,50 @@ async def generate_video(request: GenerateRequest):
         height=request.height,
         generator=generator
     )
-    
+
     # Get frames
     frames = output.frames[0]  # Shape: [num_frames, height, width, channels]
     if isinstance(frames, torch.Tensor):
         frames = frames.cpu().numpy()
-    
+
     # Normalize frames if needed
     if frames.dtype != np.uint8:
         if frames.min() < 0:
             frames = (frames + 1) / 2  # From [-1, 1] to [0, 1]
         frames = (frames * 255).astype(np.uint8)
-    
+
     # Save as video file
     try:
         # Try to use OpenCV if available
         import cv2
-        
+
         # Create temporary file
         with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmp_file:
             video_path = tmp_file.name
-        
+
         # Get video properties
         num_frames, height, width = frames.shape[:3]
         fps = 8  # Default FPS for generated videos
-        
+
         # Create video writer
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(video_path, fourcc, fps, (width, height))
-        
+
         # Write frames
         for frame in frames:
             # Convert RGB to BGR for OpenCV
             bgr_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             out.write(bgr_frame)
-        
+
         out.release()
-        
+
         # Read video file and encode to base64
         with open(video_path, 'rb') as f:
             video_data = base64.b64encode(f.read()).decode()
-        
+
         # Clean up
         os.unlink(video_path)
-        
+
         return {
             "video": video_data,
             "metadata": {
@@ -992,11 +1020,11 @@ async def generate_video(request: GenerateRequest):
                 "format": "mp4"
             }
         }
-        
+
     except ImportError:
         # OpenCV not available, return frames as images
         logger.warning("OpenCV not available, returning frames as images")
-        
+
         # Convert frames to base64 encoded images
         images = []
         for i, frame in enumerate(frames):
@@ -1006,7 +1034,7 @@ async def generate_video(request: GenerateRequest):
             img.save(buffered, format="PNG")
             img_str = base64.b64encode(buffered.getvalue()).decode()
             images.append(img_str)
-        
+
         return {
             "frames": images,
             "metadata": {
@@ -1039,4 +1067,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

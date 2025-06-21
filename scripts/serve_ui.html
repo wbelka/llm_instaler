@@ -326,6 +326,37 @@
             text-align: right;
         }
 
+        /* New styles for generation controls */
+        .setting-row {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .setting-group.half {
+            flex: 1;
+        }
+
+        .setting-select {
+            width: 100%;
+            padding: 0.5rem;
+            background-color: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-size: 0.95rem;
+        }
+
+        .setting-input {
+            width: 100%;
+            padding: 0.5rem;
+            background-color: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-size: 0.95rem;
+        }
+
         /* Image Generation Interface */
         .image-container {
             display: none;
@@ -463,6 +494,91 @@
                         <label class="setting-label">Negative Prompt</label>
                         <textarea class="input-textarea" id="negativePrompt" placeholder="What to avoid..."></textarea>
                     </div>
+                    
+                    <!-- Size Presets -->
+                    <div class="setting-group">
+                        <label class="setting-label">Size Preset</label>
+                        <select class="setting-select" id="sizePreset" onchange="applySizePreset()">
+                            <option value="custom">Custom</option>
+                            <optgroup label="Square">
+                                <option value="256x256">256×256 (Small)</option>
+                                <option value="512x512" selected>512×512 (Standard)</option>
+                                <option value="768x768">768×768 (Large)</option>
+                                <option value="1024x1024">1024×1024 (XL)</option>
+                            </optgroup>
+                            <optgroup label="Portrait">
+                                <option value="512x768">512×768</option>
+                                <option value="768x1024">768×1024</option>
+                            </optgroup>
+                            <optgroup label="Landscape">
+                                <option value="768x512">768×512</option>
+                                <option value="1024x768">1024×768</option>
+                            </optgroup>
+                            <optgroup label="Video" id="videoPresets" style="display: none;">
+                                <option value="128x128">128×128 (Fast)</option>
+                                <option value="256x256">256×256 (Recommended)</option>
+                                <option value="512x512">512×512 (High Quality)</option>
+                            </optgroup>
+                        </select>
+                    </div>
+                    
+                    <!-- Size Controls -->
+                    <div class="setting-row">
+                        <div class="setting-group half">
+                            <label class="setting-label">Width</label>
+                            <select class="setting-select" id="imageWidth" onchange="onSizeChange()">
+                                <option value="128">128</option>
+                                <option value="256">256</option>
+                                <option value="512" selected>512</option>
+                                <option value="768">768</option>
+                                <option value="1024">1024</option>
+                            </select>
+                        </div>
+                        <div class="setting-group half">
+                            <label class="setting-label">Height</label>
+                            <select class="setting-select" id="imageHeight" onchange="onSizeChange()">
+                                <option value="128">128</option>
+                                <option value="256">256</option>
+                                <option value="512" selected>512</option>
+                                <option value="768">768</option>
+                                <option value="1024">1024</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <!-- Video-specific controls (hidden by default) -->
+                    <div class="setting-group" id="videoControls" style="display: none;">
+                        <label class="setting-label">Number of Frames</label>
+                        <div class="slider-container">
+                            <input type="range" class="slider" id="numFrames" min="1" max="64" step="1" value="16">
+                            <span class="slider-value" id="numFramesValue">16</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Generation Parameters -->
+                    <div class="setting-row">
+                        <div class="setting-group half">
+                            <label class="setting-label">Steps</label>
+                            <div class="slider-container">
+                                <input type="range" class="slider" id="numSteps" min="10" max="100" step="5" value="50">
+                                <span class="slider-value" id="numStepsValue">50</span>
+                            </div>
+                        </div>
+                        <div class="setting-group half">
+                            <label class="setting-label">Guidance Scale</label>
+                            <div class="slider-container">
+                                <input type="range" class="slider" id="guidanceScale" min="1" max="20" step="0.5" value="7.5">
+                                <span class="slider-value" id="guidanceScaleValue">7.5</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Seed -->
+                    <div class="setting-group">
+                        <label class="setting-label">Seed (optional)</label>
+                        <input type="number" class="setting-input" id="seed" placeholder="Random">
+                    </div>
+                    
                     <button class="send-btn" onclick="generateImage()">Generate</button>
                 </div>
                 <div class="image-output">
@@ -551,10 +667,26 @@
                     if (modelInfo.capabilities.supports_reasoning) {
                         document.getElementById('reasoningModeLabel').style.display = 'block';
                     }
-                } else if (modelInfo.model_family === 'image-generation') {
+                } else if (modelInfo.model_family === 'image-generation' || modelInfo.model_family === 'video-generation') {
                     document.getElementById('imageInterface').style.display = 'flex';
                     document.getElementById('chatInterface').style.display = 'none';
+                    
+                    // Show video controls if it's a video model
+                    const isVideoModel = modelInfo.model_family === 'video-generation' || 
+                                       modelInfo.model_id.toLowerCase().includes('video') ||
+                                       modelInfo.model_id.toLowerCase().includes('text-to-video');
+                    
+                    if (isVideoModel) {
+                        document.getElementById('videoControls').style.display = 'block';
+                        document.getElementById('videoPresets').style.display = 'block';
+                        // Set default video preset
+                        document.getElementById('sizePreset').value = '256x256';
+                        applySizePreset();
+                    }
                 }
+                
+                // Setup slider listeners
+                setupSliders();
                 
                 // Load settings from localStorage
                 loadSettings();
@@ -716,6 +848,29 @@
             };
         }
 
+        // Setup sliders
+        function setupSliders() {
+            // Setup all sliders with value display
+            const sliders = [
+                { id: 'temperature', valueId: 'temperatureValue' },
+                { id: 'maxTokens', valueId: 'maxTokensValue' },
+                { id: 'topP', valueId: 'topPValue' },
+                { id: 'numSteps', valueId: 'numStepsValue' },
+                { id: 'guidanceScale', valueId: 'guidanceScaleValue' },
+                { id: 'numFrames', valueId: 'numFramesValue' }
+            ];
+            
+            sliders.forEach(slider => {
+                const input = document.getElementById(slider.id);
+                const value = document.getElementById(slider.valueId);
+                if (input && value) {
+                    input.addEventListener('input', () => {
+                        value.textContent = input.value;
+                    });
+                }
+            });
+        }
+
         // Image generation functions
         async function generateImage() {
             const prompt = document.getElementById('imagePrompt').value.trim();
@@ -725,22 +880,36 @@
             const placeholder = document.getElementById('imagePlaceholder');
             const image = document.getElementById('generatedImage');
             
-            loading.style.display = 'block';
+            loading.classList.add('active');
             placeholder.style.display = 'none';
             image.style.display = 'none';
+            
+            // Gather parameters
+            const params = {
+                prompt: prompt,
+                negative_prompt: document.getElementById('negativePrompt').value,
+                num_inference_steps: parseInt(document.getElementById('numSteps').value),
+                guidance_scale: parseFloat(document.getElementById('guidanceScale').value),
+                width: parseInt(document.getElementById('imageWidth').value),
+                height: parseInt(document.getElementById('imageHeight').value)
+            };
+            
+            // Add seed if specified
+            const seed = document.getElementById('seed').value;
+            if (seed) {
+                params.seed = parseInt(seed);
+            }
+            
+            // Add num_frames for video models
+            if (document.getElementById('videoControls').style.display !== 'none') {
+                params.num_frames = parseInt(document.getElementById('numFrames').value);
+            }
             
             try {
                 const response = await fetch('/generate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        prompt: prompt,
-                        negative_prompt: document.getElementById('negativePrompt').value,
-                        num_inference_steps: 50,
-                        guidance_scale: 7.5,
-                        width: 512,
-                        height: 512
-                    })
+                    body: JSON.stringify(params)
                 });
                 
                 const data = await response.json();
@@ -755,7 +924,7 @@
                 placeholder.textContent = 'Error generating image';
                 placeholder.style.display = 'block';
             } finally {
-                loading.style.display = 'none';
+                loading.classList.remove('active');
             }
         }
 
@@ -822,6 +991,38 @@
             const tokens = Math.ceil(text.length / 4);
             document.getElementById('tokenCounter').textContent = `${tokens} tokens`;
         });
+
+        // Size preset functions
+        function applySizePreset() {
+            const preset = document.getElementById('sizePreset').value;
+            if (preset === 'custom') return;
+            
+            const [width, height] = preset.split('x');
+            document.getElementById('imageWidth').value = width;
+            document.getElementById('imageHeight').value = height;
+        }
+        
+        function onSizeChange() {
+            // Check if current size matches any preset
+            const width = document.getElementById('imageWidth').value;
+            const height = document.getElementById('imageHeight').value;
+            const currentSize = `${width}x${height}`;
+            
+            const presetSelect = document.getElementById('sizePreset');
+            let found = false;
+            
+            for (let option of presetSelect.options) {
+                if (option.value === currentSize) {
+                    presetSelect.value = currentSize;
+                    found = true;
+                    break;
+                }
+            }
+            
+            if (!found) {
+                presetSelect.value = 'custom';
+            }
+        }
 
         // Close modal when clicking outside
         window.onclick = (event) => {
