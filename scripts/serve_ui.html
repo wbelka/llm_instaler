@@ -357,6 +357,16 @@
             font-size: 0.95rem;
         }
 
+        .warning-message {
+            background-color: rgba(255, 152, 0, 0.1);
+            border: 1px solid var(--warning);
+            color: var(--warning);
+            padding: 0.75rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+        }
+
         /* Image Generation Interface */
         .image-container {
             display: none;
@@ -515,9 +525,9 @@
                                 <option value="1024x768">1024×768</option>
                             </optgroup>
                             <optgroup label="Video" id="videoPresets" style="display: none;">
-                                <option value="128x128">128×128 (Fast)</option>
+                                <option value="128x128">128×128 (Fast, Always Works)</option>
                                 <option value="256x256">256×256 (Recommended)</option>
-                                <option value="512x512">512×512 (High Quality)</option>
+                                <option value="512x512">512×512 (May Fail - GPU Limited)</option>
                             </optgroup>
                         </select>
                     </div>
@@ -544,6 +554,11 @@
                                 <option value="1024">1024</option>
                             </select>
                         </div>
+                    </div>
+                    
+                    <!-- Size warning for video models -->
+                    <div class="warning-message" id="sizeWarning" style="display: none;">
+                        ⚠️ Large video sizes may fail due to GPU memory limits. The model will automatically retry with smaller dimensions if needed.
                     </div>
                     
                     <!-- Video-specific controls (hidden by default) -->
@@ -1034,6 +1049,9 @@
             const [width, height] = preset.split('x');
             document.getElementById('imageWidth').value = width;
             document.getElementById('imageHeight').value = height;
+            
+            // Check if we need to show warning
+            onSizeChange();
         }
         
         function onSizeChange() {
@@ -1055,6 +1073,16 @@
             
             if (!found) {
                 presetSelect.value = 'custom';
+            }
+            
+            // Show warning for large video sizes
+            const isVideoModel = document.getElementById('videoControls').style.display !== 'none';
+            const sizeWarning = document.getElementById('sizeWarning');
+            
+            if (isVideoModel && (parseInt(width) > 256 || parseInt(height) > 256)) {
+                sizeWarning.style.display = 'block';
+            } else {
+                sizeWarning.style.display = 'none';
             }
         }
 

@@ -194,6 +194,16 @@ async def get_model_info():
     # Add UI-specific capabilities
     capabilities = MODEL_INFO.get("capabilities", {})
     capabilities["is_video_model"] = model_family == "video-generation" or 'video' in model_id
+    
+    # Add size recommendations for video models
+    if capabilities["is_video_model"]:
+        capabilities["recommended_sizes"] = {
+            "video": {
+                "small": {"width": 128, "height": 128, "label": "128×128 (Fast)"},
+                "medium": {"width": 256, "height": 256, "label": "256×256 (Recommended)"},
+                "large": {"width": 512, "height": 512, "label": "512×512 (May fail on some GPUs)"}
+            }
+        }
 
     return ModelInfoResponse(
         model_id=MODEL_INFO.get("model_id", "unknown"),
@@ -480,6 +490,7 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
                 gen_kwargs["width"] = 128
                 gen_kwargs["height"] = 128
                 gen_kwargs["num_frames"] = 8
+                logger.info(f"Retrying with reduced params: {gen_kwargs['width']}x{gen_kwargs['height']}, {gen_kwargs['num_frames']} frames")
                 try:
                     output = MODEL(**gen_kwargs)
                 except RuntimeError as e2:
@@ -554,7 +565,9 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
                     "fps": fps,
                     "width": width,
                     "height": height,
-                    "format": "mp4"
+                    "format": "mp4",
+                    "actual_size": f"{width}x{height}",
+                    "requested_size": f"{request.width}x{request.height}"
                 }
             )
             
@@ -575,7 +588,9 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
                     "frames_count": len(frames),
                     "width": frames.shape[2],
                     "height": frames.shape[1],
-                    "format": "png_sequence"
+                    "format": "png_sequence",
+                    "actual_size": f"{frames.shape[2]}x{frames.shape[1]}",
+                    "requested_size": f"{request.width}x{request.height}"
                 }
             )
     else:
