@@ -1121,6 +1121,32 @@ class ModelChecker:
         console.print(train_table)
         console.print("\n" + "=" * 60)
 
+    def _serialize_compatibility_result(self, result: Optional[CompatibilityResult]) -> Dict[str, Any]:
+        """Serialize a CompatibilityResult object to a dictionary.
+        
+        Args:
+            result: CompatibilityResult object or None.
+            
+        Returns:
+            Dictionary representation of the result.
+        """
+        if result is None:
+            return {
+                "can_run": False,
+                "device": "cpu",
+                "memory_required_gb": 0,
+                "memory_available_gb": 0,
+                "notes": []
+            }
+        
+        return {
+            "can_run": result.can_run,
+            "device": result.device,
+            "memory_required_gb": result.memory_required_gb,
+            "memory_available_gb": result.memory_available_gb,
+            "notes": result.notes
+        }
+    
     def _save_results(self, model_id: str, requirements: ModelRequirements,
                       compatibility: Dict[str, CompatibilityResult]):
         """Save check results for later use."""
@@ -1161,7 +1187,9 @@ class ModelChecker:
                 "memory_requirements": requirements.memory_requirements,
                 "capabilities": requirements.capabilities,
                 "special_config": requirements.special_config,
-                "compatibility_result": compatibility.get("float16", compatibility.get("float32")),
+                "compatibility_result": self._serialize_compatibility_result(
+                    compatibility.get("float16", compatibility.get("float32"))
+                ),
             },
             "compatibility": {
                 dtype: {
