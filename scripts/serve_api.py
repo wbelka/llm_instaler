@@ -395,9 +395,18 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
 
     # Check if this is a video model
     model_info = get_model_config()
-    is_video_model = 'video' in model_info.get('model_family', '').lower()
+    model_family = model_info.get('model_family', '').lower()
+    model_id = model_info.get('model_id', '').lower()
+    model_class = model_info.get('config', {}).get('_class_name', '').lower()
     
-    logger.info(f"Model info: model_family={model_info.get('model_family')}, is_video_model={is_video_model}")
+    # Multiple ways to detect video models
+    is_video_model = (
+        'video' in model_family or
+        any(indicator in model_id for indicator in ['video', 'text2video', 'text-to-video', 't2v']) or
+        'video' in model_class
+    )
+    
+    logger.info(f"Model detection: model_family={model_info.get('model_family')}, model_id={model_info.get('model_id')}, _class_name={model_info.get('config', {}).get('_class_name')}, is_video_model={is_video_model}")
     
     # Prepare generation kwargs
     gen_kwargs = {
