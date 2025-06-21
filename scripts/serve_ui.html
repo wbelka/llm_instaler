@@ -381,7 +381,7 @@
             position: relative;
         }
 
-        .generated-image {
+        .generated-image, .generated-video {
             max-width: 100%;
             max-height: 100%;
             border-radius: 4px;
@@ -583,9 +583,10 @@
                 </div>
                 <div class="image-output">
                     <div class="image-placeholder" id="imagePlaceholder">
-                        Generated images will appear here
+                        Generated content will appear here
                     </div>
                     <img class="generated-image" id="generatedImage" style="display: none;">
+                    <video class="generated-video" id="generatedVideo" style="display: none;" controls></video>
                     <div class="loading" id="imageLoading">
                         <div class="spinner"></div>
                     </div>
@@ -879,10 +880,12 @@
             const loading = document.getElementById('imageLoading');
             const placeholder = document.getElementById('imagePlaceholder');
             const image = document.getElementById('generatedImage');
+            const video = document.getElementById('generatedVideo');
             
             loading.classList.add('active');
             placeholder.style.display = 'none';
             image.style.display = 'none';
+            video.style.display = 'none';
             
             // Gather parameters
             const numStepsEl = document.getElementById('numSteps');
@@ -927,8 +930,27 @@
                 const data = await response.json();
                 
                 if (data.image) {
+                    // Image generation result
                     image.src = 'data:image/png;base64,' + data.image;
                     image.style.display = 'block';
+                } else if (data.video) {
+                    // Video generation result
+                    if (data.video.format === 'mp4' && data.video.data) {
+                        // MP4 video
+                        video.src = 'data:video/mp4;base64,' + data.video.data;
+                        video.style.display = 'block';
+                    } else if (data.video.format === 'png_sequence' && data.video.frames) {
+                        // Fallback: show frames as animated slideshow
+                        let frameIndex = 0;
+                        image.src = 'data:image/png;base64,' + data.video.frames[0];
+                        image.style.display = 'block';
+                        
+                        // Simple frame animation
+                        setInterval(() => {
+                            frameIndex = (frameIndex + 1) % data.video.frames.length;
+                            image.src = 'data:image/png;base64,' + data.video.frames[frameIndex];
+                        }, 125); // 8 FPS
+                    }
                 }
                 
             } catch (error) {

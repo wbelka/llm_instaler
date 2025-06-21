@@ -77,6 +77,10 @@ class DiffusionHandler(BaseHandler):
             "compel",    # For better prompt handling
         ]
         
+        # Add opencv for video models
+        if requirements.model_family == "video-generation":
+            requirements.optional_dependencies.append("opencv-python")
+        
         # Memory requirements
         model_size = self._estimate_model_size()
         requirements.disk_space_gb = model_size

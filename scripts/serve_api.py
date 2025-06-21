@@ -501,25 +501,83 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
         # Standard image generation
         image = output.images[0]
     elif hasattr(output, 'frames') and output.frames is not None:
-        # Video generation - return first frame as image
+        # Video generation - return full video
         frames = output.frames[0]  # Shape: [num_frames, height, width, channels]
         if isinstance(frames, torch.Tensor):
             frames = frames.cpu().numpy()
 
-        # Take the first frame
-        first_frame = frames[0]
+        # Normalize frames if needed
+        if frames.dtype != np.uint8:
+            if frames.min() < 0:
+                frames = (frames + 1) / 2  # From [-1, 1] to [0, 1]
+            frames = (frames * 255).astype(np.uint8)
 
-        # Convert to PIL Image
-        if first_frame.dtype != np.uint8:
-            # Normalize to 0-255 range
-            if first_frame.min() < 0:
-                first_frame = (first_frame + 1) / 2  # From [-1, 1] to [0, 1]
-            first_frame = (first_frame * 255).astype(np.uint8)
-
-        image = Image.fromarray(first_frame)
-
-        # Log that this was a video
-        logger.info(f"Generated video with {len(frames)} frames, returning first frame")
+        logger.info(f"Generated video with {len(frames)} frames")
+        
+        # Try to create video file
+        try:
+            import cv2
+            import tempfile
+            import os
+            
+            # Create temporary file
+            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmp_file:
+                video_path = tmp_file.name
+            
+            # Get video properties
+            num_frames, height, width = frames.shape[:3]
+            fps = 8  # Default FPS for generated videos
+            
+            # Create video writer
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(video_path, fourcc, fps, (width, height))
+            
+            # Write frames
+            for frame in frames:
+                # Convert RGB to BGR for OpenCV
+                bgr_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                out.write(bgr_frame)
+            
+            out.release()
+            
+            # Read video file and encode to base64
+            with open(video_path, 'rb') as f:
+                video_data = base64.b64encode(f.read()).decode()
+            
+            # Clean up
+            os.unlink(video_path)
+            
+            return GenerateResponse(
+                video={
+                    "data": video_data,
+                    "frames": num_frames,
+                    "fps": fps,
+                    "width": width,
+                    "height": height,
+                    "format": "mp4"
+                }
+            )
+            
+        except ImportError:
+            logger.warning("OpenCV not available, returning frames as images")
+            # Fallback: return frames as a sequence of images
+            images = []
+            for i, frame in enumerate(frames):
+                img = Image.fromarray(frame)
+                buffered = BytesIO()
+                img.save(buffered, format="PNG")
+                img_str = base64.b64encode(buffered.getvalue()).decode()
+                images.append(img_str)
+            
+            return GenerateResponse(
+                video={
+                    "frames": images,
+                    "frames_count": len(frames),
+                    "width": frames.shape[2],
+                    "height": frames.shape[1],
+                    "format": "png_sequence"
+                }
+            )
     else:
         raise ValueError(f"Unknown output format from model: {type(output)}")
 
