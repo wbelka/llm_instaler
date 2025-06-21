@@ -696,7 +696,7 @@ Make sure you have nvcc installed:
             return False
 
     def _copy_scripts(self, model_dir: Path, log_path: Path) -> bool:
-        """Copy universal scripts to model directory.
+        """Copy universal scripts and required libraries to model directory.
 
         Args:
             model_dir: Model installation directory.
@@ -706,6 +706,7 @@ Make sure you have nvcc installed:
             True if scripts copied successfully, False otherwise.
         """
         scripts_dir = Path(__file__).parent.parent / "scripts"
+        installer_root = Path(__file__).parent.parent
 
         if not scripts_dir.exists():
             self._log_install(log_path, "WARNING", "Scripts directory not found")
@@ -721,6 +722,7 @@ Make sure you have nvcc installed:
         ]
 
         try:
+            # Copy scripts
             for script_name, make_executable in scripts_to_copy:
                 src = scripts_dir / script_name
                 dst = model_dir / script_name
@@ -735,6 +737,33 @@ Make sure you have nvcc installed:
                     self._log_install(log_path, "INFO", f"Copied {script_name}")
                 else:
                     self._log_install(log_path, "WARNING", f"Script {script_name} not found")
+
+            # Copy handlers directory
+            handlers_src = installer_root / "handlers"
+            handlers_dst = model_dir / "handlers"
+            if handlers_src.exists():
+                print_info("Copying handlers library...")
+                shutil.copytree(handlers_src, handlers_dst, dirs_exist_ok=True)
+                self._log_install(log_path, "INFO", "Copied handlers library")
+
+            # Copy detectors directory
+            detectors_src = installer_root / "detectors"
+            detectors_dst = model_dir / "detectors"
+            if detectors_src.exists():
+                print_info("Copying detectors library...")
+                shutil.copytree(detectors_src, detectors_dst, dirs_exist_ok=True)
+                self._log_install(log_path, "INFO", "Copied detectors library")
+
+            # Copy core utilities (only needed files)
+            core_utils_src = installer_root / "core" / "utils.py"
+            core_dst = model_dir / "core"
+            core_dst.mkdir(exist_ok=True)
+            
+            if core_utils_src.exists():
+                shutil.copy2(core_utils_src, core_dst / "utils.py")
+                # Create __init__.py
+                (core_dst / "__init__.py").touch()
+                self._log_install(log_path, "INFO", "Copied core utilities")
 
             return True
 
@@ -934,4 +963,41 @@ except Exception as e:
             if item.is_file():
                 total_size += item.stat().st_size
         return total_size
+    
+    def update_scripts(self, model_dir: str) -> bool:
+        """Update scripts and libraries in an existing model installation.
+        
+        Args:
+            model_dir: Path to model directory to update.
+            
+        Returns:
+            True if update successful, False otherwise.
+        """
+        model_path = Path(model_dir).resolve()
+        
+        # Check if directory exists
+        if not model_path.exists():
+            print_error(f"Model directory not found: {model_path}")
+            return False
+            
+        # Check if it's a valid model installation
+        if not (model_path / ".install_complete").exists():
+            print_error(f"Not a valid model installation: {model_path}")
+            return False
+            
+        print_info(f"Updating scripts in: {model_path}")
+        
+        # Create a temporary log file
+        log_path = model_path / "logs" / "update.log"
+        log_path.parent.mkdir(exist_ok=True)
+        self._init_install_log(log_path, f"Update for {model_path.name}")
+        
+        # Use the existing copy scripts method
+        if self._copy_scripts(model_path, log_path):
+            print_success("Scripts and libraries updated successfully!")
+            self._log_install(log_path, "INFO", "Update completed successfully")
+            return True
+        else:
+            print_error("Failed to update scripts")
+            return False
 

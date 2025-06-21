@@ -162,6 +162,31 @@ def list_models(ctx: click.Context, detailed: bool):
 
 
 @cli.command()
+@click.argument('model_dir', type=click.Path(exists=True))
+@click.pass_context
+def update(ctx: click.Context, model_dir: str):
+    """Update scripts and libraries in an installed model.
+
+    MODEL_DIR: Path to the model installation directory.
+
+    This command updates all scripts and libraries in an existing model
+    installation to the latest versions from the installer.
+    """
+    logger = ctx.obj['logger']
+    logger.info(f"Updating model at: {model_dir}")
+
+    # Import here to avoid circular imports
+    from core.installer import ModelInstaller
+    
+    # Create installer and run update
+    installer = ModelInstaller()
+    success = installer.update_scripts(model_dir)
+    
+    if not success:
+        sys.exit(1)
+
+
+@cli.command()
 @click.option('--show-paths', is_flag=True, help='Show expanded paths')
 @click.pass_context
 def config(ctx: click.Context, show_paths: bool):

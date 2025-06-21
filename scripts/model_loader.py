@@ -11,24 +11,10 @@ import logging
 from typing import Dict, Any, Optional, Tuple, Union
 from pathlib import Path
 
-# Try to add installer to path - check multiple possible locations
-possible_paths = [
-    os.path.expanduser("~/LLM/installer"),
-    os.path.expanduser("~/llm_installer"),
-    os.path.expanduser("~/llm_instaler"),
-    "/home/wblk/llm_instaler",  # Direct path
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),  # Parent of scripts dir
-]
-
-installer_found = False
-for installer_path in possible_paths:
-    if os.path.exists(installer_path) and os.path.exists(os.path.join(installer_path, "handlers")):
-        sys.path.insert(0, installer_path)
-        installer_found = True
-        break
-
-if not installer_found:
-    logging.warning("Could not find LLM installer path with handlers module")
+# Add current directory to path for local imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
 
 
 def get_handler(model_info: Dict[str, Any]):
