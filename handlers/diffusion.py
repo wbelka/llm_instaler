@@ -210,8 +210,71 @@ class DiffusionHandler(BaseHandler):
         Returns:
             Loaded model (pipeline) and tokenizer/processor (None for diffusion).
         """
-        from model_loader import _load_diffusers_model
-        return _load_diffusers_model(self.model_info, model_path, **kwargs)
+        import torch
+        from diffusers import DiffusionPipeline
+        import os
+        import json
+        
+        # Determine device
+        device = kwargs.get('device', 'auto')
+        if device == "auto":
+            if torch.cuda.is_available():
+                device = "cuda"
+            elif torch.backends.mps.is_available():
+                device = "mps"
+            else:
+                device = "cpu"
+        
+        # Determine dtype
+        dtype = kwargs.get('dtype', 'auto')
+        if dtype == "auto":
+            if device in ["cuda", "mps"]:
+                torch_dtype = torch.float16
+            else:
+                torch_dtype = torch.float32
+        else:
+            dtype_map = {
+                "float16": torch.float16,
+                "float32": torch.float32,
+                "bfloat16": torch.bfloat16,
+            }
+            torch_dtype = dtype_map.get(dtype, torch.float32)
+        
+        # Check for specific pipeline class
+        model_index_path = os.path.join(model_path, "model_index.json")
+        if os.path.exists(model_index_path):
+            with open(model_index_path, 'r') as f:
+                model_index = json.load(f)
+                pipeline_class_name = model_index.get("_class_name", None)
+                
+                if pipeline_class_name == "TextToVideoSDPipeline":
+                    from diffusers import TextToVideoSDPipeline
+                    pipeline = TextToVideoSDPipeline.from_pretrained(
+                        model_path,
+                        torch_dtype=torch_dtype,
+                    )
+                else:
+                    pipeline = DiffusionPipeline.from_pretrained(
+                        model_path,
+                        torch_dtype=torch_dtype,
+                    )
+        else:
+            pipeline = DiffusionPipeline.from_pretrained(
+                model_path,
+                torch_dtype=torch_dtype,
+            )
+        
+        # Move to device
+        pipeline = pipeline.to(device)
+        
+        # Enable optimizations
+        if device == "cuda":
+            try:
+                pipeline.enable_xformers_memory_efficient_attention()
+            except:
+                pipeline.enable_attention_slicing()
+        
+        return pipeline, None
     
     def validate_model_files(self, model_path: str) -> Tuple[bool, Optional[str]]:
         """Validate model files.
