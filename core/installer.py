@@ -945,14 +945,25 @@ To install manually:
             if reinstall:
                 print_info("Reinstalling all dependencies...")
                 
-                # Get requirements from model
-                from handlers import get_handler_class
-                handler = get_handler_class(model_info)
-                if handler:
-                    requirements = handler(model_info).analyze()
-                    self._install_dependencies(requirements, model_path, log_path)
-                else:
-                    print_warning("Could not determine model requirements")
+                # Save current sys.path
+                original_path = sys.path.copy()
+                
+                # Remove model directory from sys.path to avoid conflicts
+                model_path_str = str(model_path)
+                sys.path = [p for p in sys.path if not p.startswith(model_path_str)]
+                
+                try:
+                    # Get requirements from model using system handlers
+                    from handlers import get_handler_class
+                    handler = get_handler_class(model_info)
+                    if handler:
+                        requirements = handler(model_info).analyze()
+                        self._install_dependencies(requirements, model_path, log_path)
+                    else:
+                        print_warning("Could not determine model requirements")
+                finally:
+                    # Restore original sys.path
+                    sys.path = original_path
             
             print_success("Dependencies fixed successfully!")
             return True
