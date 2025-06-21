@@ -513,10 +513,22 @@ class ModelInstaller:
         optional_deps = getattr(requirements, 'optional_dependencies', [])
         if optional_deps:
             print_info(f"Installing optional dependencies: {', '.join(optional_deps)}")
+            
+            # Get torch info once for all dependencies
+            torch_info = self._get_torch_info(pip_path)
+            
             for dep in optional_deps:
                 try:
+                    # Build install command
+                    install_cmd = [str(pip_path), "install", dep]
+                    
+                    # Add index URL for CUDA-dependent packages
+                    cuda_deps = ["xformers", "triton", "ninja", "flash-attn", "deepspeed", "bitsandbytes"]
+                    if dep in cuda_deps and torch_info.get("index_url"):
+                        install_cmd.extend(["--index-url", torch_info["index_url"]])
+                    
                     subprocess.run(
-                        [str(pip_path), "install", dep],
+                        install_cmd,
                         check=True,
                         capture_output=True,
                         text=True
@@ -660,8 +672,11 @@ class ModelInstaller:
         Returns:
             True if installed successfully, False otherwise.
         """
+        # First get torch and CUDA information
+        torch_info = self._get_torch_info(pip_path)
+        
         special_instructions = {
-            "mamba-ssm": """
+            "mamba-ssm": f"""
 This model requires mamba-ssm which needs additional setup:
 
 1. Ensure CUDA toolkit is installed:
@@ -672,11 +687,11 @@ This model requires mamba-ssm which needs additional setup:
    - macOS: xcode-select --install
 
 3. Try manual installation:
-   cd {model_dir}
+   cd {{model_dir}}
    source .venv/bin/activate
-   pip install mamba-ssm --no-cache-dir
+   pip install mamba-ssm --no-cache-dir{' --index-url ' + torch_info['index_url'] if torch_info.get('index_url') else ''}
 """,
-            "flash-attn": """
+            "flash-attn": f"""
 This model uses Flash Attention for better performance.
 Flash Attention requires:
 - CUDA 11.6 or higher
@@ -684,30 +699,53 @@ Flash Attention requires:
 - C++ compiler
 
 To install manually:
-   cd {model_dir}
+   cd {{model_dir}}
    source .venv/bin/activate
-   pip install flash-attn --no-build-isolation
+   pip install flash-attn --no-build-isolation{' --index-url ' + torch_info['index_url'] if torch_info.get('index_url') else ''}
 """,
             "causal-conv1d": """
 This dependency requires CUDA and compilation.
 Make sure you have nvcc installed:
    nvcc --version
 """,
-            "xformers": """
+            "xformers": f"""
 xformers provides memory efficient attention for better performance.
 If installation fails, the model will still work with standard attention.
 
 To install manually:
-   cd {model_dir}
+   cd {{model_dir}}
    source .venv/bin/activate
-   pip install xformers --index-url https://download.pytorch.org/whl/cu118
+   pip install xformers{' --index-url ' + torch_info['index_url'] if torch_info.get('index_url') else ''}
 """
         }
 
         try:
             print_info(f"Installing {dep}...")
+            
+            # Build install command based on dependency type
+            install_cmd = [str(pip_path), "install", dep]
+            
+            # Add special handling for CUDA-dependent packages
+            if dep in ["mamba-ssm", "flash-attn", "causal-conv1d"]:
+                if torch_info.get("index_url"):
+                    install_cmd.extend(["--index-url", torch_info["index_url"]])
+                    
+                # For flash-attn, use specific build options
+                if dep == "flash-attn":
+                    install_cmd.extend(["--no-build-isolation"])
+                    
+                # For mamba-ssm, ensure we don't upgrade torch
+                if dep == "mamba-ssm":
+                    install_cmd.extend(["--no-deps"])
+                    # Install dependencies separately
+                    subprocess.run(
+                        [str(pip_path), "install", "einops", "triton", "--index-url", torch_info.get("index_url", "")],
+                        capture_output=True,
+                        text=True
+                    )
+            
             subprocess.run(
-                [str(pip_path), "install", dep],
+                install_cmd,
                 check=True,
                 capture_output=True,
                 text=True
@@ -725,6 +763,71 @@ To install manually:
 
             return False
     
+    def _get_torch_info(self, pip_path: Path) -> Dict[str, str]:
+        """Get information about installed torch version and CUDA.
+        
+        Args:
+            pip_path: Path to pip executable.
+            
+        Returns:
+            Dictionary with torch_version, cuda_suffix, and index_url.
+        """
+        info = {
+            "torch_version": None,
+            "cuda_suffix": None,
+            "index_url": "https://download.pytorch.org/whl/cu118"  # Default
+        }
+        
+        try:
+            # Check installed torch version
+            result = subprocess.run(
+                [str(pip_path), "show", "torch"],
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode == 0:
+                # Extract torch version
+                for line in result.stdout.split('\n'):
+                    if line.startswith('Version:'):
+                        info["torch_version"] = line.split(':')[1].strip()
+                        break
+                
+                # Extract CUDA version from torch
+                if info["torch_version"] and '+cu' in info["torch_version"]:
+                    info["cuda_suffix"] = info["torch_version"].split('+')[1]
+                    
+                    # Map to index URL
+                    index_urls = {
+                        "cu121": "https://download.pytorch.org/whl/cu121",
+                        "cu118": "https://download.pytorch.org/whl/cu118",
+                        "cu117": "https://download.pytorch.org/whl/cu117",
+                    }
+                    info["index_url"] = index_urls.get(info["cuda_suffix"], info["index_url"])
+                else:
+                    # Try to detect from system
+                    result = subprocess.run(
+                        ["nvcc", "--version"],
+                        capture_output=True,
+                        text=True
+                    )
+                    
+                    if result.returncode == 0:
+                        for line in result.stdout.split('\n'):
+                            if 'release' in line:
+                                cuda_version = line.split('release')[1].split(',')[0].strip()
+                                if cuda_version.startswith("12.1"):
+                                    info["cuda_suffix"] = "cu121"
+                                    info["index_url"] = "https://download.pytorch.org/whl/cu121"
+                                elif cuda_version.startswith("11.8"):
+                                    info["cuda_suffix"] = "cu118"
+                                    info["index_url"] = "https://download.pytorch.org/whl/cu118"
+                                break
+        except:
+            pass
+            
+        return info
+    
     def _install_xformers_with_cuda(self, pip_path: Path, log_path: Path) -> bool:
         """Try to install xformers with appropriate CUDA version.
         
@@ -736,69 +839,22 @@ To install manually:
             True if installed successfully, False otherwise.
         """
         try:
-            # First check installed torch version
-            result = subprocess.run(
-                [str(pip_path), "show", "torch"],
+            torch_info = self._get_torch_info(pip_path)
+            
+            if not torch_info["torch_version"]:
+                return False
+                
+            print_info(f"Installing xformers compatible with torch {torch_info['torch_version']}...")
+            
+            # Try to install compatible xformers
+            subprocess.run(
+                [str(pip_path), "install", "xformers", "--index-url", torch_info["index_url"]],
+                check=True,
                 capture_output=True,
                 text=True
             )
-            
-            if result.returncode != 0:
-                return False
-                
-            # Extract torch version
-            torch_version = None
-            for line in result.stdout.split('\n'):
-                if line.startswith('Version:'):
-                    torch_version = line.split(':')[1].strip()
-                    break
-            
-            if not torch_version:
-                return False
-            
-            # Check CUDA version from torch
-            cuda_suffix = None
-            if '+cu' in torch_version:
-                # Extract CUDA version from torch version (e.g., "2.5.1+cu121" -> "cu121")
-                cuda_suffix = torch_version.split('+')[1]
-            else:
-                # Try to detect from system
-                result = subprocess.run(
-                    ["nvcc", "--version"],
-                    capture_output=True,
-                    text=True
-                )
-                
-                if result.returncode == 0:
-                    for line in result.stdout.split('\n'):
-                        if 'release' in line:
-                            cuda_version = line.split('release')[1].split(',')[0].strip()
-                            if cuda_version.startswith("12.1"):
-                                cuda_suffix = "cu121"
-                            elif cuda_version.startswith("11.8"):
-                                cuda_suffix = "cu118"
-                            break
-            
-            if cuda_suffix:
-                # Map CUDA suffix to index URL
-                index_urls = {
-                    "cu121": "https://download.pytorch.org/whl/cu121",
-                    "cu118": "https://download.pytorch.org/whl/cu118",
-                    "cu117": "https://download.pytorch.org/whl/cu117",
-                }
-                index_url = index_urls.get(cuda_suffix, "https://download.pytorch.org/whl/cu118")
-                
-                print_info(f"Installing xformers compatible with torch {torch_version}...")
-                
-                # Try to install compatible xformers
-                subprocess.run(
-                    [str(pip_path), "install", "xformers", "--index-url", index_url],
-                    check=True,
-                    capture_output=True,
-                    text=True
-                )
-                self._log_install(log_path, "INFO", f"Installed xformers for {cuda_suffix}")
-                return True
+            self._log_install(log_path, "INFO", f"Installed xformers for {torch_info.get('cuda_suffix', 'unknown')}")
+            return True
                 
         except Exception as e:
             # Silent fail for optional dependency
