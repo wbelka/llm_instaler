@@ -8,6 +8,38 @@ management, and parameter configuration.
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
+from dataclasses import dataclass, field
+
+
+@dataclass
+class ModelRequirements:
+    """Container for model requirements and metadata."""
+    
+    # Model type information
+    model_type: str = ""
+    model_family: str = ""
+    architecture_type: str = ""
+    primary_library: str = "transformers"
+    
+    # Dependencies
+    base_dependencies: List[str] = field(default_factory=list)
+    optional_dependencies: List[str] = field(default_factory=list)
+    special_dependencies: List[str] = field(default_factory=list)
+    
+    # Storage requirements
+    disk_space_gb: float = 0.0
+    
+    # Memory requirements
+    memory_requirements: Dict[str, float] = field(default_factory=dict)
+    
+    # Capabilities
+    capabilities: Dict[str, Any] = field(default_factory=dict)
+    
+    # Special configuration
+    special_config: Dict[str, Any] = field(default_factory=dict)
+    
+    # Additional notes
+    notes: List[str] = field(default_factory=list)
 
 
 class BaseHandler(ABC):
@@ -46,6 +78,15 @@ class BaseHandler(ABC):
         """
         raise NotImplementedError("Subclasses must implement get_system_dependencies()")
 
+    @abstractmethod
+    def analyze(self) -> ModelRequirements:
+        """Analyze model and return its requirements.
+        
+        Returns:
+            ModelRequirements object containing all detected requirements.
+        """
+        raise NotImplementedError("Subclasses must implement analyze()")
+    
     @abstractmethod
     def load_model(self, model_path: str, **kwargs):
         """Load model from the specified path with optimal parameters.
