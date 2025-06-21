@@ -238,21 +238,40 @@ def _load_diffusers_model(
             if pipeline_class_name:
                 # Try to get the specific pipeline class
                 try:
-                    from diffusers import pipelines
-                    pipeline_class = getattr(pipelines, pipeline_class_name, None)
-                    if pipeline_class:
-                        pipeline = pipeline_class.from_pretrained(
+                    # Special handling for text-to-video pipeline
+                    if pipeline_class_name == "TextToVideoSDPipeline":
+                        from diffusers import TextToVideoSDPipeline
+                        pipeline = TextToVideoSDPipeline.from_pretrained(
                             model_path,
                             torch_dtype=torch_dtype,
                             **kwargs
                         )
                     else:
-                        # Fallback to auto-detection
-                        pipeline = DiffusionPipeline.from_pretrained(
-                            model_path,
-                            torch_dtype=torch_dtype,
-                            **kwargs
-                        )
+                        # Try to import from diffusers.pipelines
+                        from diffusers import pipelines
+                        pipeline_class = getattr(pipelines, pipeline_class_name, None)
+                        if pipeline_class:
+                            pipeline = pipeline_class.from_pretrained(
+                                model_path,
+                                torch_dtype=torch_dtype,
+                                **kwargs
+                            )
+                        else:
+                            # Fallback to auto-detection
+                            pipeline = DiffusionPipeline.from_pretrained(
+                                model_path,
+                                torch_dtype=torch_dtype,
+                                **kwargs
+                            )
+                except ImportError as e:
+                    logging.warning(f"Missing dependency for {pipeline_class_name}: {e}")
+                    logging.info("Trying auto-detection fallback...")
+                    # Fallback to auto-detection
+                    pipeline = DiffusionPipeline.from_pretrained(
+                        model_path,
+                        torch_dtype=torch_dtype,
+                        **kwargs
+                    )
                 except Exception as e:
                     logging.warning(f"Failed to load specific pipeline class {pipeline_class_name}: {e}")
                     # Fallback to auto-detection
