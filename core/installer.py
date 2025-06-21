@@ -463,7 +463,8 @@ class ModelInstaller:
         self,
         model_dir: Path,
         requirements: Any,
-        log_path: Path
+        log_path: Path,
+        preserve_torch_config: bool = False
     ) -> bool:
         """Install model dependencies in virtual environment.
 
@@ -471,6 +472,7 @@ class ModelInstaller:
             model_dir: Model installation directory.
             requirements: Model requirements from checker.
             log_path: Path to installation log.
+            preserve_torch_config: If True, preserve existing PyTorch configuration.
 
         Returns:
             True if dependencies installed successfully, False otherwise.
@@ -488,7 +490,7 @@ class ModelInstaller:
 
         # Install PyTorch first if needed
         if any('torch' in dep for dep in base_deps):
-            if not self._install_pytorch(pip_path, log_path):
+            if not self._install_pytorch(pip_path, log_path, preserve_config=preserve_torch_config):
                 return False
             # Remove only torch-related packages from base_deps to avoid reinstalling
             # Keep transformers and other non-torch packages
@@ -581,19 +583,56 @@ class ModelInstaller:
         self._log_install(log_path, "INFO", "Dependencies installation completed")
         return True
 
-    def _install_pytorch(self, pip_path: Path, log_path: Path) -> bool:
+    def _install_pytorch(self, pip_path: Path, log_path: Path, preserve_config: bool = False) -> bool:
         """Install PyTorch with appropriate CUDA support.
 
         Args:
             pip_path: Path to pip executable.
             log_path: Path to installation log.
+            preserve_config: If True, preserve existing PyTorch configuration (CPU/CUDA).
 
         Returns:
             True if PyTorch installed successfully, False otherwise.
         """
         import platform
 
-        # Detect CUDA availability
+        # Check if we should preserve existing configuration
+        if preserve_config:
+            torch_info = self._get_torch_info(pip_path)
+            if torch_info["torch_version"]:
+                # Use existing configuration
+                index_url = torch_info.get("index_url")
+                cuda_suffix = torch_info.get("cuda_suffix", "")
+                
+                print_info(
+                    f"Preserving existing PyTorch configuration: "
+                    f"{cuda_suffix or 'CPU'}"
+                )
+
+                # Reinstall with same configuration
+                torch_cmd = ["torch", "torchvision", "torchaudio"]
+                cmd = [str(pip_path), "install"] + torch_cmd
+                if index_url:
+                    cmd.extend(["--index-url", index_url])
+
+                try:
+                    subprocess.run(
+                        cmd, check=True, capture_output=True, text=True
+                    )
+                    self._log_install(
+                        log_path, "INFO",
+                        f"PyTorch reinstalled with {cuda_suffix or 'CPU'} "
+                        f"configuration"
+                    )
+                    return True
+                except subprocess.CalledProcessError as e:
+                    self._log_install(
+                        log_path, "ERROR", f"Failed to reinstall PyTorch: {e}"
+                    )
+                    print_error(f"Failed to reinstall PyTorch: {e}")
+                    return False
+
+        # Detect CUDA availability for new installation
         cuda_available = False
         cuda_version = None
 
@@ -811,26 +850,74 @@ To install manually:
                         "cu118": "https://download.pytorch.org/whl/cu118",
                         "cu117": "https://download.pytorch.org/whl/cu117",
                     }
-                    info["index_url"] = index_urls.get(info["cuda_suffix"], info["index_url"])
-                else:
-                    # Try to detect from system
-                    result = subprocess.run(
-                        ["nvcc", "--version"],
-                        capture_output=True,
-                        text=True
+                    info["index_url"] = index_urls.get(
+                        info["cuda_suffix"], info["index_url"]
                     )
+                elif info["torch_version"] and '+cpu' in info["torch_version"]:
+                    # CPU-only installation
+                    info["cuda_suffix"] = "cpu"
+                    info["index_url"] = "https://download.pytorch.org/whl/cpu"
+                else:
+                    # Pure version without suffix - check if CUDA in torch
+                    try:
+                        # Try to detect if torch was built with CUDA
+                        python_path = str(pip_path).replace('/pip', '/python')
+                        cuda_check_cmd = (
+                            'import torch; '
+                            'print("cuda" if torch.cuda.is_available() '
+                            'else "cpu")'
+                        )
+                        result = subprocess.run(
+                            [python_path, '-c', cuda_check_cmd],
+                            capture_output=True,
+                            text=True
+                        )
 
-                    if result.returncode == 0:
-                        for line in result.stdout.split('\n'):
-                            if 'release' in line:
-                                cuda_version = line.split('release')[1].split(',')[0].strip()
-                                if cuda_version.startswith("12.1"):
-                                    info["cuda_suffix"] = "cu121"
-                                    info["index_url"] = "https://download.pytorch.org/whl/cu121"
-                                elif cuda_version.startswith("11.8"):
-                                    info["cuda_suffix"] = "cu118"
-                                    info["index_url"] = "https://download.pytorch.org/whl/cu118"
-                                break
+                        if result.returncode == 0:
+                            if "cpu" in result.stdout:
+                                info["cuda_suffix"] = "cpu"
+                                info["index_url"] = (
+                                    "https://download.pytorch.org/whl/cpu"
+                                )
+                            else:
+                                # CUDA available, detect version from system
+                                nvcc_result = subprocess.run(
+                                    ["nvcc", "--version"],
+                                    capture_output=True,
+                                    text=True
+                                )
+
+                                if nvcc_result.returncode == 0:
+                                    for line in nvcc_result.stdout.split('\n'):
+                                        if 'release' in line:
+                                            cuda_version = (
+                                                line.split('release')[1]
+                                                .split(',')[0].strip()
+                                            )
+                                            if cuda_version.startswith("12"):
+                                                info["cuda_suffix"] = "cu121"
+                                                info["index_url"] = (
+                                                    "https://download.pytorch.org"
+                                                    "/whl/cu121"
+                                                )
+                                            elif cuda_version.startswith("11.8"):
+                                                info["cuda_suffix"] = "cu118"
+                                                info["index_url"] = (
+                                                    "https://download.pytorch.org"
+                                                    "/whl/cu118"
+                                                )
+                                            else:
+                                                # Default CUDA
+                                                info["cuda_suffix"] = "cu118"
+                                                info["index_url"] = (
+                                                    "https://download.pytorch.org"
+                                                    "/whl/cu118"
+                                                )
+                                            break
+                    except Exception:
+                        # If detection fails, assume CPU
+                        info["cuda_suffix"] = "cpu"
+                        info["index_url"] = "https://download.pytorch.org/whl/cpu"
         except Exception:
             pass
 
@@ -966,7 +1053,7 @@ To install manually:
                     handler = get_handler_class(model_info)
                     if handler:
                         requirements = handler(model_info).analyze()
-                        self._install_dependencies(model_path, requirements, log_path)
+                        self._install_dependencies(model_path, requirements, log_path, preserve_torch_config=True)
                     else:
                         print_warning("Could not determine model requirements")
                 finally:
