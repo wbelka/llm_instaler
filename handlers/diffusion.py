@@ -34,11 +34,15 @@ class DiffusionHandler(BaseHandler):
         
         # Check if it's a video model
         model_id = self.model_info.get('model_id', '').lower()
-        if 'video' in model_id or 'text2video' in model_id:
+        config = self.model_info.get('config', {})
+        
+        # Check various indicators for video models
+        if any(indicator in model_id for indicator in ['video', 'text2video', 'text-to-video', 't2v']):
+            requirements.model_family = "video-generation"
+        elif '_class_name' in config and 'video' in config['_class_name'].lower():
             requirements.model_family = "video-generation"
         
         # Determine architecture
-        config = self.model_info.get('config', {})
         if '_class_name' in config:
             requirements.architecture_type = config['_class_name']
         else:
