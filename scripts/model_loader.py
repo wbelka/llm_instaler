@@ -35,7 +35,7 @@ def get_handler(model_info: Dict[str, Any]):
         if handler_class:
             return handler_class(model_info)
         else:
-            logging.warning(f"No handler found for model type: {model_info.get('model_type', 'unknown')}")
+            # No handler found, will use fallback loading
             return None
 
     except ImportError as e:

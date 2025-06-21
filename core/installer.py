@@ -508,6 +508,27 @@ class ModelInstaller:
             if not self._install_special_dependency(dep, pip_path, model_dir, log_path):
                 # Special dependencies might fail but shouldn't block installation
                 print_warning(f"Failed to install {dep}, continuing...")
+        
+        # Install optional dependencies
+        optional_deps = getattr(requirements, 'optional_dependencies', [])
+        if optional_deps:
+            print_info(f"Installing optional dependencies: {', '.join(optional_deps)}")
+            for dep in optional_deps:
+                try:
+                    subprocess.run(
+                        [str(pip_path), "install", dep],
+                        check=True,
+                        capture_output=True,
+                        text=True
+                    )
+                    self._log_install(log_path, "INFO", f"Installed optional dependency: {dep}")
+                except subprocess.CalledProcessError:
+                    # Optional dependencies can fail silently
+                    self._log_install(log_path, "INFO", f"Skipped optional dependency: {dep}")
+                    
+                    # Try special handling for xformers
+                    if dep == "xformers":
+                        self._install_xformers_with_cuda(pip_path, log_path)
 
         # Install server dependencies for universal scripts
         server_deps = [
@@ -671,6 +692,15 @@ To install manually:
 This dependency requires CUDA and compilation.
 Make sure you have nvcc installed:
    nvcc --version
+""",
+            "xformers": """
+xformers provides memory efficient attention for better performance.
+If installation fails, the model will still work with standard attention.
+
+To install manually:
+   cd {model_dir}
+   source .venv/bin/activate
+   pip install xformers --index-url https://download.pytorch.org/whl/cu118
 """
         }
 
@@ -694,6 +724,58 @@ Make sure you have nvcc installed:
                 print_info(special_instructions[dep].format(model_dir=model_dir))
 
             return False
+    
+    def _install_xformers_with_cuda(self, pip_path: Path, log_path: Path) -> bool:
+        """Try to install xformers with appropriate CUDA version.
+        
+        Args:
+            pip_path: Path to pip executable.
+            log_path: Path to installation log.
+            
+        Returns:
+            True if installed successfully, False otherwise.
+        """
+        try:
+            # Check if CUDA is available
+            result = subprocess.run(
+                ["nvcc", "--version"],
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode == 0:
+                # Extract CUDA version
+                cuda_version = None
+                for line in result.stdout.split('\n'):
+                    if 'release' in line:
+                        # Extract version like "11.8" from "release 11.8, V11.8.89"
+                        parts = line.split('release')[1].split(',')[0].strip()
+                        cuda_version = parts
+                        break
+                
+                if cuda_version:
+                    # Determine appropriate index URL
+                    if cuda_version.startswith("12.1"):
+                        index_url = "https://download.pytorch.org/whl/cu121"
+                    elif cuda_version.startswith("11.8"):
+                        index_url = "https://download.pytorch.org/whl/cu118"
+                    else:
+                        index_url = "https://download.pytorch.org/whl/cu118"  # Default
+                    
+                    print_info(f"Installing xformers for CUDA {cuda_version}...")
+                    subprocess.run(
+                        [str(pip_path), "install", "xformers", "--index-url", index_url],
+                        check=True,
+                        capture_output=True,
+                        text=True
+                    )
+                    self._log_install(log_path, "INFO", f"Installed xformers for CUDA {cuda_version}")
+                    return True
+        except:
+            # Silent fail for optional dependency
+            pass
+        
+        return False
 
     def _copy_scripts(self, model_dir: Path, log_path: Path) -> bool:
         """Copy universal scripts and required libraries to model directory.
