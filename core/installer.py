@@ -114,7 +114,8 @@ class ModelInstaller:
             # Step 7: Install dependencies
             print_info("Installing dependencies...")
             if not self._install_dependencies(
-                model_dir, requirements, install_log_path
+                model_dir, requirements, install_log_path,
+                device_preference=device
             ):
                 return False
 
@@ -125,7 +126,8 @@ class ModelInstaller:
 
             # Step 9: Save model info
             if not self._save_model_info(
-                model_dir, model_info, requirements, install_log_path
+                model_dir, model_info, requirements, install_log_path,
+                device_preference=device
             ):
                 return False
 
@@ -464,7 +466,8 @@ class ModelInstaller:
         model_dir: Path,
         requirements: Any,
         log_path: Path,
-        preserve_torch_config: bool = False
+        preserve_torch_config: bool = False,
+        device_preference: str = "auto"
     ) -> bool:
         """Install model dependencies in virtual environment.
 
@@ -473,6 +476,7 @@ class ModelInstaller:
             requirements: Model requirements from checker.
             log_path: Path to installation log.
             preserve_torch_config: If True, preserve existing PyTorch configuration.
+            device_preference: Device preference (auto/cuda/cpu/mps).
 
         Returns:
             True if dependencies installed successfully, False otherwise.
@@ -490,7 +494,11 @@ class ModelInstaller:
 
         # Install PyTorch first if needed
         if any('torch' in dep for dep in base_deps):
-            if not self._install_pytorch(pip_path, log_path, preserve_config=preserve_torch_config):
+            if not self._install_pytorch(
+                pip_path, log_path, 
+                preserve_config=preserve_torch_config,
+                device_preference=device_preference
+            ):
                 return False
             # Remove only torch-related packages from base_deps to avoid reinstalling
             # Keep transformers and other non-torch packages
@@ -590,13 +598,20 @@ class ModelInstaller:
         self._log_install(log_path, "INFO", "Dependencies installation completed")
         return True
 
-    def _install_pytorch(self, pip_path: Path, log_path: Path, preserve_config: bool = False) -> bool:
+    def _install_pytorch(
+        self, 
+        pip_path: Path, 
+        log_path: Path, 
+        preserve_config: bool = False,
+        device_preference: str = "auto"
+    ) -> bool:
         """Install PyTorch with appropriate CUDA support.
 
         Args:
             pip_path: Path to pip executable.
             log_path: Path to installation log.
             preserve_config: If True, preserve existing PyTorch configuration (CPU/CUDA).
+            device_preference: Device preference (auto/cuda/cpu/mps).
 
         Returns:
             True if PyTorch installed successfully, False otherwise.
@@ -639,56 +654,70 @@ class ModelInstaller:
                     print_error(f"Failed to reinstall PyTorch: {e}")
                     return False
 
-        # Detect CUDA availability for new installation
-        cuda_available = False
-        cuda_version = None
-
-        try:
-            result = subprocess.run(
-                ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-                capture_output=True,
-                text=True
-            )
-            if result.returncode == 0:
-                cuda_available = True
-                # Try to get CUDA version
-                result = subprocess.run(
-                    ["nvcc", "--version"],
-                    capture_output=True,
-                    text=True
-                )
-                if result.returncode == 0 and "release" in result.stdout:
-                    # Extract version (e.g., "release 11.8")
-                    import re
-                    match = re.search(r"release (\d+\.\d+)", result.stdout)
-                    if match:
-                        cuda_version = match.group(1)
-        except Exception:
-            pass
-
-        # Determine PyTorch index URL
+        # Handle explicit device preference
         system = platform.system().lower()
-
-        if cuda_available and cuda_version:
-            # Map CUDA version to PyTorch index
-            if cuda_version.startswith("12"):
-                index_url = "https://download.pytorch.org/whl/cu121"
-                torch_cmd = ["torch", "torchvision", "torchaudio"]
-            elif cuda_version.startswith("11.8"):
-                index_url = "https://download.pytorch.org/whl/cu118"
-                torch_cmd = ["torch", "torchvision", "torchaudio"]
-            else:
-                # Default CUDA
-                index_url = "https://download.pytorch.org/whl/cu118"
-                torch_cmd = ["torch", "torchvision", "torchaudio"]
-        elif system == "darwin":  # macOS
-            # MPS support
-            torch_cmd = ["torch", "torchvision", "torchaudio"]
-            index_url = None
-        else:
-            # CPU only
+        
+        if device_preference == "cpu":
+            # Force CPU installation
             index_url = "https://download.pytorch.org/whl/cpu"
             torch_cmd = ["torch", "torchvision", "torchaudio"]
+            cuda_available = False
+            cuda_version = None
+            print_info("Installing CPU-only PyTorch as requested")
+        else:
+            # Detect CUDA availability for auto/cuda preference
+            cuda_available = False
+            cuda_version = None
+
+            if device_preference != "mps":  # Don't check CUDA for MPS
+                try:
+                    result = subprocess.run(
+                        ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                        capture_output=True,
+                        text=True
+                    )
+                    if result.returncode == 0:
+                        cuda_available = True
+                        # Try to get CUDA version
+                        result = subprocess.run(
+                            ["nvcc", "--version"],
+                            capture_output=True,
+                            text=True
+                        )
+                        if result.returncode == 0 and "release" in result.stdout:
+                            # Extract version (e.g., "release 11.8")
+                            import re
+                            match = re.search(r"release (\d+\.\d+)", result.stdout)
+                            if match:
+                                cuda_version = match.group(1)
+                except Exception:
+                    pass
+
+            # Determine PyTorch index URL
+            if device_preference == "cuda" and not cuda_available:
+                print_warning("CUDA requested but not available, falling back to CPU")
+                index_url = "https://download.pytorch.org/whl/cpu"
+                torch_cmd = ["torch", "torchvision", "torchaudio"]
+            elif cuda_available and cuda_version and device_preference != "mps":
+                # Map CUDA version to PyTorch index
+                if cuda_version.startswith("12"):
+                    index_url = "https://download.pytorch.org/whl/cu121"
+                    torch_cmd = ["torch", "torchvision", "torchaudio"]
+                elif cuda_version.startswith("11.8"):
+                    index_url = "https://download.pytorch.org/whl/cu118"
+                    torch_cmd = ["torch", "torchvision", "torchaudio"]
+                else:
+                    # Default CUDA
+                    index_url = "https://download.pytorch.org/whl/cu118"
+                    torch_cmd = ["torch", "torchvision", "torchaudio"]
+            elif system == "darwin" or device_preference == "mps":  # macOS
+                # MPS support
+                torch_cmd = ["torch", "torchvision", "torchaudio"]
+                index_url = None
+            else:
+                # CPU only
+                index_url = "https://download.pytorch.org/whl/cpu"
+                torch_cmd = ["torch", "torchvision", "torchaudio"]
 
         try:
             print_info(f"Installing PyTorch for {system} "
@@ -1295,7 +1324,8 @@ To install manually:
         model_dir: Path,
         model_info: Dict[str, Any],
         requirements: Any,
-        log_path: Path
+        log_path: Path,
+        device_preference: str = "auto"
     ) -> bool:
         """Save model information to model_info.json.
 
@@ -1304,6 +1334,7 @@ To install manually:
             model_info: Model information from checker.
             requirements: Model requirements.
             log_path: Path to installation log.
+            device_preference: Device preference used during installation.
 
         Returns:
             True if saved successfully, False otherwise.
@@ -1315,6 +1346,7 @@ To install manually:
                 "install_date": datetime.now().isoformat(),
                 "installer_version": self.config.version,
                 "model_path": "./model",
+                "device_preference": device_preference,
                 "requirements": {
                     "base_dependencies": requirements.base_dependencies,
                     "special_dependencies": requirements.special_dependencies,
