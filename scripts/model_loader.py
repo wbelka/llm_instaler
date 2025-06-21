@@ -32,14 +32,18 @@ def get_handler(model_info: Dict[str, Any]):
         registry = get_handler_registry()
         handler_class = registry.get_handler_for_model(model_info)
 
-        if not handler_class:
-            raise ValueError(f"No handler found for model type: {model_info.get('model_type', 'unknown')}")
-
-        return handler_class(model_info)
+        if handler_class:
+            return handler_class(model_info)
+        else:
+            logging.warning(f"No handler found for model type: {model_info.get('model_type', 'unknown')}")
+            return None
 
     except ImportError as e:
-        logging.error(f"Failed to import handlers: {e}")
+        logging.warning(f"Failed to import handlers: {e}")
         # Fallback to basic loading
+        return None
+    except Exception as e:
+        logging.warning(f"Failed to get handler: {e}")
         return None
 
 

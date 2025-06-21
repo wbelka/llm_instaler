@@ -35,9 +35,45 @@ class HandlerRegistry:
             self._handlers['text-classifier'] = TransformerHandler
         except ImportError:
             pass
-
-        # Other handlers will be added as they are implemented
-        # For now, they will use the dynamic loading approach
+            
+        try:
+            from handlers.diffusion import DiffusionHandler
+            self._handlers['diffusion'] = DiffusionHandler
+            self._handlers['image-generation'] = DiffusionHandler
+            self._handlers['text-to-image'] = DiffusionHandler
+            self._handlers['text-to-video'] = DiffusionHandler
+        except ImportError:
+            pass
+            
+        try:
+            from handlers.embedding import EmbeddingHandler
+            self._handlers['embedding'] = EmbeddingHandler
+            self._handlers['text-embedding'] = EmbeddingHandler
+        except ImportError:
+            pass
+            
+        try:
+            from handlers.vision import VisionHandler
+            self._handlers['vision'] = VisionHandler
+            self._handlers['image-classification'] = VisionHandler
+            self._handlers['object-detection'] = VisionHandler
+        except ImportError:
+            pass
+            
+        try:
+            from handlers.audio import AudioHandler
+            self._handlers['audio'] = AudioHandler
+            self._handlers['speech-to-text'] = AudioHandler
+            self._handlers['text-to-speech'] = AudioHandler
+        except ImportError:
+            pass
+            
+        try:
+            from handlers.multimodal import MultimodalHandler
+            self._handlers['multimodal'] = MultimodalHandler
+            self._handlers['vision-language'] = MultimodalHandler
+        except ImportError:
+            pass
 
     def register_handler(
         self,
