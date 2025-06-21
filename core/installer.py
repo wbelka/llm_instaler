@@ -945,7 +945,7 @@ To install manually:
                     handler = get_handler_class(model_info)
                     if handler:
                         requirements = handler(model_info).analyze()
-                        self._install_dependencies(requirements, model_path, log_path)
+                        self._install_dependencies(model_path, requirements, log_path)
                     else:
                         print_warning("Could not determine model requirements")
                 finally:
