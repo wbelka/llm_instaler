@@ -483,7 +483,7 @@ class ModelInstaller:
             pip_path = venv_path / "Scripts" / "pip.exe"
 
         # Get dependencies from requirements
-        base_deps = requirements.base_dependencies
+        base_deps = requirements.base_dependencies.copy()  # Make a copy
         special_deps = requirements.special_dependencies
 
         self._log_install(log_path, "INFO", f"Installing dependencies: {base_deps}")
@@ -494,13 +494,20 @@ class ModelInstaller:
                 return False
             # Remove only torch-related packages from base_deps to avoid reinstalling
             # Keep transformers and other non-torch packages
+            torch_packages = ['torch', 'torchvision', 'torchaudio']
             base_deps = [dep for dep in base_deps if not any(
-                torch_pkg in dep for torch_pkg in ['torch==', 'torchvision', 'torchaudio', 'torch>=', 'torch<']
-            ) and dep != 'torch']
+                dep.startswith(torch_pkg) for torch_pkg in torch_packages
+            )]
 
         # Install base dependencies
         if base_deps:
             try:
+                # Ensure transformers is always installed for diffusion models
+                if (hasattr(requirements, 'primary_library') and 
+                    requirements.primary_library == 'diffusers' and 
+                    'transformers' not in base_deps):
+                    base_deps.append('transformers')
+                
                 print_info(f"Installing base dependencies: {', '.join(base_deps)}")
                 subprocess.run(
                     [str(pip_path), "install"] + base_deps,

@@ -70,6 +70,13 @@ class DiffusionHandler(BaseHandler):
             requirements.capabilities["sdxl"] = True
             requirements.special_dependencies.append("invisible-watermark")
             
+        # Optional dependencies
+        requirements.optional_dependencies = [
+            "xformers",  # For memory efficient attention
+            "triton",    # For some optimizations
+            "compel",    # For better prompt handling
+        ]
+        
         # Wan models need specific dependencies
         if 'wan' in model_id.lower():
             # Ensure transformers is in the list (if not already)
@@ -77,13 +84,6 @@ class DiffusionHandler(BaseHandler):
                 requirements.base_dependencies.append("transformers")
             # Wan models also benefit from these
             requirements.optional_dependencies.append("scipy")
-        
-        # Optional dependencies
-        requirements.optional_dependencies = [
-            "xformers",  # For memory efficient attention
-            "triton",    # For some optimizations
-            "compel",    # For better prompt handling
-        ]
         
         # Add opencv for video models
         if requirements.model_family == "video-generation":
