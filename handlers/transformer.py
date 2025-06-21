@@ -11,10 +11,10 @@ from handlers.base import BaseHandler
 
 class TransformerHandler(BaseHandler):
     """Handler for transformer-based language models."""
-    
+
     def get_dependencies(self) -> List[str]:
         """Get Python dependencies for transformer models.
-        
+
         Returns:
             List of required pip packages.
         """
@@ -26,52 +26,52 @@ class TransformerHandler(BaseHandler):
             'protobuf>=3.20.0',       # For some models
             'tokenizers>=0.15.0'      # Fast tokenizers
         ]
-        
+
         # Add special dependencies based on model architecture
         special_reqs = self.model_info.get('special_requirements', [])
-        
+
         if 'flash-attn' in special_reqs:
             base_deps.append('flash-attn>=2.0.0')
-        
+
         if 'mamba-ssm' in special_reqs:
             base_deps.extend(['mamba-ssm>=1.0.0', 'causal-conv1d>=1.0.0'])
-        
+
         return base_deps
-    
+
     def get_system_dependencies(self) -> List[str]:
         """Get system dependencies for transformer models.
-        
+
         Returns:
             List of system requirements.
         """
         deps = []
-        
+
         # Check if CUDA is needed
         device = self.model_info.get('optimal_device', 'auto')
         if device in ['cuda', 'auto']:
             deps.append('cuda>=11.7')
-        
+
         return deps
-    
+
     def load_model(self, model_path: str, **kwargs):
         """Load transformer model with optimal settings.
-        
+
         Args:
             model_path: Path to model directory.
             **kwargs: Additional parameters.
-            
+
         Returns:
             Tuple of (model, tokenizer).
         """
         from transformers import AutoModelForCausalLM, AutoTokenizer
         import torch
-        
+
         # Extract parameters
         device = kwargs.get('device', 'auto')
         dtype = kwargs.get('dtype', 'auto')
         load_in_8bit = kwargs.get('load_in_8bit', False)
         load_in_4bit = kwargs.get('load_in_4bit', False)
-        
+
         # Determine torch dtype
         if dtype == 'auto':
             if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 7:
@@ -85,48 +85,48 @@ class TransformerHandler(BaseHandler):
                 'bfloat16': torch.bfloat16
             }
             torch_dtype = dtype_map.get(dtype, torch.float16)
-        
+
         # Load configuration
         model_kwargs = {
             'torch_dtype': torch_dtype,
             'low_cpu_mem_usage': True,
             'trust_remote_code': self.model_info.get('trust_remote_code', False)
         }
-        
+
         # Add quantization if requested
         if load_in_8bit:
             model_kwargs['load_in_8bit'] = True
         elif load_in_4bit:
             model_kwargs['load_in_4bit'] = True
             model_kwargs['bnb_4bit_compute_dtype'] = torch_dtype
-        
+
         # Device map for multi-GPU or CPU offloading
         if device == 'auto':
             model_kwargs['device_map'] = 'auto'
         elif device != 'cpu':
             model_kwargs['device_map'] = {'': device}
-        
+
         # Load model
         model = AutoModelForCausalLM.from_pretrained(
             model_path,
             **model_kwargs
         )
-        
+
         # Load tokenizer
         tokenizer = AutoTokenizer.from_pretrained(
             model_path,
             trust_remote_code=self.model_info.get('trust_remote_code', False)
         )
-        
+
         # Set padding token if not present
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
-        
+
         return model, tokenizer
-    
+
     def get_inference_params(self) -> Dict[str, Any]:
         """Get default inference parameters.
-        
+
         Returns:
             Dictionary of inference parameters.
         """
@@ -140,15 +140,15 @@ class TransformerHandler(BaseHandler):
             'pad_token_id': None,  # Set from tokenizer
             'eos_token_id': None,  # Set from tokenizer
         }
-    
+
     def get_training_params(self) -> Dict[str, Any]:
         """Get default training parameters.
-        
+
         Returns:
             Dictionary of training parameters.
         """
         model_size = self.model_info.get('model_size_b', 7)
-        
+
         # Adjust parameters based on model size
         if model_size < 1:
             base_lr = 5e-4
@@ -162,7 +162,7 @@ class TransformerHandler(BaseHandler):
         else:
             base_lr = 5e-5
             lora_r = 64
-        
+
         return {
             'learning_rate': base_lr,
             'num_train_epochs': 3,
@@ -178,32 +178,32 @@ class TransformerHandler(BaseHandler):
             'lora_dropout': 0.1,
             'lora_target_modules': ['q_proj', 'v_proj', 'k_proj', 'o_proj']
         }
-    
+
     def validate_model_files(self, model_path: str) -> Tuple[bool, Optional[str]]:
         """Validate model files are present.
-        
+
         Args:
             model_path: Path to model directory.
-            
+
         Returns:
             Tuple of (is_valid, error_message).
         """
         model_path = Path(model_path)
-        
+
         # Check for config
         if not (model_path / 'config.json').exists():
             return False, "Missing config.json"
-        
+
         # Check for model weights
         has_weights = False
         for pattern in ['*.bin', '*.safetensors', '*.pt', '*.pth']:
             if list(model_path.glob(pattern)):
                 has_weights = True
                 break
-        
+
         if not has_weights:
             return False, "No model weight files found"
-        
+
         # Check for tokenizer
         tokenizer_files = [
             'tokenizer.json',
@@ -211,24 +211,24 @@ class TransformerHandler(BaseHandler):
             'tokenizer.model',  # For sentencepiece
             'vocab.json'        # For some older models
         ]
-        
+
         has_tokenizer = any(
             (model_path / f).exists() for f in tokenizer_files
         )
-        
+
         if not has_tokenizer:
             return False, "No tokenizer files found"
-        
+
         return True, None
-    
+
     def get_model_capabilities(self) -> Dict[str, Any]:
         """Get model capabilities.
-        
+
         Returns:
             Dictionary of capabilities.
         """
         capabilities = super().get_model_capabilities()
-        
+
         # Update for transformer models
         capabilities.update({
             'supports_streaming': True,
@@ -237,37 +237,37 @@ class TransformerHandler(BaseHandler):
             'input_modalities': ['text'],
             'output_modalities': ['text']
         })
-        
+
         # Check for reasoning support
         model_type = self.model_info.get('config', {}).get('model_type', '')
         if model_type in ['o1', 'reasoning-llm'] or 'reasoning' in self.model_info.get('tags', []):
             capabilities['supports_reasoning'] = True
-        
+
         # Get context length
         config = self.model_info.get('config', {})
-        max_length = config.get('max_position_embeddings', 
+        max_length = config.get('max_position_embeddings',
                               config.get('max_sequence_length',
                                        config.get('n_positions', 2048)))
         capabilities['max_context_length'] = max_length
-        
+
         return capabilities
-    
+
     def prepare_for_training(self, model, training_method: str = 'lora') -> Any:
         """Prepare model for training.
-        
+
         Args:
             model: Loaded model instance.
             training_method: Training method to use.
-            
+
         Returns:
             Prepared model.
         """
         if training_method in ['lora', 'qlora']:
             from peft import LoraConfig, get_peft_model, TaskType
-            
+
             # Get training parameters
             train_params = self.get_training_params()
-            
+
             # Create LoRA configuration
             peft_config = LoraConfig(
                 task_type=TaskType.CAUSAL_LM,
@@ -277,21 +277,21 @@ class TransformerHandler(BaseHandler):
                 lora_dropout=train_params['lora_dropout'],
                 target_modules=train_params['lora_target_modules']
             )
-            
+
             # Prepare model for k-bit training if using QLoRA
             if training_method == 'qlora':
                 from peft import prepare_model_for_kbit_training
                 model = prepare_model_for_kbit_training(model)
-            
+
             # Get PEFT model
             model = get_peft_model(model, peft_config)
             model.print_trainable_parameters()
-            
+
             return model
-        
+
         elif training_method == 'full':
             # For full fine-tuning, just return the model
             return model
-        
+
         else:
             raise ValueError(f"Unknown training method: {training_method}")

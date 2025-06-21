@@ -41,7 +41,7 @@ def test_safe_model_name():
 def test_check_system_requirements():
     """Test system requirements checking."""
     system_info = check_system_requirements()
-    
+
     # Check that all expected keys are present
     assert 'os' in system_info
     assert 'python_version' in system_info
@@ -51,14 +51,14 @@ def test_check_system_requirements():
     assert 'disk_space_gb' in system_info
     assert 'cuda_available' in system_info
     assert 'gpu_info' in system_info
-    
+
     # Check types
     assert isinstance(system_info['cpu_count'], int)
     assert isinstance(system_info['total_memory_gb'], float)
     assert isinstance(system_info['available_memory_gb'], float)
     assert isinstance(system_info['cuda_available'], bool)
     assert isinstance(system_info['gpu_info'], list)
-    
+
     # Check disk space structure
     assert 'home' in system_info['disk_space_gb']
     assert 'total' in system_info['disk_space_gb']['home']
@@ -69,11 +69,11 @@ def test_calculate_model_size():
     """Test model size calculation."""
     # Test with empty list
     assert calculate_model_size([]) == 0.0
-    
+
     # Test with single file
     files = [{'size': 1024 * 1024 * 1024}]  # 1 GB
     assert calculate_model_size(files) == 1.0
-    
+
     # Test with multiple files
     files = [
         {'size': 1024 * 1024 * 1024},  # 1 GB
@@ -81,7 +81,7 @@ def test_calculate_model_size():
         {'size': 256 * 1024 * 1024}    # 0.25 GB
     ]
     assert calculate_model_size(files) == 1.75
-    
+
     # Test with missing size field
     files = [
         {'size': 1024 * 1024 * 1024},

@@ -6,13 +6,12 @@ This module implements the CLI commands using Click framework.
 import sys
 import click
 from pathlib import Path
-from typing import Optional
 
 from core.config import get_config, ConfigError
 from core.utils import (
     setup_logging, check_system_requirements, print_system_info,
-    print_error, print_success, print_warning, print_info,
-    console, get_models_dir, safe_model_name
+    print_error, print_success, print_info,
+    console, get_models_dir
 )
 
 # Version
@@ -72,11 +71,11 @@ def check(ctx: click.Context, model_id: str):
 
     # Import here to avoid circular imports
     from core.checker import ModelChecker
-    
+
     # Create and run checker
     checker = ModelChecker()
     success, requirements = checker.check_model(model_id)
-    
+
     if not success:
         sys.exit(1)
 
@@ -101,17 +100,21 @@ def install(ctx: click.Context, model_id: str, device: str, dtype: str,
     logger = ctx.obj['logger']
     logger.info(f"Installing model: {model_id}")
 
-    # Check if model already exists
-    models_dir = get_models_dir()
-    model_dir = models_dir / safe_model_name(model_id)
+    # Import here to avoid circular imports
+    from core.installer import ModelInstaller
 
-    if model_dir.exists() and not force:
-        print_error(f"Model already installed at: {model_dir}")
-        print_info("Use --force to reinstall")
-        return
+    # Create installer and run installation
+    installer = ModelInstaller()
+    success = installer.install_model(
+        model_id=model_id,
+        device=device,
+        dtype=dtype,
+        quantization=quantization,
+        force=force
+    )
 
-    print_info(f"Installing model: {model_id}")
-    console.print("\n[yellow]Note:[/yellow] Install functionality will be implemented in Step 3")
+    if not success:
+        sys.exit(1)
 
 
 @cli.command(name='list')

@@ -126,6 +126,9 @@ class ModelChecker:
             # Step 7: Save results
             self._save_results(model_id, requirements, compatibility)
 
+            # Store model info for installer
+            self._last_model_info = requirements.__dict__.copy()
+
             return True, requirements
 
         except RepositoryNotFoundError:
@@ -1131,9 +1134,21 @@ class ModelChecker:
 
         from datetime import datetime
 
+        # Create model_info dict
+        model_info = {
+            "model_id": model_id,
+            "model_type": requirements.model_type,
+            "model_family": requirements.model_family,
+            "architecture_type": requirements.architecture_type,
+            "primary_library": requirements.primary_library,
+            "capabilities": requirements.capabilities,
+            "special_config": requirements.special_config,
+        }
+
         results = {
             "model_id": model_id,
             "check_date": datetime.now().isoformat(),
+            "model_info": model_info,
             "requirements": {
                 "model_type": requirements.model_type,
                 "model_family": requirements.model_family,
@@ -1146,6 +1161,7 @@ class ModelChecker:
                 "memory_requirements": requirements.memory_requirements,
                 "capabilities": requirements.capabilities,
                 "special_config": requirements.special_config,
+                "compatibility_result": compatibility.get("float16", compatibility.get("float32")),
             },
             "compatibility": {
                 dtype: {
