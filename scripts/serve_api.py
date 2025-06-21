@@ -72,6 +72,9 @@ class GenerateRequest(BaseModel):
     width: int = Field(512, ge=64, le=2048)
     height: int = Field(512, ge=64, le=2048)
     seed: Optional[int] = None
+    
+    # Video generation parameters
+    num_frames: int = Field(16, ge=1, le=128, description="Number of frames for video generation")
 
     # Embedding parameters
     texts: Optional[List[str]] = Field(None, description="Texts for embedding")
@@ -390,16 +393,71 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
     else:
         generator = None
 
+    # Check if this is a video model
+    model_info = get_model_config()
+    is_video_model = 'video' in model_info.get('model_family', '').lower()
+    
+    logger.info(f"Model info: model_family={model_info.get('model_family')}, is_video_model={is_video_model}")
+    
+    # Prepare generation kwargs
+    gen_kwargs = {
+        "prompt": request.prompt,
+        "negative_prompt": request.negative_prompt,
+        "num_inference_steps": request.num_inference_steps,
+        "guidance_scale": request.guidance_scale,
+        "generator": generator
+    }
+    
+    # For video models, we need to be more careful with dimensions
+    if is_video_model:
+        # Video models often have specific size requirements
+        # Default to smaller sizes for video to avoid CUDA errors
+        gen_kwargs["width"] = min(request.width, 256)
+        gen_kwargs["height"] = min(request.height, 256)
+        
+        # Some video models need num_frames parameter
+        if hasattr(MODEL, "unet") and hasattr(MODEL.unet, "config"):
+            if hasattr(MODEL.unet.config, "sample_size"):
+                # Use model's preferred size if available
+                sample_size = MODEL.unet.config.sample_size
+                if isinstance(sample_size, int):
+                    gen_kwargs["width"] = sample_size
+                    gen_kwargs["height"] = sample_size
+        
+        # Add num_frames if the model supports it
+        gen_kwargs["num_frames"] = request.num_frames
+    else:
+        gen_kwargs["width"] = request.width
+        gen_kwargs["height"] = request.height
+    
     # Generate image/video
-    output = MODEL(
-        prompt=request.prompt,
-        negative_prompt=request.negative_prompt,
-        num_inference_steps=request.num_inference_steps,
-        guidance_scale=request.guidance_scale,
-        width=request.width,
-        height=request.height,
-        generator=generator
-    )
+    try:
+        logger.info(f"Generating with params: width={gen_kwargs.get('width')}, height={gen_kwargs.get('height')}, num_frames={gen_kwargs.get('num_frames', 'N/A')}")
+        output = MODEL(**gen_kwargs)
+    except RuntimeError as e:
+        error_msg = str(e)
+        if "CUDA" in error_msg:
+            if is_video_model:
+                # Try with even smaller dimensions
+                logger.warning(f"CUDA error with dimensions {gen_kwargs['width']}x{gen_kwargs['height']}, trying smaller")
+                gen_kwargs["width"] = 128
+                gen_kwargs["height"] = 128
+                gen_kwargs["num_frames"] = 8
+                try:
+                    output = MODEL(**gen_kwargs)
+                except RuntimeError as e2:
+                    logger.error(f"Failed even with smaller dimensions: {str(e2)}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"GPU memory error. Try smaller dimensions or fewer frames. Error: {str(e2)}"
+                    )
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"GPU error during generation: {error_msg}"
+                )
+        else:
+            raise
     
     # Handle different output types
     if hasattr(output, 'images') and output.images is not None:
