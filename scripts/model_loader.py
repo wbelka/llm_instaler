@@ -38,12 +38,11 @@ def get_handler(model_info: Dict[str, Any]):
             # No handler found, will use fallback loading
             return None
 
-    except ImportError as e:
-        logging.warning(f"Failed to import handlers: {e}")
-        # Fallback to basic loading
+    except ImportError:
+        # Handlers not available, will use fallback loading
         return None
-    except Exception as e:
-        logging.warning(f"Failed to get handler: {e}")
+    except Exception:
+        # Error getting handler, will use fallback loading
         return None
 
 
