@@ -72,6 +72,8 @@ class HandlerRegistry:
             from handlers.multimodal import MultimodalHandler
             self._handlers['multimodal'] = MultimodalHandler
             self._handlers['vision-language'] = MultimodalHandler
+            # For Deepseek Janus models
+            self._handlers['multi_modality'] = MultimodalHandler
         except ImportError:
             pass
 
