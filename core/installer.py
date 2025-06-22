@@ -113,6 +113,37 @@ class ModelInstaller:
 
             # Step 7: Install dependencies
             print_info("Installing dependencies...")
+
+            # Check if we have a handler for this model type
+            handler = None
+            try:
+                handler_class = self.handler_registry.get_handler_for_model(
+                    model_info
+                )
+                if handler_class:
+                    self._log_install(
+                        install_log_path, "INFO",
+                        f"Using handler: {handler_class.__name__}"
+                    )
+                    handler = handler_class(model_info)
+                    # Get handler's requirements
+                    handler_requirements = handler.analyze()
+                    # Update base dependencies with handler's dependencies
+                    if hasattr(handler_requirements, 'python_packages'):
+                        requirements.base_dependencies = (
+                            handler_requirements.python_packages
+                        )
+                        self._log_install(
+                            install_log_path, "INFO",
+                            f"Updated dependencies from handler: "
+                            f"{requirements.base_dependencies}"
+                        )
+            except Exception as e:
+                self._log_install(
+                    install_log_path, "WARNING",
+                    f"Failed to get handler requirements: {e}"
+                )
+
             if not self._install_dependencies(
                 model_dir, requirements, install_log_path,
                 device_preference=device
