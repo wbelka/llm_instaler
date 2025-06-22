@@ -90,9 +90,15 @@ class DiffusionHandler(BaseHandler):
             # Wan models also benefit from these
             requirements.optional_dependencies.append("scipy")
         
-        # Add opencv for video models
+        # Add opencv for video models - required for video output
         if requirements.model_family == "video-generation":
-            requirements.optional_dependencies.append("opencv-python")
+            if "opencv-python" not in requirements.base_dependencies:
+                requirements.base_dependencies.append("opencv-python")
+            # Some video models also need imageio for video I/O
+            if "imageio" not in requirements.base_dependencies:
+                requirements.base_dependencies.append("imageio")
+            if "imageio-ffmpeg" not in requirements.optional_dependencies:
+                requirements.optional_dependencies.append("imageio-ffmpeg")
         
         # Memory requirements
         model_size = self._estimate_model_size()
