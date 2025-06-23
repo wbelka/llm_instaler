@@ -40,6 +40,8 @@ class ArchitectureDetector:
         'mamba': 'language-model',
         'rwkv': 'language-model',
         'jamba': 'language-model',
+        'qwen3': 'language-model',
+        'qwen-3': 'language-model',
         
         # Multimodal models
         'llava': 'multimodal',
@@ -109,6 +111,7 @@ class ArchitectureDetector:
         'LlamaForCausalLM': 'language-model',
         'MistralForCausalLM': 'language-model',
         'Qwen2ForCausalLM': 'language-model',
+        'Qwen3ForCausalLM': 'language-model',
         'GemmaForCausalLM': 'language-model',
         'PhiForCausalLM': 'language-model',
         
@@ -206,6 +209,8 @@ class ArchitectureDetector:
         """
         # Models that typically require trust_remote_code
         trust_required = [
+            'qwen3',
+            'qwen-3',
             'qwen2_5_vl',
             'qwen2_vl', 
             'janus',

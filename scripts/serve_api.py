@@ -293,6 +293,9 @@ async def get_model_info():
     
     if model_family == "language-model":
         supported_modes.extend(["chat", "complete", "instruct", "creative", "code", "analyze", "translate", "summarize"])
+        # Add thinking modes for Qwen3
+        if MODEL_INFO.get("model_type") in ["qwen3", "qwen-3"]:
+            supported_modes.extend(["thinking", "no-thinking", "math", "reasoning"])
     elif model_family == "multimodal" or MODEL_INFO.get("model_type") == "multi_modality":
         supported_modes.extend(["chat", "complete", "analyze", "image", "creative", "vision"])
     elif model_family == "image-generation":
@@ -327,7 +330,11 @@ async def get_model_info():
         "artistic": "Artistic style",
         "photorealistic": "Realistic images",
         "animate": "Animation generation",
-        "similarity": "Similarity search"
+        "similarity": "Similarity search",
+        "thinking": "Enable thinking mode for complex reasoning",
+        "no-thinking": "Disable thinking for efficient responses",
+        "math": "Mathematical problem solving with thinking",
+        "reasoning": "Complex logical reasoning with thinking"
     }
 
     return ModelInfoResponse(

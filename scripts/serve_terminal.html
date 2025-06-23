@@ -15,6 +15,7 @@
             --error-color: #ff0040;
             --warning-color: #ffaa00;
             --info-color: #00aaff;
+            --thinking-color: #9966ff;
             --border-color: #00ff00;
             --button-bg: #001100;
             --button-hover: #002200;
@@ -758,6 +759,35 @@
                     imgLine.appendChild(img);
                 } else {
                     // Handle text response
+                    // Check if there's thinking content (for Qwen3)
+                    if (data.thinking) {
+                        // Show thinking process if in thinking mode
+                        if (currentMode === 'thinking' || currentMode === 'math' || currentMode === 'reasoning' || 
+                            (currentMode === 'auto' && modelInfo.capabilities.supports_thinking)) {
+                            const thinkingHeader = document.createElement('div');
+                            thinkingHeader.className = 'terminal-line';
+                            thinkingHeader.style.color = 'var(--thinking-color)';
+                            thinkingHeader.textContent = '[THINKING]';
+                            document.getElementById('terminalOutput').appendChild(thinkingHeader);
+                            
+                            const thinkingContent = document.createElement('div');
+                            thinkingContent.className = 'terminal-line';
+                            thinkingContent.style.color = 'var(--thinking-color)';
+                            thinkingContent.style.opacity = '0.8';
+                            thinkingContent.style.fontStyle = 'italic';
+                            thinkingContent.style.marginLeft = '20px';
+                            document.getElementById('terminalOutput').appendChild(thinkingContent);
+                            
+                            await typeText(thinkingContent, data.thinking, 20); // Very fast typing for thinking
+                            
+                            const separator = document.createElement('div');
+                            separator.className = 'terminal-line';
+                            separator.style.color = 'var(--thinking-color)';
+                            separator.textContent = '─'.repeat(60);
+                            document.getElementById('terminalOutput').appendChild(separator);
+                        }
+                    }
+                    
                     const responseLine = addTerminalLine('', '', 'output');
                     await typeText(responseLine, `[MODEL] ${data.text || data.answer || 'No response'}`);
                 }

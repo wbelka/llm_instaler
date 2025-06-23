@@ -102,6 +102,14 @@ class HandlerRegistry:
             self._handlers['qwen2_5_vl'] = QwenVLHandler
         except ImportError:
             pass
+        
+        try:
+            from handlers.qwen3 import Qwen3Handler
+            # Register Qwen3 handler for thinking mode support
+            self._handlers['qwen3'] = Qwen3Handler
+            self._handlers['qwen-3'] = Qwen3Handler
+        except ImportError:
+            pass
 
     def register_handler(
         self,
