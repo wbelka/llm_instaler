@@ -609,13 +609,16 @@ Note: This is a large package and may take some time to install.
         # Extract assistant response
         response = self.extract_assistant_response(response)
         
+        # Calculate usage if possible
+        usage = {}
+        if 'input_ids' in inputs and hasattr(inputs['input_ids'], 'shape'):
+            usage['prompt_tokens'] = inputs['input_ids'].shape[1]
+            usage['completion_tokens'] = outputs.shape[1] - inputs['input_ids'].shape[1]
+            usage['total_tokens'] = outputs.shape[1]
+        
         return {
             'text': response,
-            'usage': {
-                'prompt_tokens': inputs.get('input_ids', torch.tensor([[]])).shape[1],
-                'completion_tokens': outputs.shape[1] - inputs.get('input_ids', torch.tensor([[]])).shape[1],
-                'total_tokens': outputs.shape[1]
-            }
+            'usage': usage
         }
     
     def resize_images_for_memory(self, images: List[Any], max_size: int = 1024) -> List[Any]:
