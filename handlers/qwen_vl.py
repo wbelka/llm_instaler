@@ -119,6 +119,16 @@ class QwenVLHandler(MultimodalHandler):
                 torch_dtype = torch.float16
             else:
                 torch_dtype = torch.float32
+        elif dtype in ['int8', 'int4']:
+            # Enable quantization for memory reduction
+            if dtype == 'int8':
+                load_in_8bit = True
+                torch_dtype = torch.float16  # Base dtype for int8
+                logger.info("Enabling 8-bit quantization for memory efficiency")
+            else:  # int4
+                load_in_4bit = True
+                torch_dtype = torch.float16  # Base dtype for int4
+                logger.info("Enabling 4-bit quantization for memory efficiency")
         else:
             dtype_map = {
                 'float32': torch.float32,
@@ -143,11 +153,13 @@ class QwenVLHandler(MultimodalHandler):
                 bnb_4bit_compute_dtype=torch_dtype if load_in_4bit else None,
             )
         
-        # Device mapping
+        # Device mapping with memory optimization
         if device == 'auto':
+            # Use more aggressive memory settings for Qwen2.5-VL
             model_kwargs['device_map'] = 'auto'
-        elif device != 'cpu':
-            model_kwargs['device_map'] = {'': device}
+            # Use 95% of available GPU memory instead of default 90%
+            model_kwargs['max_memory'] = {0: "95%"}
+            logger.info("Using 95% of GPU memory for model loading")
         
         # Load model
         logger.info(f"Loading Qwen VL model from {model_path}")
