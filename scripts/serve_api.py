@@ -78,6 +78,10 @@ class GenerateRequest(BaseModel):
     # Embedding parameters
     texts: Optional[List[str]] = Field(None, description="Texts for embedding")
     normalize: bool = Field(True, description="Normalize embeddings")
+    
+    # Multimodal parameters
+    image_data: Optional[str] = Field(None, description="Base64 encoded image data")
+    images: Optional[List[str]] = Field(None, description="List of base64 encoded images")
 
     # Reasoning parameters
     reasoning_mode: bool = Field(False, description="Enable reasoning mode")
@@ -223,10 +227,25 @@ async def generate(request: GenerateRequest):
 
     try:
         # Log request for debugging
-        logger.info(f"Received request: prompt='{request.prompt[:50] if request.prompt else None}...', "
-                    f"messages={type(request.messages).__name__ if hasattr(request, 'messages') else 'no attr'}, "
-                    f"messages_value={request.messages if hasattr(request, 'messages') else 'N/A'}, "
-                    f"image_data={'present' if hasattr(request, 'image_data') and request.image_data else 'none'}")
+        logger.info("=== New generation request ===")
+        logger.info(f"Prompt: '{request.prompt[:50] if request.prompt else None}...'")
+        
+        if hasattr(request, 'messages') and request.messages:
+            logger.info(f"Messages: {len(request.messages)} messages")
+            for i, msg in enumerate(request.messages):
+                logger.info(f"  Message {i}: role='{msg.get('role')}', content_length={len(msg.get('content', ''))}")
+        else:
+            logger.info("Messages: None")
+            
+        if hasattr(request, 'image_data') and request.image_data:
+            logger.info("Image data: Single image provided")
+        elif hasattr(request, 'images') and request.images:
+            logger.info(f"Images: {len(request.images)} images provided")
+        else:
+            logger.info("Images: None")
+        
+        logger.info(f"Parameters: temperature={request.temperature}, max_tokens={request.max_tokens}, "
+                    f"top_p={request.top_p}, top_k={request.top_k}")
         
         model_family = MODEL_INFO.get("model_family", "")
         model_type = MODEL_INFO.get("model_type", "")
@@ -273,31 +292,45 @@ async def generate(request: GenerateRequest):
 async def generate_text(request: GenerateRequest) -> GenerateResponse:
     """Generate text for language models."""
     import torch
+    
+    logger.info("=== Starting text generation ===")
+    logger.info(f"Model type: {MODEL_INFO.get('model_type')}")
+    logger.info(f"Model family: {MODEL_INFO.get('model_family')}")
 
     # Check if this is a reasoning model
     capabilities = MODEL_INFO.get("capabilities", {})
     supports_reasoning = capabilities.get("reasoning", False)
+    logger.info(f"Supports reasoning: {supports_reasoning}, Reasoning mode requested: {request.reasoning_mode}")
 
     if request.reasoning_mode and supports_reasoning:
+        logger.info("Using reasoning mode generation")
         return await generate_with_reasoning(request)
 
     # Prepare input
     if request.messages:
+        logger.info(f"Processing {len(request.messages)} chat messages")
         # Chat format
         text = TOKENIZER.apply_chat_template(
             request.messages,
             tokenize=False,
             add_generation_prompt=True
         )
+        logger.info(f"Applied chat template, text length: {len(text)}")
     else:
         text = request.prompt
+        logger.info(f"Using direct prompt, length: {len(text) if text else 0}")
 
     if not text:
+        logger.error("No text input provided")
         raise HTTPException(status_code=400, detail="No prompt provided")
 
     # Tokenize
+    logger.info("Tokenizing input text")
     inputs = TOKENIZER(text, return_tensors="pt")
+    logger.info(f"Tokenized input shape: {inputs['input_ids'].shape}")
+    
     if hasattr(MODEL, "device"):
+        logger.info(f"Moving inputs to device: {MODEL.device}")
         inputs = {k: v.to(MODEL.device) for k, v in inputs.items()}
 
     # Generate
@@ -310,24 +343,38 @@ async def generate_text(request: GenerateRequest) -> GenerateResponse:
             "do_sample": request.temperature > 0,
             "pad_token_id": TOKENIZER.eos_token_id,
         }
+        
+        logger.info(f"Generation parameters: {generation_kwargs}")
 
         if request.stop_sequences:
             generation_kwargs["stop_strings"] = request.stop_sequences
+            logger.info(f"Stop sequences: {request.stop_sequences}")
 
+        logger.info("Starting generation...")
         outputs = MODEL.generate(**inputs, **generation_kwargs)
+        logger.info(f"Generation complete, output shape: {outputs.shape}")
 
     # Decode
+    input_length = inputs["input_ids"].shape[1]
+    generated_tokens = outputs[0][input_length:]
+    logger.info(f"Decoding {len(generated_tokens)} generated tokens (excluded {input_length} input tokens)")
+    
     generated_text = TOKENIZER.decode(
-        outputs[0][inputs["input_ids"].shape[1]:],
+        generated_tokens,
         skip_special_tokens=True
     )
+    
+    logger.info(f"Generated text length: {len(generated_text)}")
+    logger.info(f"Generated text preview: {generated_text[:200]}...")
 
     # Calculate usage
     usage = {
-        "prompt_tokens": inputs["input_ids"].shape[1],
-        "completion_tokens": outputs.shape[1] - inputs["input_ids"].shape[1],
+        "prompt_tokens": input_length,
+        "completion_tokens": len(generated_tokens),
         "total_tokens": outputs.shape[1]
     }
+    logger.info(f"Token usage: {usage}")
+    logger.info("=== Text generation complete ===")
 
     return GenerateResponse(text=generated_text, usage=usage)
 
@@ -858,13 +905,20 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
     """Generate for multimodal models."""
     import torch
     from PIL import Image
+    
+    logger.info("=== Starting multimodal generation ===")
+    logger.info(f"Model type: {MODEL_INFO.get('model_type')}")
+    logger.info(f"Model family: {MODEL_INFO.get('model_family')}")
+    logger.info(f"Model ID: {MODEL_INFO.get('model_id')}")
 
     # Get prompt from either prompt field or messages
     prompt = request.prompt
     if not prompt and request.messages:
+        logger.info(f"Converting {len(request.messages)} messages to prompt")
         # Convert messages to a single prompt
         try:
             prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in request.messages])
+            logger.info(f"Created prompt from messages: {prompt[:100]}...")
         except (TypeError, AttributeError):
             # Handle case where messages is not iterable
             logger.warning("Messages provided but not in expected format")
@@ -872,22 +926,46 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
     
     # Multimodal models typically take both text and image inputs
     if not prompt:
+        logger.error("No prompt provided in request")
         raise HTTPException(status_code=400, detail="No prompt provided")
 
     # Check if image is provided
-    image = None
+    images = []
+    
+    # Handle single image
     if hasattr(request, 'image_data') and request.image_data:
+        logger.info("Processing single image from image_data field")
         try:
             image_data = base64.b64decode(request.image_data)
             image = Image.open(BytesIO(image_data))
+            logger.info(f"Decoded image: size={image.size}, mode={image.mode}")
+            images.append(image)
         except Exception as e:
             logger.warning(f"Failed to decode image: {e}")
+    
+    # Handle multiple images
+    if hasattr(request, 'images') and request.images:
+        logger.info(f"Processing {len(request.images)} images from images field")
+        for i, img_data in enumerate(request.images):
+            try:
+                decoded = base64.b64decode(img_data)
+                img = Image.open(BytesIO(decoded))
+                logger.info(f"Decoded image {i+1}: size={img.size}, mode={img.mode}")
+                images.append(img)
+            except Exception as e:
+                logger.warning(f"Failed to decode image {i+1}: {e}")
+    
+    logger.info(f"Total images loaded: {len(images)}")
 
     # Process inputs
     if TOKENIZER:
         # For Janus models, we need to prepare the conversation format
-        logger.info(f"TOKENIZER type: {type(TOKENIZER)}")
-        if hasattr(TOKENIZER, 'process_one') or 'janus' in str(type(TOKENIZER)).lower():
+        tokenizer_type = str(type(TOKENIZER))
+        logger.info(f"TOKENIZER type: {tokenizer_type}")
+        logger.info(f"TOKENIZER class: {TOKENIZER.__class__.__name__}")
+        
+        if hasattr(TOKENIZER, 'process_one') or 'janus' in tokenizer_type.lower():
+            logger.info("Detected Janus model processor")
             # Janus expects conversations format with specific role names
             if request.messages:
                 # Convert standard roles to Janus format
@@ -895,25 +973,30 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
                 # System message should be prepended to the first user message
                 system_content = None
                 
-                for msg in request.messages:
+                logger.info(f"Converting {len(request.messages)} messages to Janus format")
+                for i, msg in enumerate(request.messages):
                     role = msg['role']
                     content = msg['content']
+                    logger.info(f"Message {i}: role='{role}', content_length={len(content)}")
                     
                     if role.lower() == 'system':
                         # Skip system messages entirely for Janus
-                        logger.info(f"Skipping system message: {content}")
+                        logger.info(f"Skipping system message: {content[:100]}...")
                         continue
                     elif role.lower() == 'user':
                         # Use proper Janus Pro format with angle brackets
                         role = '<|User|>'
+                        logger.info(f"Converted 'user' to '{role}'")
                     elif role.lower() == 'assistant':
                         # Use proper Janus Pro format with angle brackets
                         role = '<|Assistant|>'
+                        logger.info(f"Converted 'assistant' to '{role}'")
                     
                     conversations.append({
                         "role": role,
                         "content": content
                     })
+                    logger.info(f"Added conversation entry: role='{role}', content='{content[:50]}...'")
                 
                 # For Janus, we don't need to add empty Assistant message
                 # The model will generate from the last User message
@@ -923,39 +1006,37 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
                     {"role": "<|User|>", "content": prompt}
                 ]
             
-            logger.info(f"Using Janus processor with conversations: {conversations}")
-            
-            # Log the actual prompt being sent
-            if conversations:
-                logger.info(f"Number of messages: {len(conversations)}")
-                for i, msg in enumerate(conversations):
-                    logger.info(f"Message {i}: role={msg.get('role')}, content={msg.get('content')[:100] if msg.get('content') else 'None'}...")
+            logger.info(f"Final conversations list has {len(conversations)} messages")
             
             try:
-                if image:
+                if images:
+                    logger.info(f"Calling Janus processor with {len(images)} images")
                     # Janus expects a list of images
                     inputs = TOKENIZER(
                         conversations=conversations,
-                        images=[image],
+                        images=images,
                         return_tensors="pt"
                     )
+                    logger.info(f"Janus processor returned inputs of type: {type(inputs)}")
                 else:
+                    logger.info("Calling Janus processor without images")
                     # Pass empty list instead of None for images
                     inputs = TOKENIZER(
                         conversations=conversations,
                         images=[],
                         return_tensors="pt"
                     )
+                    logger.info(f"Janus processor returned inputs of type: {type(inputs)}")
             except Exception as e:
                 logger.error(f"Error in Janus processor: {e}")
                 # Try alternative format
                 logger.info("Trying alternative format with single message")
                 try:
                     # Try without images parameter when no image
-                    if image:
+                    if images:
                         inputs = TOKENIZER(
                             conversations=[{"role": "user", "content": prompt}],
-                            images=[image],
+                            images=images,
                             return_tensors="pt"
                         )
                     else:
@@ -977,10 +1058,11 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
                         raise
         else:
             # Standard transformers processor
-            if image:
+            if images:
+                # For standard multimodal models, usually only one image is supported
                 inputs = TOKENIZER(
                     text=prompt,
-                    images=image,
+                    images=images[0] if len(images) == 1 else images,
                     return_tensors="pt",
                     padding=True
                 )
@@ -998,14 +1080,17 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
 
     # Move inputs to device
     if hasattr(MODEL, "device"):
+        logger.info(f"Moving inputs to device: {MODEL.device}")
         if hasattr(inputs, "to"):
             # For Janus BatchedVLChatProcessorOutput or similar objects
             inputs = inputs.to(MODEL.device)
+            logger.info("Moved BatchedVLChatProcessorOutput to device")
         elif isinstance(inputs, dict):
             # For standard dict inputs
             inputs = {k: v.to(MODEL.device) if hasattr(v, "to") else v for k, v in inputs.items()}
+            logger.info(f"Moved dict inputs to device, keys: {list(inputs.keys())}")
         else:
-            logger.warning(f"Unknown input type: {type(inputs)}")
+            logger.warning(f"Unknown input type: {type(inputs)}, cannot move to device")
 
     # Generate
     # Clear any cached states for Janus models
@@ -1035,10 +1120,10 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
 
         # Debug: Check what methods the model has
         logger.info(f"Model type: {type(MODEL)}")
+        logger.info(f"Model class: {MODEL.__class__.__name__ if hasattr(MODEL, '__class__') else 'Unknown'}")
         logger.info(f"Model has generate: {hasattr(MODEL, 'generate')}")
         logger.info(f"Model has language_model: {hasattr(MODEL, 'language_model')}")
-        if hasattr(MODEL, "__class__"):
-            logger.info(f"Model class: {MODEL.__class__.__name__}")
+        logger.info(f"Generation kwargs: {generation_kwargs}")
         
         # For Janus models, the generate method is on the language_model attribute
         actual_model = MODEL
@@ -1228,6 +1313,7 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
             # Final logging
             logger.info(f"Final generated text length: {len(generated_text)}")
             logger.info(f"Final generated text: {generated_text[:200]}...")
+            logger.info("=== Multimodal generation complete ===")
             
             return GenerateResponse(text=generated_text)
         else:

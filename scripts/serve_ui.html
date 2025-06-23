@@ -205,6 +205,70 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .image-upload-container {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .image-upload-btn {
+            background-color: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 0.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+            font-size: 0.9rem;
+            transition: background-color 0.2s;
+        }
+        
+        .image-upload-btn:hover {
+            background-color: var(--bg-primary);
+        }
+        
+        .uploaded-images {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+            flex-wrap: wrap;
+        }
+        
+        .uploaded-image {
+            position: relative;
+            width: 80px;
+            height: 80px;
+            border-radius: 4px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+        
+        .uploaded-image img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .remove-image {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
         }
 
         .token-counter {
@@ -476,6 +540,7 @@
                 <div class="messages-container" id="messages"></div>
                 <div class="input-container">
                     <div class="input-wrapper">
+                        <div class="uploaded-images" id="uploadedImages" style="display: none;"></div>
                         <textarea 
                             class="input-textarea" 
                             id="userInput" 
@@ -483,7 +548,14 @@
                             onkeydown="handleKeyPress(event)"
                         ></textarea>
                         <div class="input-controls">
-                            <span class="token-counter" id="tokenCounter">0 tokens</span>
+                            <div class="image-upload-container" id="imageUploadContainer" style="display: none;">
+                                <input type="file" id="imageInput" accept="image/*" multiple style="display: none;" onchange="handleImageUpload(event)">
+                                <button class="image-upload-btn" onclick="document.getElementById('imageInput').click()">
+                                    📷 Add Image
+                                </button>
+                                <span class="token-counter" id="tokenCounter">0 tokens</span>
+                            </div>
+                            <span class="token-counter" id="tokenCounterText" style="display: none;">0 tokens</span>
                             <label style="display: none;" id="reasoningModeLabel">
                                 <input type="checkbox" id="reasoningMode"> Reasoning mode
                             </label>
@@ -655,6 +727,7 @@
         let messages = [];
         let isGenerating = false;
         let eventSource = null;
+        let uploadedImages = []; // Store base64 encoded images
 
         // Settings
         let settings = {
@@ -680,6 +753,18 @@
                     modelInfo.model_family === 'multimodal' || 
                     modelInfo.model_family === 'vision-language') {
                     document.getElementById('chatInterface').style.display = 'flex';
+                    
+                    // Show image upload for multimodal models
+                    if (modelInfo.model_family === 'multimodal' || 
+                        modelInfo.model_family === 'vision-language' ||
+                        modelInfo.capabilities.supports_multimodal) {
+                        document.getElementById('imageUploadContainer').style.display = 'flex';
+                        document.getElementById('tokenCounterText').style.display = 'none';
+                    } else {
+                        document.getElementById('imageUploadContainer').style.display = 'none';
+                        document.getElementById('tokenCounterText').style.display = 'inline';
+                        document.getElementById('tokenCounter').textContent = '0 tokens';
+                    }
                     
                     // Check for reasoning support
                     if (modelInfo.capabilities.supports_reasoning) {
@@ -716,16 +801,34 @@
         }
 
         // Chat functions
-        function addMessage(role, content, thinking = null) {
-            messages.push({ role, content });
+        function addMessage(role, content, thinking = null, images = null) {
+            // Store message data
+            const messageData = { role, content };
+            
+            // If this is a user message and we have uploaded images, store them with the message
+            if (role === 'user' && uploadedImages.length > 0) {
+                messageData.images = [...uploadedImages];
+                images = uploadedImages;
+            }
+            
+            messages.push(messageData);
             
             const messagesContainer = document.getElementById('messages');
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${role}`;
             
             let messageHTML = `
-                <div class="message-role">${role.charAt(0).toUpperCase() + role.slice(1)}:</div>
+                <div class="message-role">${role}:</div>
                 <div class="message-content">`;
+            
+            // Add images if present
+            if (images && images.length > 0) {
+                messageHTML += '<div class="message-images" style="margin-bottom: 10px;">';
+                images.forEach((img, idx) => {
+                    messageHTML += `<img src="data:image/jpeg;base64,${img}" style="max-width: 200px; max-height: 200px; margin-right: 10px; border-radius: 4px;" alt="Image ${idx + 1}">`;
+                });
+                messageHTML += '</div>';
+            }
             
             if (thinking) {
                 messageHTML += `
@@ -758,22 +861,31 @@
 
         async function sendMessage() {
             const input = document.getElementById('userInput');
-            const prompt = input.value.trim();
+            let prompt = input.value.trim();
             
             if (!prompt || isGenerating) return;
             
             isGenerating = true;
             document.getElementById('sendBtn').disabled = true;
             
-            // Add user message
-            addMessage('user', prompt);
+            // For multimodal models with images, prepend <image> tokens
+            if (uploadedImages.length > 0 && (modelInfo.model_family === 'multimodal' || modelInfo.model_family === 'vision-language')) {
+                // Add <image> tokens for Janus models
+                const imageTokens = uploadedImages.map(() => '<image>').join(' ');
+                prompt = imageTokens + '\n' + prompt;
+            }
+            
+            // Add user message with display text (without image tokens for display)
+            const displayPrompt = input.value.trim();
+            addMessage('user', displayPrompt);
             input.value = '';
             
             try {
                 // Prepare messages with system prompt
                 const chatMessages = [
                     { role: 'system', content: settings.systemPrompt },
-                    ...messages
+                    ...messages.slice(0, -1), // All messages except the last one we just added
+                    { role: 'user', content: prompt } // Use the prompt with image tokens
                 ];
                 
                 // Check if streaming is supported
@@ -782,6 +894,11 @@
                 } else {
                     await generateResponse(chatMessages);
                 }
+                
+                // Clear uploaded images after sending
+                uploadedImages = [];
+                document.getElementById('uploadedImages').innerHTML = '';
+                document.getElementById('uploadedImages').style.display = 'none';
                 
             } catch (error) {
                 console.error('Generation error:', error);
@@ -793,16 +910,23 @@
         }
 
         async function generateResponse(chatMessages) {
+            const requestBody = {
+                messages: chatMessages,
+                temperature: settings.temperature,
+                max_tokens: settings.maxTokens,
+                top_p: settings.topP,
+                reasoning_mode: document.getElementById('reasoningMode').checked
+            };
+            
+            // Add images if present
+            if (uploadedImages.length > 0) {
+                requestBody.images = uploadedImages;
+            }
+            
             const response = await fetch('/generate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    messages: chatMessages,
-                    temperature: settings.temperature,
-                    max_tokens: settings.maxTokens,
-                    top_p: settings.topP,
-                    reasoning_mode: document.getElementById('reasoningMode').checked
-                })
+                body: JSON.stringify(requestBody)
             });
             
             const data = await response.json();
@@ -820,7 +944,7 @@
             const messageDiv = document.createElement('div');
             messageDiv.className = 'message assistant';
             messageDiv.innerHTML = `
-                <div class="message-role">Assistant:</div>
+                <div class="message-role">assistant:</div>
                 <div class="message-content" id="streamingContent"></div>
             `;
             messagesContainer.appendChild(messageDiv);
@@ -1095,6 +1219,57 @@
                 closeSettings();
             }
         };
+        
+        // Image handling functions
+        function handleImageUpload(event) {
+            const files = event.target.files;
+            if (!files || files.length === 0) return;
+            
+            Array.from(files).forEach(file => {
+                if (file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const base64Data = e.target.result.split(',')[1]; // Remove data:image/...;base64, prefix
+                        uploadedImages.push(base64Data);
+                        displayUploadedImage(base64Data, uploadedImages.length - 1);
+                    };
+                    reader.readAsDataURL(file);
+                }
+            });
+            
+            // Reset file input
+            event.target.value = '';
+        }
+        
+        function displayUploadedImage(base64Data, index) {
+            const container = document.getElementById('uploadedImages');
+            container.style.display = 'flex';
+            
+            const imageDiv = document.createElement('div');
+            imageDiv.className = 'uploaded-image';
+            imageDiv.innerHTML = `
+                <img src="data:image/jpeg;base64,${base64Data}" alt="Uploaded image ${index + 1}">
+                <button class="remove-image" onclick="removeImage(${index})">×</button>
+            `;
+            
+            container.appendChild(imageDiv);
+        }
+        
+        function removeImage(index) {
+            uploadedImages.splice(index, 1);
+            
+            // Redraw all images
+            const container = document.getElementById('uploadedImages');
+            container.innerHTML = '';
+            
+            if (uploadedImages.length === 0) {
+                container.style.display = 'none';
+            } else {
+                uploadedImages.forEach((img, idx) => {
+                    displayUploadedImage(img, idx);
+                });
+            }
+        }
 
         // Initialize on load
         window.onload = initialize;
