@@ -21,13 +21,13 @@ wheels/
 *.egg
 MANIFEST
 
-# Virtual Environment
-.venv/
+# Virtual environments
 venv/
 ENV/
 env/
+.venv
 
-# IDE
+# IDEs
 .vscode/
 .idea/
 *.swp
@@ -35,23 +35,73 @@ env/
 *~
 .DS_Store
 
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
 # Testing
 .pytest_cache/
 .coverage
 htmlcov/
 .tox/
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
 .hypothesis/
 
 # Logs
 *.log
 logs/
 
-# Configuration
-config.yaml
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+.temp/
 
-# Installation marker
-.setup_complete
-
-# Model directories (created during usage)
+# Model files (too large for git)
 models/
-cache/
+*.bin
+*.safetensors
+*.gguf
+*.pt
+*.pth
+*.onnx
+
+# Config files with sensitive data
+config.yaml
+.env
+.env.local
+.env.*.local
+
+# OS files
+Thumbs.db
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Generated documentation
+docs/_build/
+site/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
