@@ -87,16 +87,13 @@ class GenerateRequest(BaseModel):
     # Multimodal parameters
     image_data: Optional[str] = Field(None, description="Base64 encoded image data")
     images: Optional[List[str]] = Field(None, description="List of base64 encoded images")
+    audio_data: Optional[str] = Field(None, description="Base64 encoded audio")
 
     # Reasoning parameters
     reasoning_mode: bool = Field(False, description="Enable reasoning mode")
     max_thinking_tokens: int = Field(10000, ge=1)
     max_answer_tokens: int = Field(2000, ge=1)
     show_thinking: bool = Field(True, description="Show thinking process")
-
-    # Multimodal inputs
-    image_data: Optional[str] = Field(None, description="Base64 encoded image")
-    audio_data: Optional[str] = Field(None, description="Base64 encoded audio")
 
     # Additional options
     return_all_scores: bool = Field(False, description="Return all class scores for classification")

@@ -701,11 +701,33 @@
                     requestBody.images = imagesToSend;
                 }
                 
+                // Debug logging
+                console.log('Request body:', {
+                    ...requestBody,
+                    messages: requestBody.messages.length + ' messages',
+                    images: requestBody.images ? requestBody.images.length + ' images' : 'no images'
+                });
+                
                 const response = await fetch('/generate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(requestBody)
                 });
+                
+                // Check response status first
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    loadingLine.remove();
+                    console.error('API Error:', errorData);
+                    addTerminalLine('ERROR', `Request failed (${response.status}): ${errorData.detail || errorData.error || 'Unknown error'}`, 'error');
+                    if (errorData.detail && typeof errorData.detail === 'object') {
+                        // Show validation errors
+                        errorData.detail.forEach(err => {
+                            addTerminalLine('ERROR', `  - ${err.loc ? err.loc.join('.') : 'Field'}: ${err.msg}`, 'error');
+                        });
+                    }
+                    return;
+                }
                 
                 const data = await response.json();
                 
