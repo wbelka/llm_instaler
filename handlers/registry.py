@@ -93,6 +93,15 @@ class HandlerRegistry:
             self._handlers['o1'] = SpecializedHandler
         except ImportError:
             pass
+        
+        try:
+            from handlers.qwen_vl import QwenVLHandler
+            # Register Qwen VL handler
+            self._handlers['qwen_vl'] = QwenVLHandler
+            self._handlers['qwen2_vl'] = QwenVLHandler
+            self._handlers['qwen2_5_vl'] = QwenVLHandler
+        except ImportError:
+            pass
 
     def register_handler(
         self,
@@ -139,6 +148,11 @@ class HandlerRegistry:
         if 'janus' in model_id:
             if 'janus' in self._handlers:
                 return self._handlers['janus']
+        
+        # Check for Qwen VL models
+        if 'qwen' in model_id and ('vl' in model_id or model_type == 'qwen2_5_vl'):
+            if 'qwen_vl' in self._handlers:
+                return self._handlers['qwen_vl']
         
         # Check for reasoning models (o1-style)
         if 'o1' in model_id or 'reasoning' in model_info.get('tags', []):

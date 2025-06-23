@@ -28,6 +28,14 @@ Key options:
 For updating installed models with new fixes:
 `./llm-installer update /home/wblk/LLM/models/deepseek-ai_Janus-Pro-7B`
 
+## Model Detection Algorithm
+
+- See detailed detection algorithm in [DETECTION_ALGORITHM.md](/home/wblk/llm_instaler/DETECTION_ALGORITHM.md)
+- Detection is based on model structure and metadata, NOT on model name
+- Uses chain of detectors with priorities (ConfigDetector → DiffusersDetector → etc.)
+- Each detector checks if it can handle the model via matches() method
+- First matching detector analyzes the model and determines its type/family
+
 ## Handler System
 
 The LLM Installer uses a handler-based architecture for model-specific logic:

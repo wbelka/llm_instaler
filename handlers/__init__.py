@@ -43,8 +43,12 @@ def get_handler_class(model_info: Dict[str, Any]) -> Type[BaseHandler]:
     if model_type in ['mamba', 'rwkv', 'jamba']:
         handler_module = 'specialized'
     
-    # Check for reasoning models
+    # Check for Qwen VL models
     model_id = model_info.get('model_id', '').lower()
+    if 'qwen' in model_id and ('vl' in model_id or model_type == 'qwen2_5_vl'):
+        handler_module = 'qwen_vl'
+    
+    # Check for reasoning models
     tags = model_info.get('tags', [])
     if 'o1' in model_id or 'reasoning' in tags or model_type in ['o1', 'reasoning-llm']:
         handler_module = 'specialized'
