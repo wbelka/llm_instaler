@@ -63,6 +63,7 @@ class GenerateRequest(BaseModel):
     top_k: int = Field(50, ge=0)
     stop_sequences: Optional[List[str]] = None
     stream: bool = Field(False, description="Enable streaming")
+    mode: Optional[str] = Field("auto", description="Generation mode: auto, chat, complete, instruct, creative, code, analyze, translate, summarize, image, audio, video")
 
     # Image generation parameters
     negative_prompt: Optional[str] = None
@@ -161,13 +162,84 @@ async def startup_event():
 @app.get("/")
 async def root():
     """Serve the web UI."""
-    ui_path = Path("serve_ui.html")
-    if ui_path.exists():
-        return FileResponse(ui_path)
+    # Check if terminal UI exists, otherwise fall back to regular UI
+    terminal_ui = Path("serve_terminal.html")
+    regular_ui = Path("serve_ui.html")
+    
+    if terminal_ui.exists():
+        return FileResponse(terminal_ui)
+    elif regular_ui.exists():
+        return FileResponse(regular_ui)
     else:
         return HTMLResponse(
             content="<h1>Model API</h1><p>UI file not found. API is running at /docs</p>"
         )
+
+
+def apply_mode_settings(request: GenerateRequest, mode: str) -> GenerateRequest:
+    """Apply mode-specific settings to the request."""
+    # Mode-specific parameter adjustments
+    mode_settings = {
+        "chat": {"temperature": 0.7, "top_p": 0.9},
+        "complete": {"temperature": 0.8, "top_p": 0.95},
+        "instruct": {"temperature": 0.3, "top_p": 0.9},
+        "creative": {"temperature": 1.2, "top_p": 0.95},
+        "code": {"temperature": 0.2, "top_p": 0.95, "max_tokens": 1024},
+        "analyze": {"temperature": 0.1, "top_p": 0.9},
+        "translate": {"temperature": 0.3, "top_p": 0.9},
+        "summarize": {"temperature": 0.5, "top_p": 0.9},
+        "image": {"temperature": 1.0, "guidance_scale": 7.5},
+        "artistic": {"temperature": 1.2, "guidance_scale": 8.0},
+        "photorealistic": {"temperature": 0.8, "guidance_scale": 7.0},
+        "vision": {"temperature": 0.5},
+        "audio": {"temperature": 0.5},
+        "video": {"temperature": 0.8, "num_frames": 16}
+    }
+    
+    if mode in mode_settings:
+        settings = mode_settings[mode]
+        for key, value in settings.items():
+            if hasattr(request, key) and getattr(request, key) == getattr(GenerateRequest.__fields__[key], 'default', None):
+                # Only override if using default value
+                setattr(request, key, value)
+    
+    # Add mode-specific prompts prefixes if needed
+    mode_prefixes = {
+        "instruct": "Follow these instructions carefully: ",
+        "code": "Generate code for: ",
+        "analyze": "Analyze the following: ",
+        "translate": "Translate the following text: ",
+        "summarize": "Summarize the following: ",
+        "creative": "Create an imaginative response for: ",
+        "artistic": "Create an artistic interpretation of: ",
+        "photorealistic": "Create a photorealistic image of: "
+    }
+    
+    if mode in mode_prefixes and request.prompt:
+        if not request.prompt.startswith(mode_prefixes[mode]):
+            request.prompt = mode_prefixes[mode] + request.prompt
+    
+    return request
+
+
+@app.get("/ui/classic")
+async def classic_ui():
+    """Serve the classic web UI."""
+    ui_path = Path("serve_ui.html")
+    if ui_path.exists():
+        return FileResponse(ui_path)
+    else:
+        return HTMLResponse(content="<h1>Classic UI not found</h1>")
+
+
+@app.get("/ui/terminal")
+async def terminal_ui():
+    """Serve the terminal-style UI."""
+    ui_path = Path("serve_terminal.html")
+    if ui_path.exists():
+        return FileResponse(ui_path)
+    else:
+        return HTMLResponse(content="<h1>Terminal UI not found</h1>")
 
 
 @app.get("/health")
@@ -208,6 +280,48 @@ async def get_model_info():
                 "large": {"width": 512, "height": 512, "label": "512×512 (May fail on some GPUs)"}
             }
         }
+    
+    # Add supported modes based on model type
+    supported_modes = ["auto"]  # All models support auto mode
+    
+    if model_family == "language-model":
+        supported_modes.extend(["chat", "complete", "instruct", "creative", "code", "analyze", "translate", "summarize"])
+    elif model_family == "multimodal" or MODEL_INFO.get("model_type") == "multi_modality":
+        supported_modes.extend(["chat", "complete", "analyze", "image", "creative", "vision"])
+    elif model_family == "image-generation":
+        supported_modes.extend(["image", "creative", "artistic", "photorealistic"])
+    elif model_family == "video-generation":
+        supported_modes.extend(["video", "creative", "animate"])
+    elif model_family == "audio-model":
+        supported_modes.extend(["audio", "transcribe", "voice"])
+    elif model_family == "embedding-model":
+        supported_modes.extend(["embed", "similarity"])
+    
+    capabilities["supported_modes"] = supported_modes
+    
+    # Add mode descriptions
+    capabilities["mode_descriptions"] = {
+        "auto": "Automatic mode selection",
+        "chat": "Conversational dialogue",
+        "complete": "Text completion",
+        "instruct": "Follow instructions",
+        "creative": "Creative generation",
+        "code": "Code generation",
+        "analyze": "Analysis & reasoning",
+        "translate": "Language translation",
+        "summarize": "Text summarization",
+        "image": "Image generation",
+        "vision": "Image understanding",
+        "audio": "Audio processing",
+        "video": "Video generation",
+        "embed": "Text embeddings",
+        "transcribe": "Speech to text",
+        "voice": "Text to speech",
+        "artistic": "Artistic style",
+        "photorealistic": "Realistic images",
+        "animate": "Animation generation",
+        "similarity": "Similarity search"
+    }
 
     return ModelInfoResponse(
         model_id=MODEL_INFO.get("model_id", "unknown"),
@@ -246,11 +360,16 @@ async def generate(request: GenerateRequest):
         
         logger.info(f"Parameters: temperature={request.temperature}, max_tokens={request.max_tokens}, "
                     f"top_p={request.top_p}, top_k={request.top_k}")
+        logger.info(f"Mode: {request.mode}")
         
         model_family = MODEL_INFO.get("model_family", "")
         model_type = MODEL_INFO.get("model_type", "")
         
         logger.info(f"Model family: {model_family}, Model type: {model_type}")
+        
+        # Apply mode-specific settings
+        if request.mode and request.mode != "auto":
+            request = apply_mode_settings(request, request.mode)
 
         # Text generation models
         if model_family in ["language-model", "text-classifier"]:
@@ -913,32 +1032,35 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
     logger.info(f"Model ID: {MODEL_INFO.get('model_id')}")
     
     # Check if this is an image generation request
-    # In draw mode, or if prompt contains generation keywords
+    # Based on mode or keywords in content
     is_generation_request = False
     generation_mode = getattr(request, 'generation_mode', 'auto')
     
-    # Get the actual user message content to check for keywords
-    user_content = ""
-    if request.messages:
-        # Find the last user message
-        for msg in reversed(request.messages):
-            if msg.get('role', '').lower() == 'user':
-                user_content = msg.get('content', '')
-                break
-    elif request.prompt:
-        user_content = request.prompt
-    
-    logger.info(f"Checking user content for generation keywords: {user_content[:100]}...")
-    
-    if generation_mode == 'text2img':
+    # Check mode first
+    if request.mode in ['image', 'artistic', 'photorealistic', 'creative']:
         is_generation_request = True
-    elif hasattr(request, 'mode') and request.mode == 'draw':
-        is_generation_request = True
-    elif user_content and any(keyword in user_content.lower() for keyword in ['нарисуй', 'draw', 'generate', 'create image', 'paint', 'рисуй', 'сгенерируй', 'покажи', 'show']):
-        is_generation_request = True
-        logger.info(f"Found generation keyword in user content")
+        logger.info(f"Image generation triggered by mode: {request.mode}")
+    else:
+        # Get the actual user message content to check for keywords
+        user_content = ""
+        if request.messages:
+            # Find the last user message
+            for msg in reversed(request.messages):
+                if msg.get('role', '').lower() == 'user':
+                    user_content = msg.get('content', '')
+                    break
+        elif request.prompt:
+            user_content = request.prompt
+        
+        logger.info(f"Checking user content for generation keywords: {user_content[:100]}...")
+        
+        if generation_mode == 'text2img':
+            is_generation_request = True
+        elif user_content and any(keyword in user_content.lower() for keyword in ['нарисуй', 'draw', 'generate', 'create image', 'paint', 'рисуй', 'сгенерируй', 'покажи', 'show']):
+            is_generation_request = True
+            logger.info(f"Found generation keyword in user content")
     
-    logger.info(f"Is generation request: {is_generation_request}, generation_mode: {generation_mode}")
+    logger.info(f"Is generation request: {is_generation_request}, mode: {request.mode}, generation_mode: {generation_mode}")
 
     # Get prompt from either prompt field or messages
     prompt = request.prompt
