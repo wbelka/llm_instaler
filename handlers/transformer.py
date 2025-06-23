@@ -377,6 +377,7 @@ class TransformerHandler(BaseHandler):
             inputs = {k: v.to(model.device) for k, v in inputs.items()}
         
         # Generate
+        import torch
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,

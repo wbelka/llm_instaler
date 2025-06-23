@@ -157,6 +157,11 @@ class HandlerRegistry:
             if 'janus' in self._handlers:
                 return self._handlers['janus']
         
+        # Check for Qwen3 models first (before Qwen VL)
+        if 'qwen3' in model_id or 'qwen-3' in model_id or model_type in ['qwen3', 'qwen-3']:
+            if 'qwen3' in self._handlers:
+                return self._handlers['qwen3']
+        
         # Check for Qwen VL models
         if 'qwen' in model_id and ('vl' in model_id or model_type == 'qwen2_5_vl'):
             if 'qwen_vl' in self._handlers:
