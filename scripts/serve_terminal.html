@@ -438,6 +438,13 @@
                 <label class="setting-label">SYSTEM PROMPT:</label>
                 <textarea class="setting-input" id="systemPrompt" rows="3">You are a helpful AI assistant.</textarea>
             </div>
+            <div class="setting-group">
+                <label class="setting-label">MAX IMAGE SIZE (pixels):</label>
+                <input type="number" class="setting-input" id="maxImageSize" min="256" max="4096" value="2048">
+                <small style="color: var(--info-color); display: block; margin-top: 5px;">
+                    Larger images use more GPU memory. Reduce if you get out of memory errors.
+                </small>
+            </div>
             <div class="modal-footer">
                 <button class="control-btn" onclick="closeSettings()">CANCEL</button>
                 <button class="control-btn" onclick="saveSettings()">SAVE</button>
@@ -460,7 +467,8 @@
             temperature: 0.7,
             maxTokens: 512,
             topP: 0.9,
-            systemPrompt: "You are a helpful AI assistant."
+            systemPrompt: "You are a helpful AI assistant.",
+            maxImageSize: 2048
         };
 
         // Initialize
@@ -677,7 +685,8 @@
                     temperature: settings.temperature,
                     max_tokens: settings.maxTokens,
                     top_p: settings.topP,
-                    mode: currentMode
+                    mode: currentMode,
+                    max_image_size: settings.maxImageSize
                 };
                 
                 // Add images if present (from current upload or history)
@@ -852,6 +861,7 @@
             document.getElementById('maxTokens').value = settings.maxTokens;
             document.getElementById('topP').value = settings.topP;
             document.getElementById('systemPrompt').value = settings.systemPrompt;
+            document.getElementById('maxImageSize').value = settings.maxImageSize;
         }
 
         function closeSettings() {
@@ -863,6 +873,7 @@
             settings.maxTokens = parseInt(document.getElementById('maxTokens').value);
             settings.topP = parseFloat(document.getElementById('topP').value);
             settings.systemPrompt = document.getElementById('systemPrompt').value;
+            settings.maxImageSize = parseInt(document.getElementById('maxImageSize').value);
             
             localStorage.setItem('terminalSettings', JSON.stringify(settings));
             closeSettings();
@@ -920,7 +931,7 @@
         // Load settings from localStorage
         const savedSettings = localStorage.getItem('terminalSettings');
         if (savedSettings) {
-            settings = JSON.parse(savedSettings);
+            settings = { ...settings, ...JSON.parse(savedSettings) };
         }
 
         // Initialize on load

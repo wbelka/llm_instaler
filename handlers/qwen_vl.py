@@ -177,22 +177,34 @@ class QwenVLHandler(MultimodalHandler):
         except ImportError:
             pass
         
-        # Handle images - check if resizing is disabled
+        # Handle images with smart resizing
         if images:
-            if kwargs.get('disable_image_resize', False) or kwargs.get('mode') == 'vision':
-                # Don't resize images if disabled or in vision mode
-                pil_images = []
-                for img in images:
-                    if isinstance(img, str):
-                        # Decode base64
-                        img_data = base64.b64decode(img)
-                        pil_images.append(Image.open(BytesIO(img_data)))
-                    elif isinstance(img, Image.Image):
-                        pil_images.append(img)
-                logger.info("Image resizing disabled, using original images")
-            else:
-                # Use base handler's image resizing for memory efficiency
-                pil_images = self.resize_images_for_memory(images, max_size=1024)
+            pil_images = []
+            vision_mode = kwargs.get('mode') == 'vision'
+            max_size = kwargs.get('max_image_size', 2048 if vision_mode else 1024)
+            
+            for img in images:
+                if isinstance(img, str):
+                    # Decode base64
+                    img_data = base64.b64decode(img)
+                    pil_img = Image.open(BytesIO(img_data))
+                elif isinstance(img, Image.Image):
+                    pil_img = img
+                else:
+                    continue
+                
+                # Check if image needs resizing to prevent OOM
+                width, height = pil_img.size
+                if width > max_size or height > max_size:
+                    # Resize to fit within max_size while maintaining aspect ratio
+                    ratio = min(max_size / width, max_size / height)
+                    new_size = (int(width * ratio), int(height * ratio))
+                    pil_img = pil_img.resize(new_size, Image.Resampling.LANCZOS)
+                    logger.info(f"Resized image from {width}x{height} to {new_size[0]}x{new_size[1]} to prevent OOM")
+                else:
+                    logger.info(f"Image size {width}x{height} is within limits, keeping original")
+                
+                pil_images.append(pil_img)
         else:
             pil_images = []
         
@@ -245,18 +257,28 @@ class QwenVLHandler(MultimodalHandler):
             inputs = {k: v.to(model.device) if hasattr(v, 'to') else v 
                      for k, v in inputs.items()}
         
-        # Generate
-        # For Qwen2.5-VL, the model structure is complex
-        # The loaded model might be the base model without generate capability
-        
+        # Generate with memory optimization
         # Check if model has generate method
         if hasattr(model, 'generate'):
             # Model has generate, use it directly
             import torch
+            
+            # More aggressive memory clearing before generation
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            
             with torch.no_grad():
+                # Limit tokens more aggressively for vision mode to save memory
+                max_tokens = kwargs.get('max_tokens', 128)
+                if kwargs.get('mode') == 'vision':
+                    max_tokens = min(max_tokens, 128)  # Very short for vision mode
+                else:
+                    max_tokens = min(max_tokens, 256)  # Still limited for other modes
+                
                 outputs = model.generate(
                     **inputs,
-                    max_new_tokens=min(kwargs.get('max_tokens', 256), 256),  # Limit to 256 for memory
+                    max_new_tokens=max_tokens,
                     temperature=kwargs.get('temperature', 0.7),
                     top_p=kwargs.get('top_p', 0.9),
                     do_sample=kwargs.get('temperature', 0.7) > 0,
@@ -293,7 +315,7 @@ class QwenVLHandler(MultimodalHandler):
         if text_input and generated_text.startswith(text_input):
             generated_text = generated_text[len(text_input):].strip()
         
-        return {
+        result = {
             'text': generated_text,
             'usage': {
                 'prompt_tokens': inputs['input_ids'].shape[1] if 'input_ids' in inputs else 0,
@@ -301,6 +323,13 @@ class QwenVLHandler(MultimodalHandler):
                 'total_tokens': outputs.shape[1]
             }
         }
+        
+        # Clear memory after generation
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+        
+        return result
     
     def process_image(self, image: Union[str, Image.Image], prompt: str = None,
                      model=None, processor=None, **kwargs) -> Dict[str, Any]:

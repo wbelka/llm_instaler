@@ -427,7 +427,8 @@ async def generate(request: GenerateRequest):
                             temperature=request.temperature,
                             max_tokens=request.max_tokens,
                             top_p=request.top_p,
-                            mode=request.mode
+                            mode=request.mode,
+                            max_image_size=getattr(request, 'max_image_size', 2048)
                         )
                         return GenerateResponse(**result)
                 
