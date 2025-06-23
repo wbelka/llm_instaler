@@ -4,6 +4,7 @@ This handler manages Qwen2-VL and Qwen2.5-VL models which are
 multimodal models supporting both text and image inputs.
 """
 
+import os
 import logging
 from typing import List, Dict, Any, Optional, Tuple, Union
 from pathlib import Path
@@ -25,6 +26,16 @@ class QwenVLHandler(MultimodalHandler):
         """Initialize Qwen VL handler."""
         super().__init__(model_info)
         self.supports_video = 'video_token_id' in model_info.get('config', {})
+    
+    def _load_config(self, model_path: str) -> Dict[str, Any]:
+        """Load model config.json."""
+        import json
+        from pathlib import Path
+        config_path = Path(model_path) / "config.json"
+        if config_path.exists():
+            with open(config_path, 'r') as f:
+                return json.load(f)
+        return {}
     
     def get_dependencies(self) -> List[str]:
         """Get Python dependencies for Qwen VL models."""
@@ -51,17 +62,41 @@ class QwenVLHandler(MultimodalHandler):
         import torch
         from transformers import AutoProcessor
         
-        # For Qwen VL models, we need to use AutoModel instead of AutoModelForCausalLM
-        try:
-            # First try with the specific Qwen2VL class if available
-            from transformers import Qwen2VLForConditionalGeneration
-            model_class = Qwen2VLForConditionalGeneration
-            logger.info("Using Qwen2VLForConditionalGeneration")
-        except ImportError:
-            # Fallback to AutoModel
-            from transformers import AutoModel
-            model_class = AutoModel
-            logger.info("Using AutoModel for Qwen VL")
+        # For Qwen2.5-VL, we MUST use the correct auto class
+        # The model has custom code that registers the right class
+        config = self._load_config(model_path)
+        
+        # Import the auto classes
+        from transformers import AutoModel, AutoModelForCausalLM
+        
+        # For Qwen2.5-VL, we need to use the specific model class
+        if config.get('model_type') == 'qwen2_5_vl':
+            try:
+                # Try to import the specific Qwen2VL model class
+                from transformers import Qwen2VLForConditionalGeneration
+                model_class = Qwen2VLForConditionalGeneration
+                logger.info("Using Qwen2VLForConditionalGeneration for Qwen2.5-VL")
+            except ImportError:
+                # Fallback: try to load the modeling file to register classes
+                try:
+                    import importlib.util
+                    modeling_file = os.path.join(model_path, "modeling_qwen2_5_vl.py")
+                    if os.path.exists(modeling_file):
+                        spec = importlib.util.spec_from_file_location("modeling_qwen2_5_vl", modeling_file)
+                        module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(module)
+                        logger.info("Loaded Qwen2.5-VL modeling file to register classes")
+                        # After loading, try to get the class
+                        if hasattr(module, 'Qwen2_5_VLForConditionalGeneration'):
+                            model_class = module.Qwen2_5_VLForConditionalGeneration
+                        else:
+                            model_class = AutoModel  # Use AutoModel which should pick up registered class
+                except Exception as e:
+                    logger.warning(f"Could not load modeling file: {e}")
+                    model_class = AutoModel
+        else:
+            model_class = AutoModelForCausalLM
+            logger.info("Using AutoModelForCausalLM")
         
         # Extract parameters
         device = kwargs.get('device', 'auto')
@@ -113,10 +148,19 @@ class QwenVLHandler(MultimodalHandler):
         model = model_class.from_pretrained(model_path, **model_kwargs)
         
         # Load processor (handles both text and image)
-        processor = AutoProcessor.from_pretrained(
-            model_path,
-            trust_remote_code=True
-        )
+        # For Qwen2.5-VL, we might need tokenizer instead of processor
+        try:
+            processor = AutoProcessor.from_pretrained(
+                model_path,
+                trust_remote_code=True
+            )
+        except Exception as e:
+            logger.info(f"AutoProcessor failed, trying AutoTokenizer: {e}")
+            from transformers import AutoTokenizer
+            processor = AutoTokenizer.from_pretrained(
+                model_path,
+                trust_remote_code=True
+            )
         
         # Set processor attributes if not present
         if not hasattr(processor, 'tokenizer') and hasattr(processor, 'text_processor'):
@@ -177,12 +221,24 @@ class QwenVLHandler(MultimodalHandler):
             text_input = text or ''
         
         # Process inputs
-        inputs = processor(
-            text=text_input,
-            images=pil_images if pil_images else None,
-            return_tensors='pt',
-            padding=True
-        )
+        # For Qwen2.5-VL with tokenizer, we need different handling
+        if hasattr(processor, 'image_processor') or hasattr(processor, '__call__') and 'images' in processor.__call__.__code__.co_varnames:
+            # Processor supports images directly
+            inputs = processor(
+                text=text_input,
+                images=pil_images if pil_images else None,
+                return_tensors='pt',
+                padding=True
+            )
+        else:
+            # Tokenizer only - need to handle images separately
+            # For now, just process text
+            logger.warning("Processor doesn't support images directly, processing text only")
+            inputs = processor(
+                text_input,
+                return_tensors='pt',
+                padding=True
+            )
         
         # Move to device
         if hasattr(model, 'device'):
@@ -190,16 +246,35 @@ class QwenVLHandler(MultimodalHandler):
                      for k, v in inputs.items()}
         
         # Generate
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=kwargs.get('max_tokens', 512),
-                temperature=kwargs.get('temperature', 0.7),
-                top_p=kwargs.get('top_p', 0.9),
-                do_sample=kwargs.get('temperature', 0.7) > 0,
-                pad_token_id=processor.tokenizer.pad_token_id if hasattr(processor, 'tokenizer') else None,
-                eos_token_id=processor.tokenizer.eos_token_id if hasattr(processor, 'tokenizer') else None,
-            )
+        # For Qwen2.5-VL, the model structure is complex
+        # The loaded model might be the base model without generate capability
+        
+        # Check if model has generate method
+        if hasattr(model, 'generate'):
+            # Model has generate, use it directly
+            with torch.no_grad():
+                outputs = model.generate(
+                    **inputs,
+                    max_new_tokens=kwargs.get('max_tokens', 512),
+                    temperature=kwargs.get('temperature', 0.7),
+                    top_p=kwargs.get('top_p', 0.9),
+                    do_sample=kwargs.get('temperature', 0.7) > 0,
+                    pad_token_id=processor.tokenizer.pad_token_id if hasattr(processor, 'tokenizer') else getattr(processor, 'pad_token_id', None),
+                    eos_token_id=processor.tokenizer.eos_token_id if hasattr(processor, 'tokenizer') else getattr(processor, 'eos_token_id', None),
+                )
+        else:
+            # Model doesn't have generate - this is likely the base VL model
+            # For Qwen2.5-VL, we need to use the model's forward method with custom generation
+            logger.error("Model doesn't have generate method. This handler needs updating for this model structure.")
+            # Return empty response to let API handle it
+            return {
+                'text': '',
+                'usage': {
+                    'prompt_tokens': inputs.get('input_ids', inputs).shape[-1] if hasattr(inputs.get('input_ids', inputs), 'shape') else 0,
+                    'completion_tokens': 0,
+                    'total_tokens': inputs.get('input_ids', inputs).shape[-1] if hasattr(inputs.get('input_ids', inputs), 'shape') else 0
+                }
+            }
         
         # Decode output
         if hasattr(processor, 'decode'):
@@ -288,8 +363,13 @@ class QwenVLHandler(MultimodalHandler):
                      for k, v in inputs.items()}
         
         # Generate
+        # For Qwen2.5-VL, the generate method might be on the language_model attribute
+        generate_model = model
+        if not hasattr(model, 'generate') and hasattr(model, 'language_model'):
+            generate_model = model.language_model
+        
         with torch.no_grad():
-            outputs = model.generate(
+            outputs = generate_model.generate(
                 **inputs,
                 max_new_tokens=kwargs.get('max_tokens', 512),
                 temperature=kwargs.get('temperature', 0.7),

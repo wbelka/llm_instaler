@@ -450,42 +450,25 @@ async def generate(request: GenerateRequest):
                         )
                         return GenerateResponse(**result)
                 
-            except NotImplementedError:
-                # Handler doesn't support this operation, fall through to legacy code
-                logger.info("Handler doesn't support operation, falling back to legacy code")
+            except NotImplementedError as e:
+                # Handler doesn't support this operation
+                logger.error(f"Handler doesn't support operation: {e}")
+                raise HTTPException(
+                    status_code=501,
+                    detail=f"Handler does not support this operation: {str(e)}"
+                )
             except Exception as e:
                 logger.error(f"Handler error: {e}")
-                # Fall through to legacy code
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Handler error: {str(e)}"
+                )
 
-        # Legacy code paths for models without handlers
-        # Text generation models
-        if model_family in ["language-model", "text-classifier"]:
-            return await generate_text(request)
-
-        # Image/video generation models
-        elif model_family in ["image-generation", "video-generation", "text-to-image", "text-to-video"]:
-            return await generate_image(request)
-
-        # Embedding models
-        elif model_family in ["embedding", "text-embedding"]:
-            return await generate_embeddings(request)
-
-        # Vision models
-        elif model_family in ["vision", "image-classification", "object-detection"]:
-            return await generate_vision(request)
-
-        # Audio models
-        elif model_family in ["audio", "speech-to-text", "text-to-speech"]:
-            return await generate_audio(request)
-
-        # Multimodal models
-        elif model_family in ["multimodal", "vision-language"]:
-            return await generate_multimodal(request)
-
+        # If no handler is available, return error
         else:
             raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported model family: {model_family}"
+                status_code=501,
+                detail=f"No handler available for model family: {model_family}. All operations must go through handlers."
             )
 
     except Exception as e:
@@ -495,7 +478,7 @@ async def generate(request: GenerateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def generate_text(request: GenerateRequest) -> GenerateResponse:
+async def generate_text_legacy(request: GenerateRequest) -> GenerateResponse:
     """Generate text for language models."""
     import torch
     
@@ -585,8 +568,8 @@ async def generate_text(request: GenerateRequest) -> GenerateResponse:
     return GenerateResponse(text=generated_text, usage=usage)
 
 
-async def generate_with_reasoning(request: GenerateRequest) -> GenerateResponse:
-    """Generate text with reasoning/thinking process."""
+async def generate_with_reasoning_legacy(request: GenerateRequest) -> GenerateResponse:
+    """[LEGACY - DO NOT USE] Generate text with reasoning/thinking process."""
     import torch
 
     # Prepare input with thinking tags
@@ -664,7 +647,7 @@ async def generate_with_reasoning(request: GenerateRequest) -> GenerateResponse:
     return response
 
 
-async def generate_image(request: GenerateRequest) -> GenerateResponse:
+async def generate_image_legacy(request: GenerateRequest) -> GenerateResponse:
     """Generate images for diffusion models."""
     import torch
     import numpy as np
@@ -875,7 +858,7 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
     return GenerateResponse(image=img_str)
 
 
-async def generate_embeddings(request: GenerateRequest) -> GenerateResponse:
+async def generate_embeddings_legacy(request: GenerateRequest) -> GenerateResponse:
     """Generate embeddings for embedding models."""
     import torch
 
@@ -907,7 +890,7 @@ async def generate_embeddings(request: GenerateRequest) -> GenerateResponse:
     return GenerateResponse(embeddings=embeddings_list)
 
 
-async def generate_vision(request: GenerateRequest) -> GenerateResponse:
+async def generate_vision_legacy(request: GenerateRequest) -> GenerateResponse:
     """Generate for vision models (classification, detection)."""
     import torch
     from PIL import Image
@@ -995,7 +978,7 @@ async def generate_vision(request: GenerateRequest) -> GenerateResponse:
         )
 
 
-async def generate_audio(request: GenerateRequest) -> GenerateResponse:
+async def generate_audio_legacy(request: GenerateRequest) -> GenerateResponse:
     """Generate for audio models (STT, TTS)."""
     import torch
     import tempfile
@@ -1107,7 +1090,7 @@ async def generate_audio(request: GenerateRequest) -> GenerateResponse:
         )
 
 
-async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
+async def generate_multimodal_legacy(request: GenerateRequest) -> GenerateResponse:
     """Generate for multimodal models."""
     import torch
     from PIL import Image
