@@ -44,7 +44,7 @@
         /* Header */
         .header {
             background-color: var(--bg-secondary);
-            padding: 1rem;
+            padding: 0.5rem 1rem;
             border-bottom: 1px solid var(--border);
             display: flex;
             justify-content: space-between;
@@ -54,19 +54,19 @@
         .model-info {
             display: flex;
             align-items: center;
-            gap: 1rem;
+            gap: 0.75rem;
         }
 
         .model-name {
-            font-size: 1.2rem;
+            font-size: 1rem;
             font-weight: 600;
         }
 
         .model-status {
             display: flex;
             align-items: center;
-            gap: 0.5rem;
-            font-size: 0.9rem;
+            gap: 0.4rem;
+            font-size: 0.85rem;
             color: var(--text-secondary);
         }
 
@@ -82,10 +82,11 @@
             background: none;
             border: 1px solid var(--border);
             color: var(--text-primary);
-            padding: 0.5rem 1rem;
+            padding: 0.4rem 0.8rem;
             border-radius: 4px;
             cursor: pointer;
             transition: all 0.2s;
+            font-size: 0.9rem;
         }
 
         .settings-btn:hover {
@@ -105,27 +106,27 @@
             flex: 1;
             display: flex;
             flex-direction: column;
-            padding: 1rem;
-            gap: 1rem;
+            padding: 0.75rem;
+            gap: 0.75rem;
             overflow: hidden;
         }
 
         .messages-container {
             flex: 1;
             overflow-y: auto;
-            padding: 1rem;
+            padding: 0.75rem;
             background-color: var(--bg-secondary);
             border-radius: 8px;
             display: flex;
             flex-direction: column;
-            gap: 1rem;
+            gap: 0.75rem;
         }
 
         .message {
             display: flex;
-            gap: 1rem;
-            padding: 1rem;
-            border-radius: 8px;
+            gap: 0.75rem;
+            padding: 0.75rem;
+            border-radius: 6px;
             background-color: var(--bg-tertiary);
         }
 
@@ -136,13 +137,16 @@
 
         .message-role {
             font-weight: 600;
-            min-width: 80px;
+            min-width: 65px;
+            font-size: 0.9rem;
         }
 
         .message-content {
             flex: 1;
             white-space: pre-wrap;
             word-wrap: break-word;
+            font-size: 0.95rem;
+            line-height: 1.5;
         }
 
         .thinking-section {
@@ -185,15 +189,17 @@
 
         .input-textarea {
             width: 100%;
-            min-height: 100px;
-            padding: 0.75rem;
+            min-height: 60px;
+            max-height: 150px;
+            padding: 0.5rem;
             background-color: var(--bg-tertiary);
             border: 1px solid var(--border);
             border-radius: 4px;
             color: var(--text-primary);
             font-family: inherit;
-            font-size: 0.95rem;
+            font-size: 0.9rem;
             resize: vertical;
+            line-height: 1.4;
         }
 
         .input-textarea:focus {
@@ -229,6 +235,34 @@
         }
         
         .image-upload-btn:hover {
+            background-color: var(--bg-primary);
+        }
+        
+        .mode-toggle {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            margin-right: auto;
+        }
+        
+        .mode-btn {
+            padding: 0.4rem 0.8rem;
+            border: 1px solid var(--border);
+            background-color: var(--bg-tertiary);
+            color: var(--text-primary);
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+        
+        .mode-btn.active {
+            background-color: var(--accent);
+            color: white;
+            border-color: var(--accent);
+        }
+        
+        .mode-btn:hover:not(.active) {
             background-color: var(--bg-primary);
         }
         
@@ -530,7 +564,13 @@
                 <span id="modelStatus">Initializing</span>
             </div>
         </div>
-        <button class="settings-btn" onclick="openSettings()">Settings ⚙</button>
+        <div style="display: flex; gap: 0.5rem;">
+            <button class="settings-btn" onclick="newSession()">📝 New</button>
+            <select class="settings-btn" id="sessionSelect" onchange="loadSession(this.value)" style="min-width: 120px;">
+                <option value="default">Default</option>
+            </select>
+            <button class="settings-btn" onclick="openSettings()">⚙️ Settings</button>
+        </div>
     </div>
 
     <div class="container">
@@ -548,6 +588,10 @@
                             onkeydown="handleKeyPress(event)"
                         ></textarea>
                         <div class="input-controls">
+                            <div class="mode-toggle" id="modeToggle" style="display: none;">
+                                <button class="mode-btn active" id="chatModeBtn" onclick="setMode('chat')">💬 Chat</button>
+                                <button class="mode-btn" id="drawModeBtn" onclick="setMode('draw')">🎨 Draw</button>
+                            </div>
                             <div class="image-upload-container" id="imageUploadContainer" style="display: none;">
                                 <input type="file" id="imageInput" accept="image/*" multiple style="display: none;" onchange="handleImageUpload(event)">
                                 <button class="image-upload-btn" onclick="document.getElementById('imageInput').click()">
@@ -718,6 +762,60 @@
                 <label class="setting-label">System Prompt</label>
                 <textarea class="input-textarea" id="systemPrompt" placeholder="You are a helpful assistant..."></textarea>
             </div>
+            
+            <!-- Multimodal-specific settings -->
+            <div id="multimodalSettings" style="display: none;">
+                <hr style="margin: 1rem 0; border-color: var(--border);">
+                <h3 style="margin-bottom: 1rem; font-size: 1.1rem;">Multimodal Settings</h3>
+                
+                <div class="setting-group">
+                    <label class="setting-label">Image Resolution</label>
+                    <select class="setting-input" id="imageResolution">
+                        <option value="384">384×384 (Default)</option>
+                        <option value="512">512×512</option>
+                        <option value="768">768×768</option>
+                        <option value="1024">1024×1024</option>
+                    </select>
+                </div>
+                
+                <div class="setting-group">
+                    <label class="setting-label">Generation Mode</label>
+                    <select class="setting-input" id="generationMode">
+                        <option value="auto">Auto-detect</option>
+                        <option value="text">Text Only</option>
+                        <option value="image">Image Generation</option>
+                        <option value="both">Text + Image</option>
+                    </select>
+                </div>
+                
+                <div class="setting-group">
+                    <label class="setting-label">Image Quality</label>
+                    <div class="slider-container">
+                        <input type="range" class="slider" id="imageQuality" min="1" max="100" step="1" value="95">
+                        <span class="slider-value" id="imageQualityValue">95</span>
+                    </div>
+                </div>
+                
+                <div class="setting-group">
+                    <label class="setting-label">Repetition Penalty</label>
+                    <div class="slider-container">
+                        <input type="range" class="slider" id="repetitionPenalty" min="0.5" max="2" step="0.1" value="1.1">
+                        <span class="slider-value" id="repetitionPenaltyValue">1.1</span>
+                    </div>
+                </div>
+                
+                <div class="setting-group">
+                    <label class="setting-label">
+                        <input type="checkbox" id="enhancePrompt"> Enhance prompts for better image generation
+                    </label>
+                </div>
+                
+                <div class="setting-group">
+                    <label class="setting-label">
+                        <input type="checkbox" id="includeMetadata" checked> Include generation metadata in response
+                    </label>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -728,13 +826,23 @@
         let isGenerating = false;
         let eventSource = null;
         let uploadedImages = []; // Store base64 encoded images
+        let currentMode = 'chat'; // 'chat' or 'draw'
+        let sessions = {}; // Store chat sessions
+        let currentSession = 'default';
 
         // Settings
         let settings = {
             temperature: 0.7,
             maxTokens: 512,
             topP: 0.9,
-            systemPrompt: "You are a helpful assistant."
+            systemPrompt: "You are a helpful assistant.",
+            // Multimodal settings
+            imageResolution: 384,
+            generationMode: 'auto',
+            imageQuality: 95,
+            repetitionPenalty: 1.1,
+            enhancePrompt: false,
+            includeMetadata: true
         };
 
         // Initialize
@@ -754,14 +862,24 @@
                     modelInfo.model_family === 'vision-language') {
                     document.getElementById('chatInterface').style.display = 'flex';
                     
-                    // Show image upload for multimodal models
+                    // Show image upload and mode toggle for multimodal models
                     if (modelInfo.model_family === 'multimodal' || 
                         modelInfo.model_family === 'vision-language' ||
                         modelInfo.capabilities.supports_multimodal) {
                         document.getElementById('imageUploadContainer').style.display = 'flex';
+                        document.getElementById('modeToggle').style.display = 'flex';
                         document.getElementById('tokenCounterText').style.display = 'none';
+                        
+                        // Show draw mode button if model supports image generation
+                        if (modelInfo.capabilities.supports_image_generation || 
+                            modelInfo.capabilities.output_modalities?.includes('image')) {
+                            document.getElementById('drawModeBtn').style.display = 'block';
+                        } else {
+                            document.getElementById('drawModeBtn').style.display = 'none';
+                        }
                     } else {
                         document.getElementById('imageUploadContainer').style.display = 'none';
+                        document.getElementById('modeToggle').style.display = 'none';
                         document.getElementById('tokenCounterText').style.display = 'inline';
                         document.getElementById('tokenCounter').textContent = '0 tokens';
                     }
@@ -801,17 +919,26 @@
         }
 
         // Chat functions
-        function addMessage(role, content, thinking = null, images = null) {
+        function addMessage(role, content, thinking = null, images = null, saveToMessages = true) {
             // Store message data
             const messageData = { role, content };
+            
+            if (thinking) {
+                messageData.thinking = thinking;
+            }
             
             // If this is a user message and we have uploaded images, store them with the message
             if (role === 'user' && uploadedImages.length > 0) {
                 messageData.images = [...uploadedImages];
                 images = uploadedImages;
+            } else if (images) {
+                messageData.images = images;
             }
             
-            messages.push(messageData);
+            if (saveToMessages) {
+                messages.push(messageData);
+                saveSession(); // Auto-save after each message
+            }
             
             const messagesContainer = document.getElementById('messages');
             const messageDiv = document.createElement('div');
@@ -875,6 +1002,11 @@
                 prompt = imageTokens + '\n' + prompt;
             }
             
+            // If in draw mode, prepend generation instruction
+            if (currentMode === 'draw') {
+                prompt = 'Please generate an image based on this description: ' + prompt;
+            }
+            
             // Add user message with display text (without image tokens for display)
             const displayPrompt = input.value.trim();
             addMessage('user', displayPrompt);
@@ -918,6 +1050,22 @@
                 reasoning_mode: document.getElementById('reasoningMode').checked
             };
             
+            // Add multimodal settings if in draw mode
+            if (currentMode === 'draw' && (modelInfo.model_family === 'multimodal' || 
+                modelInfo.model_family === 'vision-language')) {
+                requestBody.generation_mode = settings.generationMode;
+                requestBody.image_resolution = settings.imageResolution;
+                requestBody.image_quality = settings.imageQuality;
+                requestBody.repetition_penalty = settings.repetitionPenalty;
+                requestBody.enhance_prompt = settings.enhancePrompt;
+                
+                // Modify the prompt for generation mode
+                if (settings.enhancePrompt && chatMessages.length > 0) {
+                    const lastMessage = chatMessages[chatMessages.length - 1];
+                    lastMessage.content = `Generate an image: ${lastMessage.content}. High quality, detailed.`;
+                }
+            }
+            
             // Add images if present
             if (uploadedImages.length > 0) {
                 requestBody.images = uploadedImages;
@@ -933,6 +1081,14 @@
             
             if (data.thinking && data.answer) {
                 addMessage('assistant', data.answer, data.thinking);
+            } else if (data.image) {
+                // Handle image generation response
+                const imageHtml = `<img src="data:image/png;base64,${data.image}" style="max-width: 100%; border-radius: 8px; margin-top: 10px;">`;
+                let responseText = data.text || 'Generated image';
+                if (settings.includeMetadata && data.metadata) {
+                    responseText += `\n\n<details><summary>Generation metadata</summary><pre>${JSON.stringify(data.metadata, null, 2)}</pre></details>`;
+                }
+                addMessage('assistant', responseText + '\n' + imageHtml);
             } else {
                 addMessage('assistant', data.text || 'No response');
             }
@@ -990,28 +1146,6 @@
             };
         }
 
-        // Setup sliders
-        function setupSliders() {
-            // Setup all sliders with value display
-            const sliders = [
-                { id: 'temperature', valueId: 'temperatureValue' },
-                { id: 'maxTokens', valueId: 'maxTokensValue' },
-                { id: 'topP', valueId: 'topPValue' },
-                { id: 'numSteps', valueId: 'numStepsValue' },
-                { id: 'guidanceScale', valueId: 'guidanceScaleValue' },
-                { id: 'numFrames', valueId: 'numFramesValue' }
-            ];
-            
-            sliders.forEach(slider => {
-                const input = document.getElementById(slider.id);
-                const value = document.getElementById(slider.valueId);
-                if (input && value) {
-                    input.addEventListener('input', () => {
-                        value.textContent = input.value;
-                    });
-                }
-            });
-        }
 
         // Image generation functions
         async function generateImage() {
@@ -1104,8 +1238,40 @@
         }
 
         // Settings functions
+        function setupSliders() {
+            const sliders = [
+                { id: 'temperature', valueId: 'temperatureValue' },
+                { id: 'maxTokens', valueId: 'maxTokensValue' },
+                { id: 'topP', valueId: 'topPValue' },
+                { id: 'imageQuality', valueId: 'imageQualityValue' },
+                { id: 'repetitionPenalty', valueId: 'repetitionPenaltyValue' },
+                { id: 'imageResolution', valueId: 'imageResolutionValue' },
+                { id: 'imageSteps', valueId: 'imageStepsValue' },
+                { id: 'guidanceScale', valueId: 'guidanceScaleValue' },
+                { id: 'imageWidth', valueId: 'imageWidthValue' },
+                { id: 'imageHeight', valueId: 'imageHeightValue' },
+                { id: 'numFrames', valueId: 'numFramesValue' }
+            ];
+            
+            sliders.forEach(({ id, valueId }) => {
+                const slider = document.getElementById(id);
+                const valueSpan = document.getElementById(valueId);
+                if (slider && valueSpan) {
+                    slider.addEventListener('input', (e) => {
+                        valueSpan.textContent = e.target.value;
+                    });
+                }
+            });
+        }
+        
         function openSettings() {
             document.getElementById('settingsModal').style.display = 'block';
+            
+            // Show multimodal settings if applicable
+            if (modelInfo && (modelInfo.model_family === 'multimodal' || 
+                modelInfo.model_family === 'vision-language')) {
+                document.getElementById('multimodalSettings').style.display = 'block';
+            }
         }
 
         function closeSettings() {
@@ -1116,9 +1282,9 @@
         function loadSettings() {
             const saved = localStorage.getItem('llmSettings');
             if (saved) {
-                settings = JSON.parse(saved);
+                settings = { ...settings, ...JSON.parse(saved) };
                 
-                // Update UI
+                // Update UI - basic settings
                 document.getElementById('temperature').value = settings.temperature;
                 document.getElementById('temperatureValue').textContent = settings.temperature;
                 document.getElementById('maxTokens').value = settings.maxTokens;
@@ -1126,6 +1292,29 @@
                 document.getElementById('topP').value = settings.topP;
                 document.getElementById('topPValue').textContent = settings.topP;
                 document.getElementById('systemPrompt').value = settings.systemPrompt;
+                
+                // Update UI - multimodal settings
+                if (document.getElementById('imageResolution')) {
+                    document.getElementById('imageResolution').value = settings.imageResolution || 384;
+                    document.getElementById('imageResolutionValue').textContent = settings.imageResolution || 384;
+                }
+                if (document.getElementById('generationMode')) {
+                    document.getElementById('generationMode').value = settings.generationMode || 'auto';
+                }
+                if (document.getElementById('imageQuality')) {
+                    document.getElementById('imageQuality').value = settings.imageQuality || 95;
+                    document.getElementById('imageQualityValue').textContent = settings.imageQuality || 95;
+                }
+                if (document.getElementById('repetitionPenalty')) {
+                    document.getElementById('repetitionPenalty').value = settings.repetitionPenalty || 1.1;
+                    document.getElementById('repetitionPenaltyValue').textContent = settings.repetitionPenalty || 1.1;
+                }
+                if (document.getElementById('enhancePrompt')) {
+                    document.getElementById('enhancePrompt').checked = settings.enhancePrompt || false;
+                }
+                if (document.getElementById('includeMetadata')) {
+                    document.getElementById('includeMetadata').checked = settings.includeMetadata !== false;
+                }
             }
         }
 
@@ -1134,6 +1323,26 @@
             settings.maxTokens = parseInt(document.getElementById('maxTokens').value);
             settings.topP = parseFloat(document.getElementById('topP').value);
             settings.systemPrompt = document.getElementById('systemPrompt').value;
+            
+            // Save multimodal settings
+            if (document.getElementById('imageResolution')) {
+                settings.imageResolution = parseInt(document.getElementById('imageResolution').value);
+            }
+            if (document.getElementById('generationMode')) {
+                settings.generationMode = document.getElementById('generationMode').value;
+            }
+            if (document.getElementById('imageQuality')) {
+                settings.imageQuality = parseInt(document.getElementById('imageQuality').value);
+            }
+            if (document.getElementById('repetitionPenalty')) {
+                settings.repetitionPenalty = parseFloat(document.getElementById('repetitionPenalty').value);
+            }
+            if (document.getElementById('enhancePrompt')) {
+                settings.enhancePrompt = document.getElementById('enhancePrompt').checked;
+            }
+            if (document.getElementById('includeMetadata')) {
+                settings.includeMetadata = document.getElementById('includeMetadata').checked;
+            }
             
             localStorage.setItem('llmSettings', JSON.stringify(settings));
         }
@@ -1146,18 +1355,6 @@
             }
         }
 
-        // Slider updates
-        document.getElementById('temperature').addEventListener('input', (e) => {
-            document.getElementById('temperatureValue').textContent = e.target.value;
-        });
-
-        document.getElementById('maxTokens').addEventListener('input', (e) => {
-            document.getElementById('maxTokensValue').textContent = e.target.value;
-        });
-
-        document.getElementById('topP').addEventListener('input', (e) => {
-            document.getElementById('topPValue').textContent = e.target.value;
-        });
 
         // Token counter (simplified)
         document.getElementById('userInput').addEventListener('input', (e) => {
@@ -1271,8 +1468,91 @@
             }
         }
 
+        // Mode management
+        function setMode(mode) {
+            currentMode = mode;
+            
+            // Update button states
+            document.getElementById('chatModeBtn').classList.toggle('active', mode === 'chat');
+            document.getElementById('drawModeBtn').classList.toggle('active', mode === 'draw');
+            
+            // Update placeholder text
+            const input = document.getElementById('userInput');
+            if (mode === 'draw') {
+                input.placeholder = 'Describe what you want to generate...';
+            } else {
+                input.placeholder = 'Type your message...';
+            }
+        }
+        
+        // Session management
+        function saveSession() {
+            if (messages.length > 0) {
+                sessions[currentSession] = {
+                    messages: [...messages],
+                    timestamp: new Date().toISOString()
+                };
+                localStorage.setItem('chatSessions', JSON.stringify(sessions));
+            }
+        }
+        
+        function loadSession(sessionId) {
+            const savedSessions = localStorage.getItem('chatSessions');
+            if (savedSessions) {
+                sessions = JSON.parse(savedSessions);
+                if (sessions[sessionId]) {
+                    messages = [...sessions[sessionId].messages];
+                    currentSession = sessionId;
+                    renderMessages();
+                }
+            }
+        }
+        
+        function renderMessages() {
+            const messagesContainer = document.getElementById('messages');
+            messagesContainer.innerHTML = '';
+            messages.forEach(msg => {
+                addMessage(msg.role, msg.content, msg.thinking, msg.images, false);
+            });
+        }
+        
+        function newSession() {
+            saveSession();
+            currentSession = 'session_' + Date.now();
+            messages = [];
+            document.getElementById('messages').innerHTML = '';
+            updateSessionSelector();
+            document.getElementById('sessionSelect').value = currentSession;
+        }
+
+        // Update session selector
+        function updateSessionSelector() {
+            const select = document.getElementById('sessionSelect');
+            select.innerHTML = '<option value="default">Default</option>';
+            
+            const savedSessions = localStorage.getItem('chatSessions');
+            if (savedSessions) {
+                sessions = JSON.parse(savedSessions);
+                Object.keys(sessions).forEach(sessionId => {
+                    if (sessionId !== 'default') {
+                        const option = document.createElement('option');
+                        option.value = sessionId;
+                        const date = new Date(sessions[sessionId].timestamp);
+                        option.textContent = date.toLocaleString();
+                        select.appendChild(option);
+                    }
+                });
+            }
+            
+            select.value = currentSession;
+        }
+        
         // Initialize on load
-        window.onload = initialize;
+        window.onload = () => {
+            initialize();
+            updateSessionSelector();
+            loadSession('default');
+        };
     </script>
 </body>
 </html>
