@@ -157,9 +157,18 @@ class QwenVLHandler(MultimodalHandler):
         if device == 'auto':
             # Use more aggressive memory settings for Qwen2.5-VL
             model_kwargs['device_map'] = 'auto'
-            # Use 95% of available GPU memory instead of default 90%
-            model_kwargs['max_memory'] = {0: "95%"}
-            logger.info("Using 95% of GPU memory for model loading")
+            # Calculate available GPU memory and use most of it
+            if torch.cuda.is_available():
+                # Get GPU memory in bytes
+                gpu_memory = torch.cuda.get_device_properties(0).total_memory
+                # Use 95% of available memory (leave some for PyTorch overhead)
+                usable_memory = int(gpu_memory * 0.95)
+                # Convert to GB string format
+                memory_gb = usable_memory / (1024**3)
+                model_kwargs['max_memory'] = {0: f"{memory_gb:.1f}GB"}
+                logger.info(f"Using {memory_gb:.1f}GB of GPU memory for model loading")
+            else:
+                logger.info("No GPU available, using CPU")
         
         # Load model
         logger.info(f"Loading Qwen VL model from {model_path}")
