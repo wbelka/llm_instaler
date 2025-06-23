@@ -163,8 +163,9 @@ async def startup_event():
 async def root():
     """Serve the web UI."""
     # Check if terminal UI exists, otherwise fall back to regular UI
-    terminal_ui = Path("serve_terminal.html")
-    regular_ui = Path("serve_ui.html")
+    script_dir = Path(__file__).parent
+    terminal_ui = script_dir / "serve_terminal.html"
+    regular_ui = script_dir / "serve_ui.html"
     
     if terminal_ui.exists():
         return FileResponse(terminal_ui)
@@ -225,7 +226,8 @@ def apply_mode_settings(request: GenerateRequest, mode: str) -> GenerateRequest:
 @app.get("/ui/classic")
 async def classic_ui():
     """Serve the classic web UI."""
-    ui_path = Path("serve_ui.html")
+    script_dir = Path(__file__).parent
+    ui_path = script_dir / "serve_ui.html"
     if ui_path.exists():
         return FileResponse(ui_path)
     else:
@@ -235,7 +237,8 @@ async def classic_ui():
 @app.get("/ui/terminal")
 async def terminal_ui():
     """Serve the terminal-style UI."""
-    ui_path = Path("serve_terminal.html")
+    script_dir = Path(__file__).parent
+    ui_path = script_dir / "serve_terminal.html"
     if ui_path.exists():
         return FileResponse(ui_path)
     else:
