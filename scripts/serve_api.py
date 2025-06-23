@@ -905,11 +905,26 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
     """Generate for multimodal models."""
     import torch
     from PIL import Image
+    import numpy as np
     
     logger.info("=== Starting multimodal generation ===")
     logger.info(f"Model type: {MODEL_INFO.get('model_type')}")
     logger.info(f"Model family: {MODEL_INFO.get('model_family')}")
     logger.info(f"Model ID: {MODEL_INFO.get('model_id')}")
+    
+    # Check if this is an image generation request
+    # In draw mode, or if prompt contains generation keywords
+    is_generation_request = False
+    generation_mode = getattr(request, 'generation_mode', 'auto')
+    
+    if generation_mode == 'text2img':
+        is_generation_request = True
+    elif hasattr(request, 'mode') and request.mode == 'draw':
+        is_generation_request = True
+    elif request.prompt and any(keyword in request.prompt.lower() for keyword in ['нарисуй', 'draw', 'generate', 'create image', 'paint', 'рисуй', 'сгенерируй']):
+        is_generation_request = True
+    
+    logger.info(f"Is generation request: {is_generation_request}, generation_mode: {generation_mode}")
 
     # Get prompt from either prompt field or messages
     prompt = request.prompt
@@ -992,6 +1007,12 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
                         role = '<|Assistant|>'
                         logger.info(f"Converted 'assistant' to '{role}'")
                     
+                    # For image generation requests, add special prefix
+                    if is_generation_request and role == '<|User|>':
+                        # Add generation instruction prefix for Janus
+                        content = f"Generate an image: {content}"
+                        logger.info(f"Added generation prefix to user message")
+                    
                     conversations.append({
                         "role": role,
                         "content": content
@@ -1002,8 +1023,12 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
                 # The model will generate from the last User message
             else:
                 # Convert single prompt to conversation format
+                content = prompt
+                if is_generation_request:
+                    content = f"Generate an image: {prompt}"
+                    logger.info(f"Added generation prefix to prompt")
                 conversations = [
-                    {"role": "<|User|>", "content": prompt}
+                    {"role": "<|User|>", "content": content}
                 ]
             
             logger.info(f"Final conversations list has {len(conversations)} messages")
@@ -1309,6 +1334,117 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
                         # Cut off at the first disclaimer
                         generated_text = generated_text[:generated_text.find(pattern)].strip()
                         break
+            
+            # Check if this is image generation for Janus
+            if is_generation_request and 'janus' in MODEL_INFO.get('model_id', '').lower():
+                logger.info("Detected Janus image generation request")
+                
+                # For Janus image generation, we need to use special generation process
+                try:
+                    # Prepare prompt for image generation
+                    sft_format = TOKENIZER.apply_sft_template_for_multi_turn_prompts(
+                        conversations=conversations,
+                        sft_format=TOKENIZER.sft_format,
+                        system_prompt="",
+                    )
+                    gen_prompt = sft_format + TOKENIZER.image_start_tag
+                    logger.info(f"Image generation prompt: {gen_prompt[:100]}...")
+                    
+                    # Tokenize prompt
+                    input_ids = TOKENIZER.tokenizer.encode(gen_prompt)
+                    input_ids = torch.LongTensor(input_ids).unsqueeze(0).to(MODEL.device)
+                    
+                    # Parameters for image generation
+                    temperature = request.temperature if request.temperature > 0 else 1.0
+                    cfg_weight = 5.0  # Classifier-free guidance weight
+                    image_token_num_per_image = 576  # Standard for Janus
+                    img_size = 384
+                    patch_size = 16
+                    
+                    # Get input embeddings
+                    inputs_embeds = MODEL.language_model.get_input_embeddings()(input_ids)
+                    
+                    # Generate image tokens
+                    generated_tokens = []
+                    outputs = None
+                    
+                    logger.info(f"Generating {image_token_num_per_image} image tokens...")
+                    
+                    for i in range(image_token_num_per_image):
+                        # Forward pass
+                        outputs = MODEL.language_model.model(
+                            inputs_embeds=inputs_embeds, 
+                            use_cache=True, 
+                            past_key_values=outputs.past_key_values if outputs else None
+                        )
+                        hidden_states = outputs.last_hidden_state
+                        
+                        # Get logits from generation head
+                        if hasattr(MODEL, 'gen_head'):
+                            logits = MODEL.gen_head(hidden_states[:, -1, :])
+                        else:
+                            logger.error("Model does not have gen_head for image generation")
+                            raise ValueError("Model missing gen_head")
+                        
+                        # Sample next token
+                        probs = torch.softmax(logits / temperature, dim=-1)
+                        next_token = torch.multinomial(probs, num_samples=1)
+                        generated_tokens.append(next_token.item())
+                        
+                        # Prepare next input
+                        if hasattr(MODEL, 'prepare_gen_img_embeds'):
+                            img_embeds = MODEL.prepare_gen_img_embeds(next_token)
+                            inputs_embeds = img_embeds.unsqueeze(dim=1)
+                        else:
+                            # Fallback to regular embedding
+                            inputs_embeds = MODEL.language_model.get_input_embeddings()(next_token).unsqueeze(1)
+                    
+                    logger.info(f"Generated {len(generated_tokens)} tokens")
+                    
+                    # Decode tokens to image
+                    generated_tokens_tensor = torch.tensor(generated_tokens).unsqueeze(0).to(MODEL.device)
+                    
+                    if hasattr(MODEL, 'gen_vision_model') and hasattr(MODEL.gen_vision_model, 'decode_code'):
+                        logger.info("Decoding image tokens...")
+                        dec = MODEL.gen_vision_model.decode_code(
+                            generated_tokens_tensor.to(dtype=torch.int), 
+                            shape=[1, 8, img_size//patch_size, img_size//patch_size]
+                        )
+                        
+                        # Convert to numpy and rearrange dimensions
+                        dec = dec.to(torch.float32).cpu().numpy().transpose(0, 2, 3, 1)
+                        
+                        # Normalize to 0-255 range
+                        dec = (dec * 127.5 + 128).clip(0, 255).astype(np.uint8)
+                        
+                        # Convert to PIL Image
+                        image = Image.fromarray(dec[0])
+                        
+                        # Convert to base64
+                        buffered = BytesIO()
+                        image.save(buffered, format="PNG")
+                        img_base64 = base64.b64encode(buffered.getvalue()).decode()
+                        
+                        logger.info("Image generation successful")
+                        logger.info("=== Multimodal generation complete ===")
+                        
+                        return GenerateResponse(
+                            text="Generated image successfully",
+                            image=img_base64,
+                            metadata={
+                                "width": img_size,
+                                "height": img_size,
+                                "format": "png"
+                            }
+                        )
+                    else:
+                        logger.error("Model does not have gen_vision_model for decoding")
+                        raise ValueError("Model missing gen_vision_model")
+                        
+                except Exception as e:
+                    logger.error(f"Error in Janus image generation: {e}")
+                    logger.info("Falling back to text generation")
+                    # Fall through to regular text response
             
             # Final logging
             logger.info(f"Final generated text length: {len(generated_text)}")
