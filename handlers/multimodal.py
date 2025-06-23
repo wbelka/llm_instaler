@@ -488,3 +488,94 @@ Note: This is a large package and may take some time to install.
             capabilities['input_modalities'].append('video')
 
         return capabilities
+    
+    def get_supported_modes(self) -> List[str]:
+        """Get supported generation modes."""
+        base_modes = ['auto', 'chat']
+        
+        if self.is_janus_model:
+            # Janus has its own handler with specific modes
+            base_modes.extend(['image', 'vision', 'multimodal', 'analyze'])
+        else:
+            # General multimodal models
+            base_modes.extend(['vision', 'multimodal', 'analyze'])
+        
+        return base_modes
+    
+    def get_mode_descriptions(self) -> Dict[str, str]:
+        """Get descriptions for supported modes."""
+        descriptions = {
+            'auto': 'Automatic mode selection',
+            'chat': 'Text conversation mode',
+            'vision': 'Image understanding and analysis',
+            'multimodal': 'Combined text and image processing',
+            'analyze': 'Detailed analysis mode'
+        }
+        
+        if self.is_janus_model:
+            descriptions['image'] = 'Image generation from text'
+        
+        return descriptions
+    
+    def process_multimodal(self, text: str = None, images: List[str] = None,
+                          audio: str = None, video: str = None,
+                          model=None, processor=None, **kwargs) -> Dict[str, Any]:
+        """Process multimodal inputs.
+        
+        Note: This is a generic implementation. Model-specific handlers
+        (like JanusHandler) should override this method.
+        """
+        from transformers import AutoProcessor
+        import torch
+        import base64
+        from PIL import Image
+        from io import BytesIO
+        
+        if not model or not processor:
+            raise ValueError("Model and processor required for multimodal processing")
+        
+        # Prepare inputs
+        inputs = {}
+        
+        # Process text
+        if text:
+            if hasattr(processor, 'tokenizer'):
+                text_inputs = processor.tokenizer(text, return_tensors="pt")
+                inputs.update(text_inputs)
+            else:
+                inputs['text'] = text
+        
+        # Process images
+        if images:
+            pil_images = []
+            for img_base64 in images:
+                img_data = base64.b64decode(img_base64)
+                pil_images.append(Image.open(BytesIO(img_data)))
+            
+            if hasattr(processor, 'image_processor'):
+                image_inputs = processor.image_processor(pil_images, return_tensors="pt")
+                inputs['pixel_values'] = image_inputs.pixel_values
+            else:
+                inputs['images'] = pil_images
+        
+        # Move to device
+        if hasattr(model, 'device'):
+            inputs = {k: v.to(model.device) if hasattr(v, 'to') else v 
+                     for k, v in inputs.items()}
+        
+        # Generate
+        with torch.no_grad():
+            outputs = model.generate(**inputs, **kwargs)
+        
+        # Decode response
+        if hasattr(processor, 'decode'):
+            response = processor.decode(outputs[0], skip_special_tokens=True)
+        elif hasattr(processor, 'tokenizer'):
+            response = processor.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        else:
+            response = str(outputs)
+        
+        return {
+            'text': response,
+            'type': 'multimodal_response'
+        }
