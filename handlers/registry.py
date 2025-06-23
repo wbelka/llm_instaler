@@ -76,6 +76,13 @@ class HandlerRegistry:
             self._handlers['multi_modality'] = MultimodalHandler
         except ImportError:
             pass
+        
+        try:
+            from handlers.janus import JanusHandler
+            # Register Janus handler for specific model IDs
+            self._handlers['janus'] = JanusHandler
+        except ImportError:
+            pass
 
     def register_handler(
         self,
@@ -101,9 +108,10 @@ class HandlerRegistry:
         """Get the appropriate handler class for a model.
 
         This method tries to find a handler in the following order:
-        1. Check for explicitly registered handlers by model family
-        2. Check for explicitly registered handlers by model type
-        3. Fall back to dynamic loading using get_handler_class
+        1. Check for model-specific handlers (e.g., Janus)
+        2. Check for explicitly registered handlers by model family
+        3. Check for explicitly registered handlers by model type
+        4. Fall back to dynamic loading using get_handler_class
 
         Args:
             model_info: Model information dictionary containing
@@ -113,8 +121,14 @@ class HandlerRegistry:
             Handler class (not instance) or None if no suitable
             handler found.
         """
+        model_id = model_info.get('model_id', '').lower()
         model_family = model_info.get('model_family', '')
         model_type = model_info.get('model_type', '')
+        
+        # Check for model-specific handlers
+        if 'janus' in model_id:
+            if 'janus' in self._handlers:
+                return self._handlers['janus']
 
         # Try to find in registered handlers
         if model_family and model_family in self._handlers:

@@ -28,6 +28,7 @@ echo "Activating virtual environment..."
 source .venv/bin/activate
 
 # Set environment variables
+export PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True'
 export PYTHONPATH="${PYTHONPATH}:$(pwd)"
 export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
 

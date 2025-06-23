@@ -199,3 +199,266 @@ class BaseHandler(ABC):
     def __repr__(self) -> str:
         """String representation of the handler."""
         return f"{self.__class__.__name__}(model_id='{self.model_id}')"
+    
+    # Generation interface methods - override in subclasses as needed
+    
+    def generate_text(self, prompt: str = None, messages: List[Dict] = None, 
+                     model=None, tokenizer=None, **kwargs) -> Dict[str, Any]:
+        """Generate text response.
+        
+        Args:
+            prompt: Text prompt (for completion models)
+            messages: Chat messages (for chat models)
+            model: Model instance
+            tokenizer: Tokenizer/processor instance
+            **kwargs: Generation parameters (temperature, max_tokens, etc.)
+            
+        Returns:
+            Dictionary with generated text and metadata
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} does not support text generation")
+    
+    def generate_image(self, prompt: str, negative_prompt: str = None,
+                      model=None, **kwargs) -> Dict[str, Any]:
+        """Generate image from text prompt.
+        
+        Args:
+            prompt: Text description of image to generate
+            negative_prompt: What to avoid in the image
+            model: Model instance
+            **kwargs: Generation parameters (size, steps, guidance_scale, etc.)
+            
+        Returns:
+            Dictionary with image data (base64) and metadata
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} does not support image generation")
+    
+    def generate_audio(self, text: str = None, prompt: str = None,
+                      model=None, **kwargs) -> Dict[str, Any]:
+        """Generate audio (TTS or music generation).
+        
+        Args:
+            text: Text to convert to speech (for TTS)
+            prompt: Description for music generation
+            model: Model instance
+            **kwargs: Generation parameters (voice, sample_rate, duration, etc.)
+            
+        Returns:
+            Dictionary with audio data (base64) and metadata
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} does not support audio generation")
+    
+    def generate_video(self, prompt: str, image: str = None,
+                      model=None, **kwargs) -> Dict[str, Any]:
+        """Generate video from text or image prompt.
+        
+        Args:
+            prompt: Text description of video to generate
+            image: Base64 image for image-to-video generation
+            model: Model instance
+            **kwargs: Generation parameters (fps, duration, size, etc.)
+            
+        Returns:
+            Dictionary with video data (base64) and metadata
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} does not support video generation")
+    
+    def process_image(self, image: str, task: str = "classify",
+                     model=None, processor=None, **kwargs) -> Dict[str, Any]:
+        """Process image for various vision tasks.
+        
+        Args:
+            image: Base64-encoded image
+            task: Task type (classify, detect, segment, etc.)
+            model: Model instance
+            processor: Image processor instance
+            **kwargs: Task-specific parameters
+            
+        Returns:
+            Dictionary with results and metadata
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} does not support image processing")
+    
+    def process_audio(self, audio: str, task: str = "transcribe",
+                     model=None, processor=None, **kwargs) -> Dict[str, Any]:
+        """Process audio for various audio tasks.
+        
+        Args:
+            audio: Base64-encoded audio
+            task: Task type (transcribe, classify, separate, etc.)
+            model: Model instance
+            processor: Audio processor instance
+            **kwargs: Task-specific parameters
+            
+        Returns:
+            Dictionary with results and metadata
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} does not support audio processing")
+    
+    def process_multimodal(self, text: str = None, images: List[str] = None,
+                          audio: str = None, video: str = None,
+                          model=None, processor=None, **kwargs) -> Dict[str, Any]:
+        """Process multimodal inputs.
+        
+        Args:
+            text: Text input
+            images: List of base64-encoded images
+            audio: Base64-encoded audio
+            video: Base64-encoded video
+            model: Model instance
+            processor: Multimodal processor instance
+            **kwargs: Additional parameters
+            
+        Returns:
+            Dictionary with processed output and metadata
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} does not support multimodal processing")
+    
+    def embed_text(self, texts: List[str], model=None, tokenizer=None,
+                   **kwargs) -> Dict[str, Any]:
+        """Generate text embeddings.
+        
+        Args:
+            texts: List of texts to embed
+            model: Model instance
+            tokenizer: Tokenizer instance
+            **kwargs: Embedding parameters (normalize, pooling, etc.)
+            
+        Returns:
+            Dictionary with embeddings and metadata
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} does not support text embeddings")
+    
+    def embed_image(self, images: List[str], model=None, processor=None,
+                   **kwargs) -> Dict[str, Any]:
+        """Generate image embeddings.
+        
+        Args:
+            images: List of base64-encoded images
+            model: Model instance
+            processor: Image processor instance
+            **kwargs: Embedding parameters
+            
+        Returns:
+            Dictionary with embeddings and metadata
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} does not support image embeddings")
+    
+    def embed_multimodal(self, text: str = None, image: str = None,
+                        model=None, processor=None, **kwargs) -> Dict[str, Any]:
+        """Generate multimodal embeddings (e.g., CLIP).
+        
+        Args:
+            text: Text input
+            image: Base64-encoded image
+            model: Model instance
+            processor: Multimodal processor instance
+            **kwargs: Embedding parameters
+            
+        Returns:
+            Dictionary with embeddings and metadata
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} does not support multimodal embeddings")
+    
+    # Mode and configuration methods
+    
+    def get_supported_modes(self) -> List[str]:
+        """Get list of supported generation modes.
+        
+        Returns:
+            List of mode names (e.g., ['chat', 'complete', 'image'])
+        """
+        return ['auto']
+    
+    def get_mode_descriptions(self) -> Dict[str, str]:
+        """Get descriptions for each supported mode.
+        
+        Returns:
+            Dictionary mapping mode names to descriptions
+        """
+        return {'auto': 'Automatic mode selection'}
+    
+    def apply_mode_settings(self, mode: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply mode-specific settings to parameters.
+        
+        Args:
+            mode: Selected mode
+            params: Current parameters
+            
+        Returns:
+            Updated parameters
+        """
+        return params
+    
+    def prepare_inputs(self, inputs: Dict[str, Any], model=None, 
+                      processor=None) -> Dict[str, Any]:
+        """Prepare inputs for model processing.
+        
+        Args:
+            inputs: Raw inputs
+            model: Model instance
+            processor: Processor/tokenizer instance
+            
+        Returns:
+            Prepared inputs ready for model
+        """
+        return inputs
+    
+    def postprocess_outputs(self, outputs: Any, task: str = None) -> Dict[str, Any]:
+        """Postprocess model outputs.
+        
+        Args:
+            outputs: Raw model outputs
+            task: Task type for task-specific postprocessing
+            
+        Returns:
+            Processed outputs
+        """
+        return {'raw_outputs': outputs}
+    
+    def validate_inputs(self, inputs: Dict[str, Any], task: str = None) -> Tuple[bool, Optional[str]]:
+        """Validate inputs before processing.
+        
+        Args:
+            inputs: Input dictionary
+            task: Task type for task-specific validation
+            
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        return True, None
+    
+    def get_generation_config(self, task: str = "text") -> Dict[str, Any]:
+        """Get default generation configuration for a task.
+        
+        Args:
+            task: Task type (text, image, audio, video)
+            
+        Returns:
+            Default configuration dictionary
+        """
+        configs = {
+            'text': {
+                'temperature': 0.7,
+                'max_tokens': 512,
+                'top_p': 0.9,
+                'top_k': 50
+            },
+            'image': {
+                'num_inference_steps': 50,
+                'guidance_scale': 7.5,
+                'width': 512,
+                'height': 512
+            },
+            'audio': {
+                'sample_rate': 22050,
+                'duration': 10.0
+            },
+            'video': {
+                'fps': 8,
+                'num_frames': 16,
+                'width': 256,
+                'height': 256
+            }
+        }
+        return configs.get(task, {})

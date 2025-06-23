@@ -6,8 +6,12 @@ including GPT, LLaMA, Mistral, and similar architectures.
 
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
+import torch
+import logging
 from handlers.base import BaseHandler
 from core.checker import ModelRequirements
+
+logger = logging.getLogger(__name__)
 
 
 class TransformerHandler(BaseHandler):
@@ -352,3 +356,98 @@ class TransformerHandler(BaseHandler):
 
         else:
             raise ValueError(f"Unknown training method: {training_method}")
+    
+    def generate_text(self, prompt: str = None, messages: List[Dict] = None,
+                     model=None, tokenizer=None, **kwargs) -> Dict[str, Any]:
+        """Generate text using transformer model.
+        
+        Args:
+            prompt: Text prompt
+            messages: Chat messages
+            model: Model instance
+            tokenizer: Tokenizer instance
+            **kwargs: Generation parameters
+            
+        Returns:
+            Dictionary with generated text and metadata
+        """
+        if not model or not tokenizer:
+            raise ValueError("Model and tokenizer required for text generation")
+        
+        # Prepare input
+        if messages:
+            # Apply chat template if available
+            if hasattr(tokenizer, 'apply_chat_template'):
+                text = tokenizer.apply_chat_template(messages, tokenize=False)
+            else:
+                # Simple fallback
+                text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+        else:
+            text = prompt or ""
+        
+        # Tokenize
+        inputs = tokenizer(text, return_tensors="pt", truncation=True, 
+                          max_length=kwargs.get('max_length', 2048))
+        
+        if hasattr(model, "device"):
+            inputs = {k: v.to(model.device) for k, v in inputs.items()}
+        
+        # Generate
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=kwargs.get('max_tokens', 512),
+                temperature=kwargs.get('temperature', 0.7),
+                top_p=kwargs.get('top_p', 0.9),
+                top_k=kwargs.get('top_k', 50),
+                do_sample=kwargs.get('temperature', 0.7) > 0,
+                pad_token_id=tokenizer.pad_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+                **{k: v for k, v in kwargs.items() if k in ['repetition_penalty', 'length_penalty']}
+            )
+        
+        # Decode
+        generated_ids = outputs[0][inputs['input_ids'].shape[1]:]
+        generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
+        
+        return {
+            'text': generated_text,
+            'usage': {
+                'prompt_tokens': inputs['input_ids'].shape[1],
+                'completion_tokens': generated_ids.shape[0],
+                'total_tokens': outputs[0].shape[0]
+            }
+        }
+    
+    def get_supported_modes(self) -> List[str]:
+        """Get supported generation modes for transformer models."""
+        return ['auto', 'chat', 'complete', 'instruct', 'creative', 'code', 'analyze', 'translate', 'summarize']
+    
+    def get_mode_descriptions(self) -> Dict[str, str]:
+        """Get mode descriptions."""
+        return {
+            'auto': 'Automatic mode selection',
+            'chat': 'Conversational chat mode',
+            'complete': 'Text completion mode',
+            'instruct': 'Instruction following mode',
+            'creative': 'Creative writing mode',
+            'code': 'Code generation mode',
+            'analyze': 'Analysis and reasoning mode',
+            'translate': 'Translation mode',
+            'summarize': 'Summarization mode'
+        }
+    
+    def apply_mode_settings(self, mode: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply mode-specific settings."""
+        mode_settings = {
+            'creative': {'temperature': 0.9, 'top_p': 0.95},
+            'code': {'temperature': 0.3, 'top_p': 0.9},
+            'analyze': {'temperature': 0.5, 'top_p': 0.9},
+            'translate': {'temperature': 0.3, 'top_p': 0.9},
+            'summarize': {'temperature': 0.5, 'top_p': 0.9}
+        }
+        
+        if mode in mode_settings:
+            params.update(mode_settings[mode])
+        
+        return params

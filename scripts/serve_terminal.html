@@ -582,6 +582,9 @@
             } else if (command === 'clear') {
                 clearTerminal();
                 return;
+            } else if (command === 'reset' || command === 'reset session') {
+                resetSession();
+                return;
             } else if (command === 'exit') {
                 window.close();
                 return;
@@ -605,6 +608,28 @@
             
             isProcessing = true;
             addTerminalLine('USER', prompt, 'prompt');
+            
+            // Show uploaded images in chat if any
+            console.log('Current mode:', currentMode, 'Uploaded images:', uploadedImages.length);
+            if (uploadedImages.length > 0 && (currentMode === 'vision' || currentMode === 'multimodal' || currentMode === 'analyze')) {
+                const imageContainer = document.createElement('div');
+                imageContainer.style.marginLeft = '40px';
+                imageContainer.style.marginTop = '10px';
+                imageContainer.style.marginBottom = '10px';
+                
+                uploadedImages.forEach((imgBase64, index) => {
+                    const img = document.createElement('img');
+                    img.src = `data:image/jpeg;base64,${imgBase64}`;
+                    img.style.maxWidth = '300px';
+                    img.style.maxHeight = '300px';
+                    img.style.border = '1px solid var(--text-color)';
+                    img.style.marginRight = '10px';
+                    img.style.display = 'inline-block';
+                    imageContainer.appendChild(img);
+                });
+                
+                document.getElementById('terminalOutput').appendChild(imageContainer);
+            }
             
             // Show loading
             const loadingLine = addTerminalLine('SYSTEM', 'Processing', 'info');
@@ -662,9 +687,11 @@
                     await typeText(responseLine, `[MODEL] ${data.text || data.answer || 'No response'}`);
                 }
                 
-                // Save to message history
-                messages.push({ role: 'user', content: prompt });
-                messages.push({ role: 'assistant', content: data.text || data.answer || '' });
+                // Save to message history (except for image generation and vision modes)
+                if (currentMode !== 'image' && currentMode !== 'vision') {
+                    messages.push({ role: 'user', content: prompt });
+                    messages.push({ role: 'assistant', content: data.text || data.answer || '' });
+                }
                 
                 // Clear uploaded images
                 uploadedImages = [];
@@ -707,6 +734,16 @@
             document.getElementById('terminalOutput').innerHTML = '';
             addTerminalLine('SYSTEM', 'Terminal cleared', 'info');
         }
+        
+        // Reset session
+        function resetSession() {
+            messages = [];
+            commandHistory = [];
+            historyIndex = -1;
+            uploadedImages = [];
+            document.getElementById('imagePreview').innerHTML = '';
+            addTerminalLine('SYSTEM', 'Session reset - conversation history cleared', 'info');
+        }
 
         // Show help
         function showHelp() {
@@ -714,6 +751,7 @@
             addTerminalLine('HELP', 'Available commands:', 'info');
             addTerminalLine('HELP', '  help     - Show this help message', 'info');
             addTerminalLine('HELP', '  clear    - Clear terminal output', 'info');
+            addTerminalLine('HELP', '  reset    - Reset session (clear conversation history)', 'info');
             addTerminalLine('HELP', '  mode <m> - Switch to mode <m>', 'info');
             addTerminalLine('HELP', '  exit     - Close terminal', 'info');
             addTerminalLine('HELP', '', 'info');

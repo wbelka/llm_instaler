@@ -10,6 +10,9 @@ import json
 import logging
 from typing import Dict, Any, Optional, Tuple
 
+# Set CUDA memory allocation configuration to prevent fragmentation
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+
 # Set up logger
 logger = logging.getLogger(__name__)
 
@@ -36,7 +39,12 @@ def get_handler(model_info: Dict[str, Any]):
 
         if handler_class:
             logger.info(f"Found handler class: {handler_class.__name__}")
-            return handler_class(model_info)
+            handler = handler_class(model_info)
+            
+            # Store handler class name in model info for later reference
+            model_info['handler_class'] = handler_class.__name__
+            
+            return handler
         else:
             # No handler found, will use fallback loading
             logger.warning(f"No handler found for model type: {model_info.get('model_type', 'unknown')}")

@@ -14,6 +14,9 @@ from pathlib import Path
 import base64
 from io import BytesIO
 
+# Set CUDA memory allocation configuration to prevent fragmentation
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, File, UploadFile
 from starlette.responses import HTMLResponse
 from fastapi.responses import FileResponse
@@ -51,6 +54,7 @@ TOKENIZER = None
 MODEL_INFO = None
 DEVICE = None
 DTYPE = None
+HANDLER = None
 
 
 # Request/Response models
@@ -151,6 +155,13 @@ async def startup_event():
             dtype=args.dtype,
             lora_path=args.load_lora
         )
+        
+        # Get handler instance
+        global HANDLER
+        from model_loader import get_handler
+        HANDLER = get_handler(MODEL_INFO)
+        if HANDLER:
+            logger.info(f"Loaded handler: {HANDLER.__class__.__name__}")
 
         logger.info("Model loaded successfully")
 
@@ -161,19 +172,15 @@ async def startup_event():
 
 @app.get("/")
 async def root():
-    """Serve the web UI."""
-    # Check if terminal UI exists, otherwise fall back to regular UI
+    """Serve the terminal UI."""
     script_dir = Path(__file__).parent
     terminal_ui = script_dir / "serve_terminal.html"
-    regular_ui = script_dir / "serve_ui.html"
     
     if terminal_ui.exists():
         return FileResponse(terminal_ui)
-    elif regular_ui.exists():
-        return FileResponse(regular_ui)
     else:
         return HTMLResponse(
-            content="<h1>Model API</h1><p>UI file not found. API is running at /docs</p>"
+            content="<h1>Model API</h1><p>Terminal UI not found. API is running at /docs</p>"
         )
 
 
@@ -200,7 +207,7 @@ def apply_mode_settings(request: GenerateRequest, mode: str) -> GenerateRequest:
     if mode in mode_settings:
         settings = mode_settings[mode]
         for key, value in settings.items():
-            if hasattr(request, key) and getattr(request, key) == getattr(GenerateRequest.__fields__[key], 'default', None):
+            if hasattr(request, key) and getattr(request, key) == GenerateRequest.model_fields[key].default:
                 # Only override if using default value
                 setattr(request, key, value)
     
@@ -223,15 +230,6 @@ def apply_mode_settings(request: GenerateRequest, mode: str) -> GenerateRequest:
     return request
 
 
-@app.get("/ui/classic")
-async def classic_ui():
-    """Serve the classic web UI."""
-    script_dir = Path(__file__).parent
-    ui_path = script_dir / "serve_ui.html"
-    if ui_path.exists():
-        return FileResponse(ui_path)
-    else:
-        return HTMLResponse(content="<h1>Classic UI not found</h1>")
 
 
 @app.get("/ui/terminal")
@@ -273,6 +271,15 @@ async def get_model_info():
     # Add UI-specific capabilities
     capabilities = MODEL_INFO.get("capabilities", {})
     capabilities["is_video_model"] = model_family == "video-generation" or 'video' in model_id
+    
+    # Add handler-specific capabilities if available
+    if HANDLER:
+        handler_caps = HANDLER.get_model_capabilities()
+        capabilities.update(handler_caps)
+        
+        # Add supported modes from handler
+        capabilities["supported_modes"] = HANDLER.get_supported_modes()
+        capabilities["mode_descriptions"] = HANDLER.get_mode_descriptions()
 
     # Add size recommendations for video models
     if capabilities["is_video_model"]:
@@ -374,6 +381,83 @@ async def generate(request: GenerateRequest):
         if request.mode and request.mode != "auto":
             request = apply_mode_settings(request, request.mode)
 
+        # Use handler if available
+        if HANDLER:
+            logger.info(f"Using handler: {HANDLER.__class__.__name__}")
+            try:
+                # Determine the task based on request and mode
+                if request.mode == "image" or (request.mode == "auto" and 
+                    any(word in (request.prompt or "").lower() for word in ["draw", "generate image", "create image"])):
+                    # Image generation
+                    if hasattr(HANDLER, 'generate_image'):
+                        result = HANDLER.generate_image(
+                            prompt=request.prompt or request.messages[-1]["content"] if request.messages else "",
+                            negative_prompt=request.negative_prompt,
+                            model=MODEL,
+                            tokenizer=TOKENIZER,
+                            temperature=request.temperature,
+                            guidance_scale=request.guidance_scale,
+                            width=request.width,
+                            height=request.height,
+                            num_inference_steps=request.num_inference_steps,
+                            seed=request.seed
+                        )
+                        return GenerateResponse(**result)
+                
+                elif request.images or request.image_data or request.mode == "vision":
+                    # Multimodal processing (including vision mode)
+                    logger.info(f"Processing multimodal request (vision mode={request.mode == 'vision'})")
+                    if hasattr(HANDLER, 'process_multimodal'):
+                        images = []
+                        if request.image_data:
+                            images.append(request.image_data)
+                        if request.images:
+                            images.extend(request.images)
+                        
+                        # For vision mode, only use current message without history
+                        if request.mode == "vision":
+                            text_input = request.prompt or (request.messages[-1]["content"] if request.messages else None)
+                            # Override messages to only include current one for vision mode
+                            request.messages = [{"role": "user", "content": text_input}] if text_input else []
+                        else:
+                            text_input = request.prompt or (request.messages[-1]["content"] if request.messages else None)
+                        
+                        result = HANDLER.process_multimodal(
+                            text=text_input,
+                            images=images,
+                            model=MODEL,
+                            processor=TOKENIZER,
+                            temperature=request.temperature,
+                            max_tokens=request.max_tokens,
+                            top_p=request.top_p,
+                            mode=request.mode
+                        )
+                        return GenerateResponse(**result)
+                
+                else:
+                    # Text generation
+                    if hasattr(HANDLER, 'generate_text'):
+                        result = HANDLER.generate_text(
+                            prompt=request.prompt,
+                            messages=request.messages,
+                            model=MODEL,
+                            tokenizer=TOKENIZER,
+                            temperature=request.temperature,
+                            max_tokens=request.max_tokens,
+                            top_p=request.top_p,
+                            top_k=request.top_k,
+                            stop_sequences=request.stop_sequences
+                        )
+                        return GenerateResponse(**result)
+                
+            except NotImplementedError:
+                # Handler doesn't support this operation, fall through to legacy code
+                logger.info("Handler doesn't support operation, falling back to legacy code")
+            except Exception as e:
+                logger.error(f"Handler error: {e}")
+                # Fall through to legacy code
+
+        # Legacy code paths for models without handlers
         # Text generation models
         if model_family in ["language-model", "text-classifier"]:
             return await generate_text(request)
@@ -1486,9 +1570,13 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
                 else:
                     # For Janus image generation, we need to use special generation process
                     try:
+                        # For image generation, only use the current prompt without history
+                        current_prompt = request.prompt or (request.messages[-1]["content"] if request.messages else "")
+                        image_conversations = [{"role": "User", "content": current_prompt}]
+                        
                         # Prepare prompt for image generation
                         sft_format = TOKENIZER.apply_sft_template_for_multi_turn_prompts(
-                            conversations=conversations,
+                            conversations=image_conversations,
                             sft_format=TOKENIZER.sft_format,
                             system_prompt="",
                         )
@@ -1497,7 +1585,27 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
                         
                         # Tokenize prompt
                         input_ids = TOKENIZER.tokenizer.encode(gen_prompt)
-                        input_ids = torch.LongTensor(input_ids).unsqueeze(0).to(MODEL.device)
+                        input_ids = torch.LongTensor(input_ids)
+                        
+                        # Janus requires parallel processing for CFG (Classifier-Free Guidance)
+                        # Create batch with conditional and unconditional inputs
+                        parallel_size = 1
+                        batch_size = parallel_size * 2  # conditional + unconditional
+                        tokens = torch.zeros((batch_size, len(input_ids)), dtype=torch.long).to(MODEL.device)
+                        
+                        for i in range(batch_size):
+                            tokens[i, :] = input_ids
+                            # Make odd indices unconditional (padded)
+                            if i % 2 != 0:
+                                # Check for pad_token_id in various places
+                                pad_id = getattr(TOKENIZER, 'pad_token_id', None) or \
+                                        getattr(TOKENIZER, 'pad_id', None) or \
+                                        getattr(TOKENIZER.tokenizer, 'pad_token_id', None) or \
+                                        0  # Default to 0 if no pad token found
+                                if pad_id is not None:
+                                    tokens[i, 1:-1] = pad_id
+                                else:
+                                    logger.warning("No pad token found, using token 0")
                         
                         # Parameters for image generation
                         temperature = request.temperature if request.temperature > 0 else 1.0
@@ -1506,14 +1614,20 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
                         img_size = 384
                         patch_size = 16
                         
-                        # Get input embeddings
-                        inputs_embeds = MODEL.language_model.get_input_embeddings()(input_ids)
+                        # Get input embeddings for batch
+                        inputs_embeds = MODEL.language_model.get_input_embeddings()(tokens)
+                        logger.info(f"Initial inputs_embeds shape: {inputs_embeds.shape}")
                         
                         # Generate image tokens
                         generated_tokens = []
                         outputs = None
                         
                         logger.info(f"Generating {image_token_num_per_image} image tokens...")
+                        logger.info(f"Batch size: {batch_size}, Parallel size: {parallel_size}")
+                        
+                        # Clear cache before generation to free up memory
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
                         
                         for i in range(image_token_num_per_image):
                             # Forward pass
@@ -1524,25 +1638,60 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
                             )
                             hidden_states = outputs.last_hidden_state
                             
+                            if i == 0:  # Log shapes on first iteration
+                                logger.info(f"Hidden states shape: {hidden_states.shape}")
+                            
                             # Get logits from generation head
                             if hasattr(MODEL, 'gen_head'):
-                                logits = MODEL.gen_head(hidden_states[:, -1, :])
+                                # Extract last hidden state for each sequence in batch
+                                last_hidden = hidden_states[:, -1, :]  # Shape: [batch_size, hidden_dim]
+                                if i == 0:
+                                    logger.info(f"Last hidden shape: {last_hidden.shape}")
+                                logits = MODEL.gen_head(last_hidden)  # Shape: [batch_size, vocab_size]
+                                if i == 0:
+                                    logger.info(f"Logits shape: {logits.shape}")
                             else:
                                 logger.error("Model does not have gen_head for image generation")
                                 raise ValueError("Model missing gen_head")
                             
+                            # Apply classifier-free guidance
+                            # logits shape: [batch_size, vocab_size] where batch_size = parallel_size * 2
+                            if logits.shape[0] >= 2:
+                                logit_cond = logits[0::2, :]  # Conditional (even indices)
+                                logit_uncond = logits[1::2, :]  # Unconditional (odd indices)
+                                
+                                if i == 0:
+                                    logger.info(f"CFG shapes - cond: {logit_cond.shape}, uncond: {logit_uncond.shape}")
+                                
+                                # Ensure same dimensions before combining
+                                if logit_cond.dim() != logit_uncond.dim():
+                                    logger.error(f"Dimension mismatch: cond={logit_cond.shape}, uncond={logit_uncond.shape}")
+                                    raise ValueError(f"Tensor dimension mismatch: conditional has {logit_cond.dim()} dims, unconditional has {logit_uncond.dim()} dims")
+                                
+                                # Check shape compatibility
+                                if logit_cond.shape != logit_uncond.shape:
+                                    logger.error(f"Shape mismatch: cond={logit_cond.shape}, uncond={logit_uncond.shape}")
+                                    raise ValueError(f"Tensor shape mismatch: conditional shape {logit_cond.shape} != unconditional shape {logit_uncond.shape}")
+                                
+                                logits = logit_uncond + cfg_weight * (logit_cond - logit_uncond)
+                            else:
+                                logger.warning(f"Batch size too small for CFG: {logits.shape[0]}, using logits as-is")
+                            
                             # Sample next token
                             probs = torch.softmax(logits / temperature, dim=-1)
-                            next_token = torch.multinomial(probs, num_samples=1)
-                            generated_tokens.append(next_token.item())
+                            next_token = torch.multinomial(probs, num_samples=1)  # Shape: [parallel_size, 1]
+                            generated_tokens.append(next_token[0, 0].item())
                             
-                            # Prepare next input
+                            # Prepare next input for both conditional and unconditional
+                            # Repeat tokens for both conditional and unconditional paths
+                            next_token_batch = next_token.repeat(2, 1).squeeze(-1)  # Shape: [parallel_size * 2]
+                            
                             if hasattr(MODEL, 'prepare_gen_img_embeds'):
-                                img_embeds = MODEL.prepare_gen_img_embeds(next_token)
+                                img_embeds = MODEL.prepare_gen_img_embeds(next_token_batch)
                                 inputs_embeds = img_embeds.unsqueeze(dim=1)
                             else:
                                 # Fallback to regular embedding
-                                inputs_embeds = MODEL.language_model.get_input_embeddings()(next_token).unsqueeze(1)
+                                inputs_embeds = MODEL.language_model.get_input_embeddings()(next_token_batch).unsqueeze(1)
                         
                         logger.info(f"Generated {len(generated_tokens)} tokens")
                         
@@ -1571,6 +1720,11 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
                             img_base64 = base64.b64encode(buffered.getvalue()).decode()
                             
                             logger.info("Image generation successful")
+                            
+                            # Clear CUDA cache after generation
+                            if torch.cuda.is_available():
+                                torch.cuda.empty_cache()
+                            
                             logger.info("=== Multimodal generation complete ===")
                             
                             return GenerateResponse(
@@ -1589,6 +1743,11 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
                     except Exception as e:
                         logger.error(f"Error in Janus image generation: {e}")
                         logger.info("Falling back to text generation")
+                        
+                        # Clear CUDA cache on error
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                        
                         # Fall through to regular text response
             
             # Final logging

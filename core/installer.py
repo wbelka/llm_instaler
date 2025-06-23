@@ -1300,7 +1300,7 @@ To install manually:
             ("start.sh", True),
             ("train.sh", True),
             ("serve_api.py", False),
-            ("serve_ui.html", False),
+            ("serve_terminal.html", False),
             ("model_loader.py", False)
         ]
 
