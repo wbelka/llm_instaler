@@ -34,11 +34,19 @@
             overflow: hidden;
         }
 
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        
         .container {
             display: flex;
-            height: 100vh;
+            flex: 1;
             max-width: 1400px;
             margin: 0 auto;
+            width: 100%;
+            overflow: hidden;
         }
 
         /* Header */
@@ -103,6 +111,13 @@
 
         /* Chat Interface (for language models) */
         .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: row;
+            overflow: hidden;
+        }
+        
+        .chat-main {
             flex: 1;
             display: flex;
             flex-direction: column;
@@ -172,19 +187,28 @@
         }
 
         /* Input Area */
+        .input-panel {
+            width: 300px;
+            display: flex;
+            flex-direction: column;
+            background-color: var(--bg-secondary);
+            border-left: 1px solid var(--border);
+            padding: 0.75rem;
+            gap: 0.75rem;
+        }
+        
         .input-container {
             display: flex;
-            gap: 1rem;
-            padding: 1rem;
-            background-color: var(--bg-secondary);
-            border-radius: 8px;
+            flex-direction: column;
+            gap: 0.75rem;
+            flex: 1;
         }
 
         .input-wrapper {
-            flex: 1;
             display: flex;
             flex-direction: column;
             gap: 0.5rem;
+            flex: 1;
         }
 
         .input-textarea {
@@ -209,8 +233,7 @@
 
         .input-controls {
             display: flex;
-            justify-content: space-between;
-            align-items: center;
+            flex-direction: column;
             gap: 0.5rem;
         }
         
@@ -229,9 +252,11 @@
             cursor: pointer;
             display: flex;
             align-items: center;
+            justify-content: center;
             gap: 0.3rem;
             font-size: 0.9rem;
             transition: background-color 0.2s;
+            width: 100%;
         }
         
         .image-upload-btn:hover {
@@ -242,7 +267,6 @@
             display: flex;
             gap: 0.5rem;
             align-items: center;
-            margin-right: auto;
         }
         
         .mode-btn {
@@ -254,6 +278,8 @@
             cursor: pointer;
             font-size: 0.85rem;
             transition: all 0.2s;
+            flex: 1;
+            text-align: center;
         }
         
         .mode-btn.active {
@@ -314,11 +340,12 @@
             background-color: var(--accent);
             color: white;
             border: none;
-            padding: 0.75rem 1.5rem;
+            padding: 0.6rem 1rem;
             border-radius: 4px;
             cursor: pointer;
             font-weight: 500;
             transition: background-color 0.2s;
+            width: 100%;
         }
 
         .send-btn:hover {
@@ -533,6 +560,22 @@
                 width: 95%;
                 margin: 2% auto;
             }
+            
+            .chat-container {
+                flex-direction: column;
+            }
+            
+            .input-panel {
+                width: 100%;
+                border-left: none;
+                border-top: 1px solid var(--border);
+                max-height: 200px;
+            }
+            
+            .chat-main {
+                flex: 1;
+                min-height: 0;
+            }
         }
 
         /* Scrollbar */
@@ -556,56 +599,61 @@
     </style>
 </head>
 <body>
-    <div class="header">
-        <div class="model-info">
-            <h1 class="model-name" id="modelName">Loading...</h1>
-            <div class="model-status">
-                <span class="status-indicator"></span>
-                <span id="modelStatus">Initializing</span>
+    <div class="app-container">
+        <div class="header">
+            <div class="model-info">
+                <h1 class="model-name" id="modelName">Loading...</h1>
+                <div class="model-status">
+                    <span class="status-indicator"></span>
+                    <span id="modelStatus">Initializing</span>
+                </div>
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+                <button class="settings-btn" onclick="newSession()">📝 New</button>
+                <select class="settings-btn" id="sessionSelect" onchange="loadSession(this.value)" style="min-width: 120px;">
+                    <option value="default">Default</option>
+                </select>
+                <button class="settings-btn" onclick="openSettings()">⚙️ Settings</button>
             </div>
         </div>
-        <div style="display: flex; gap: 0.5rem;">
-            <button class="settings-btn" onclick="newSession()">📝 New</button>
-            <select class="settings-btn" id="sessionSelect" onchange="loadSession(this.value)" style="min-width: 120px;">
-                <option value="default">Default</option>
-            </select>
-            <button class="settings-btn" onclick="openSettings()">⚙️ Settings</button>
-        </div>
-    </div>
 
-    <div class="container">
+        <div class="container">
         <main class="main-content">
             <!-- Chat Interface -->
             <div class="chat-container" id="chatInterface">
-                <div class="messages-container" id="messages"></div>
-                <div class="input-container">
-                    <div class="input-wrapper">
-                        <div class="uploaded-images" id="uploadedImages" style="display: none;"></div>
-                        <textarea 
-                            class="input-textarea" 
-                            id="userInput" 
-                            placeholder="Type your message..."
-                            onkeydown="handleKeyPress(event)"
-                        ></textarea>
-                        <div class="input-controls">
-                            <div class="mode-toggle" id="modeToggle" style="display: none;">
-                                <button class="mode-btn active" id="chatModeBtn" onclick="setMode('chat')">💬 Chat</button>
-                                <button class="mode-btn" id="drawModeBtn" onclick="setMode('draw')">🎨 Draw</button>
-                            </div>
-                            <div class="image-upload-container" id="imageUploadContainer" style="display: none;">
-                                <input type="file" id="imageInput" accept="image/*" multiple style="display: none;" onchange="handleImageUpload(event)">
-                                <button class="image-upload-btn" onclick="document.getElementById('imageInput').click()">
-                                    📷 Add Image
-                                </button>
-                                <span class="token-counter" id="tokenCounter">0 tokens</span>
-                            </div>
-                            <span class="token-counter" id="tokenCounterText" style="display: none;">0 tokens</span>
-                            <label style="display: none;" id="reasoningModeLabel">
-                                <input type="checkbox" id="reasoningMode"> Reasoning mode
-                            </label>
-                        </div>
+                <div class="chat-main">
+                    <div class="messages-container" id="messages"></div>
+                </div>
+                <div class="input-panel">
+                    <div class="mode-toggle" id="modeToggle" style="display: none;">
+                        <button class="mode-btn active" id="chatModeBtn" onclick="setMode('chat')">💬 Chat</button>
+                        <button class="mode-btn" id="drawModeBtn" onclick="setMode('draw')">🎨 Draw</button>
                     </div>
-                    <button class="send-btn" id="sendBtn" onclick="sendMessage()">Send</button>
+                    <div class="input-container">
+                        <div class="input-wrapper">
+                            <div class="uploaded-images" id="uploadedImages" style="display: none;"></div>
+                            <textarea 
+                                class="input-textarea" 
+                                id="userInput" 
+                                placeholder="Type your message..."
+                                onkeydown="handleKeyPress(event)"
+                            ></textarea>
+                            <div class="input-controls">
+                                <div class="image-upload-container" id="imageUploadContainer" style="display: none;">
+                                    <input type="file" id="imageInput" accept="image/*" multiple style="display: none;" onchange="handleImageUpload(event)">
+                                    <button class="image-upload-btn" onclick="document.getElementById('imageInput').click()">
+                                        📷 Add Image
+                                    </button>
+                                </div>
+                                <span class="token-counter" id="tokenCounter">0 tokens</span>
+                                <span class="token-counter" id="tokenCounterText" style="display: none;">0 tokens</span>
+                                <label style="display: none;" id="reasoningModeLabel">
+                                    <input type="checkbox" id="reasoningMode"> Reasoning mode
+                                </label>
+                            </div>
+                        </div>
+                        <button class="send-btn" id="sendBtn" onclick="sendMessage()">Send</button>
+                    </div>
                 </div>
             </div>
 
@@ -1554,5 +1602,6 @@
             loadSession('default');
         };
     </script>
+    </div>
 </body>
 </html>
