@@ -614,8 +614,11 @@
             let imagesToShow = uploadedImages;
             let usingHistoryImage = false;
             
-            // In vision mode, if no new images, check for images in history
-            if (currentMode === 'vision' && uploadedImages.length === 0) {
+            // If no new images, check for images in history (for vision or auto mode with multimodal)
+            if (uploadedImages.length === 0 && 
+                (currentMode === 'vision' || 
+                 (currentMode === 'auto' && (modelInfo.model_family === 'multimodal' || 
+                                            modelInfo.capabilities.supports_multimodal)))) {
                 for (let i = messages.length - 1; i >= 0; i--) {
                     if (messages[i].role === 'user' && messages[i].images && messages[i].images.length > 0) {
                         imagesToShow = messages[i].images;
@@ -625,7 +628,9 @@
                 }
             }
             
-            if (imagesToShow.length > 0 && (currentMode === 'vision' || currentMode === 'multimodal' || currentMode === 'analyze')) {
+            if (imagesToShow.length > 0 && (currentMode === 'vision' || currentMode === 'multimodal' || currentMode === 'analyze' ||
+                                            (currentMode === 'auto' && (modelInfo.model_family === 'multimodal' || 
+                                                                       modelInfo.capabilities.supports_multimodal)))) {
                 const imageContainer = document.createElement('div');
                 imageContainer.style.marginLeft = '40px';
                 imageContainer.style.marginTop = '10px';
@@ -678,8 +683,11 @@
                 // Add images if present (from current upload or history)
                 let imagesToSend = [...uploadedImages];
                 
-                // In vision mode, check if there are images in message history
-                if (currentMode === 'vision' && imagesToSend.length === 0) {
+                // In vision mode or auto mode for multimodal models, check if there are images in message history
+                if (imagesToSend.length === 0 && 
+                    (currentMode === 'vision' || 
+                     (currentMode === 'auto' && (modelInfo.model_family === 'multimodal' || 
+                                                modelInfo.capabilities.supports_multimodal)))) {
                     // Look for the most recent user message with images
                     for (let i = messages.length - 1; i >= 0; i--) {
                         if (messages[i].role === 'user' && messages[i].images && messages[i].images.length > 0) {
@@ -725,10 +733,14 @@
                 
                 // Save to message history (except for image generation)
                 if (currentMode !== 'image') {
-                    // For vision mode, save the message with image reference
+                    // Save the message with image reference if images were uploaded
                     const userMessage = { role: 'user', content: prompt };
-                    if (currentMode === 'vision' && uploadedImages.length > 0) {
-                        // Store image data with the message for vision mode
+                    // Save images in context for vision mode or multimodal models in auto mode
+                    if (uploadedImages.length > 0 && 
+                        (currentMode === 'vision' || 
+                         (currentMode === 'auto' && (modelInfo.model_family === 'multimodal' || 
+                                                     modelInfo.capabilities.supports_multimodal)))) {
+                        // Store image data with the message
                         userMessage.images = [...uploadedImages];
                     }
                     messages.push(userMessage);

@@ -198,21 +198,14 @@ class QwenVLHandler(MultimodalHandler):
         
         # Format input for Qwen VL
         if pil_images:
-            # For vision mode, create a simple single-turn conversation
-            if kwargs.get('mode') == 'vision':
-                # Simple format for vision mode - no system message, no history
-                messages = [{
-                    'role': 'user',
-                    'content': text or 'What is in this image?'
-                }]
-            else:
-                # Standard format with multimodal content
-                messages = [{
-                    'role': 'user',
-                    'content': [
-                        {'type': 'text', 'text': text or 'What is in this image?'}
-                    ] + [{'type': 'image'} for _ in pil_images]
-                }]
+            # Always use multimodal content format when we have images
+            # This ensures image tokens are properly included
+            messages = [{
+                'role': 'user',
+                'content': [
+                    {'type': 'text', 'text': text or 'What is in this image?'}
+                ] + [{'type': 'image'} for _ in pil_images]
+            }]
             
             # Apply chat template if available
             if hasattr(processor, 'apply_chat_template'):
