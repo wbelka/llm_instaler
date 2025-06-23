@@ -8,7 +8,6 @@ including the Deepseek Janus models.
 import logging
 from typing import List, Dict, Any, Optional, Tuple, Union
 from pathlib import Path
-import torch
 
 from handlers.base import BaseHandler
 from handlers.transformer import TransformerHandler
@@ -534,9 +533,13 @@ Note: This is a large package and may take some time to install.
             raise ValueError("Model and processor required for multimodal processing")
         
         # Clear GPU cache for memory efficiency
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+        except ImportError:
+            pass
         
         # Resize images for memory efficiency
         if images:
@@ -591,6 +594,7 @@ Note: This is a large package and may take some time to install.
             'use_cache': True
         }
         
+        import torch
         with torch.no_grad():
             outputs = model.generate(**inputs, **generation_kwargs)
         

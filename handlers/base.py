@@ -8,7 +8,6 @@ management, and parameter configuration.
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Tuple
 import logging
-import torch
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +118,13 @@ class BaseHandler(ABC):
         """
         model_kwargs = {}
         
+        # Import torch only when needed
+        try:
+            import torch
+        except ImportError:
+            # Return defaults if torch not available
+            return model_kwargs, 'float16'
+        
         # Handle quantization dtype
         if dtype == 'int8' or load_in_8bit:
             load_in_8bit = True
@@ -179,12 +185,16 @@ class BaseHandler(ABC):
         if device == 'auto':
             config['device_map'] = 'auto'
             # Calculate available GPU memory
-            if torch.cuda.is_available():
-                gpu_memory = torch.cuda.get_device_properties(0).total_memory
-                usable_memory = int(gpu_memory * memory_fraction)
-                memory_gb = usable_memory / (1024**3)
-                config['max_memory'] = {0: f"{memory_gb:.1f}GB"}
-                logger.info(f"Using {memory_gb:.1f}GB of GPU memory for model loading")
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    gpu_memory = torch.cuda.get_device_properties(0).total_memory
+                    usable_memory = int(gpu_memory * memory_fraction)
+                    memory_gb = usable_memory / (1024**3)
+                    config['max_memory'] = {0: f"{memory_gb:.1f}GB"}
+                    logger.info(f"Using {memory_gb:.1f}GB of GPU memory for model loading")
+            except ImportError:
+                pass
         elif device != 'cpu':
             config['device_map'] = {'': device}
             
