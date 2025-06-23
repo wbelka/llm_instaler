@@ -1,8 +1,5 @@
 """Tests for utility functions."""
 
-import pytest
-from pathlib import Path
-
 from core.utils import (
     format_size, format_time, safe_model_name,
     check_system_requirements, calculate_model_size

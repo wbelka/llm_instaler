@@ -12,31 +12,31 @@ from core.checker import ModelRequirements
 
 class TransformerHandler(BaseHandler):
     """Handler for transformer-based language models."""
-    
+
     def analyze(self) -> ModelRequirements:
         """Analyze transformer model requirements.
-        
+
         Returns:
             ModelRequirements object with analyzed data.
         """
         requirements = ModelRequirements()
-        
+
         # Set model type and family
         requirements.model_type = "transformer"
         requirements.model_family = "language-model"
         requirements.primary_library = "transformers"
-        
+
         # Base dependencies
         requirements.base_dependencies = self.get_dependencies()
-        
+
         # Special dependencies from config
         config = self.model_info.get('config', {})
         if config.get('_attn_implementation') == 'flash_attention_2':
             requirements.special_dependencies.append('flash-attn')
-        
+
         # Optional dependencies
         requirements.optional_dependencies = ['flash-attn', 'deepspeed', 'bitsandbytes']
-        
+
         # Memory requirements
         model_size = self._estimate_model_size()
         requirements.disk_space_gb = model_size
@@ -45,27 +45,27 @@ class TransformerHandler(BaseHandler):
             "recommended": model_size * 2,
             "optimal": model_size * 3,
         }
-        
+
         # Capabilities
         requirements.capabilities = self.get_model_capabilities()
-        
+
         return requirements
-    
+
     def _estimate_model_size(self) -> float:
         """Estimate model size in GB."""
         # Use model_size from info if available
         if 'model_size' in self.model_info:
             return self.model_info['model_size']
-            
+
         # Otherwise estimate from config
         config = self.model_info.get('config', {})
         hidden_size = config.get('hidden_size', 4096)
         num_layers = config.get('num_hidden_layers', 32)
         vocab_size = config.get('vocab_size', 32000)
-        
+
         # Rough estimation in billions of parameters
         params_b = (hidden_size * hidden_size * 4 * num_layers + vocab_size * hidden_size) / 1e9
-        
+
         # Convert to GB (assuming fp16)
         return params_b * 2
 
@@ -77,7 +77,7 @@ class TransformerHandler(BaseHandler):
         """
         base_deps = [
             'transformers>=4.36.0',
-            'torch>=2.0.0',
+            'torch>=2.6.0',
             'accelerate>=0.25.0',
             'sentencepiece>=0.1.99',  # For many tokenizers
             'protobuf>=3.20.0',       # For some models
@@ -303,8 +303,8 @@ class TransformerHandler(BaseHandler):
         # Get context length
         config = self.model_info.get('config', {})
         max_length = config.get('max_position_embeddings',
-                              config.get('max_sequence_length',
-                                       config.get('n_positions', 2048)))
+                                config.get('max_sequence_length',
+                                           config.get('n_positions', 2048)))
         capabilities['max_context_length'] = max_length
 
         return capabilities

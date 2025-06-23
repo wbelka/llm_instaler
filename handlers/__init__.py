@@ -22,7 +22,7 @@ def get_handler_class(model_info: Dict[str, Any]) -> Type[BaseHandler]:
     """
     model_family = model_info.get('model_family', '')
     model_type = model_info.get('model_type', '')
-    handler_class_name = model_info.get('handler_class', '')
+    # handler_class_name = model_info.get('handler_class', '')  # Reserved for future use
 
     # Map model families to handler modules
     handler_map = {

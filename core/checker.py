@@ -128,6 +128,7 @@ class ModelChecker:
 
             # Store model info for installer
             self._last_model_info = requirements.__dict__.copy()
+            self._last_model_info['model_id'] = model_id
 
             # Add compatibility result to requirements
             # Find best compatible option

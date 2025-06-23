@@ -4,7 +4,6 @@ This module provides common utilities for logging, system checks,
 formatting, and file operations.
 """
 
-import os
 import sys
 import logging
 import shutil
@@ -19,7 +18,6 @@ from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 from rich.panel import Panel
-from rich.syntax import Syntax
 
 from core.config import get_config
 

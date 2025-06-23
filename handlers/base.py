@@ -48,12 +48,12 @@ class BaseHandler(ABC):
     @abstractmethod
     def analyze(self):
         """Analyze model and return its requirements.
-        
+
         Returns:
             ModelRequirements object containing all detected requirements.
         """
         raise NotImplementedError("Subclasses must implement analyze()")
-    
+
     @abstractmethod
     def load_model(self, model_path: str, **kwargs):
         """Load model from the specified path with optimal parameters.

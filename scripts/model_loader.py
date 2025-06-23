@@ -8,8 +8,10 @@ import sys
 import os
 import json
 import logging
-from typing import Dict, Any, Optional, Tuple, Union
-from pathlib import Path
+from typing import Dict, Any, Optional, Tuple
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 # Add current directory to path for local imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -33,16 +35,20 @@ def get_handler(model_info: Dict[str, Any]):
         handler_class = registry.get_handler_for_model(model_info)
 
         if handler_class:
+            logger.info(f"Found handler class: {handler_class.__name__}")
             return handler_class(model_info)
         else:
             # No handler found, will use fallback loading
+            logger.warning(f"No handler found for model type: {model_info.get('model_type', 'unknown')}")
             return None
 
-    except ImportError:
+    except ImportError as e:
         # Handlers not available, will use fallback loading
+        logger.error(f"ImportError getting handler: {e}")
         return None
-    except Exception:
+    except Exception as e:
         # Error getting handler, will use fallback loading
+        logger.error(f"Error getting handler: {e}")
         return None
 
 
@@ -71,9 +77,15 @@ def load_model(
     """
     # Try to get handler
     handler = get_handler(model_info)
-
+    
+    # Log handler information for debugging
+    logger.info(f"Model type: {model_info.get('model_type', 'unknown')}")
+    logger.info(f"Model family: {model_info.get('model_family', 'unknown')}")
+    logger.info(f"Handler found: {handler is not None}")
+    
     if handler:
         # Use handler to load model
+        logger.info(f"Using handler: {handler.__class__.__name__}")
         return handler.load_model(
             model_path=model_path,
             device=device,
@@ -236,7 +248,7 @@ def _load_diffusers_model(
         with open(model_index_path, 'r') as f:
             model_index = json.load(f)
             pipeline_class_name = model_index.get("_class_name", None)
-            
+
             if pipeline_class_name:
                 # Try to get the specific pipeline class
                 try:

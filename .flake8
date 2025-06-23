@@ -1,0 +1,24 @@
+[flake8]
+max-line-length = 120
+exclude = 
+    .venv,
+    venv,
+    node_modules,
+    __pycache__,
+    .git,
+    .tox,
+    dist,
+    build,
+    *.egg,
+    .cache,
+    .pytest_cache
+ignore = 
+    # Allow lambda assignments (E731)
+    E731,
+    # Line break after binary operator (style preference)
+    W504
+per-file-ignores =
+    # Allow imports at module level in __init__.py files
+    __init__.py:F401
+statistics = True
+count = True

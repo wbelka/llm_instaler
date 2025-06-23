@@ -4,7 +4,7 @@ This module manages the registration and ordering of model detectors,
 allowing the system to determine the appropriate handler for any model.
 """
 
-from typing import List, Type, Optional, Dict, Any
+from typing import List, Optional, Dict, Any
 import importlib
 import inspect
 from pathlib import Path
@@ -52,7 +52,7 @@ class DetectorRegistry:
                 for name, obj in inspect.getmembers(module):
                     if (inspect.isclass(obj) and
                         issubclass(obj, BaseDetector) and
-                        obj != BaseDetector):
+                            obj != BaseDetector):
                         # Create instance and register
                         try:
                             detector_instance = obj()

@@ -194,6 +194,8 @@ class ConfigDetector(BaseDetector):
             return 'audio-craft', 'audio-generation'
         elif model_type == 'clip':
             return 'clip', 'multimodal'
+        elif model_type == 'multi_modality':
+            return 'multi_modality', 'multimodal'
 
         # Check for vision + text configs (multimodal)
         if 'vision_config' in config and 'text_config' in config:

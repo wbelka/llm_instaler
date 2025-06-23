@@ -5,7 +5,6 @@ a unified interface for interacting with any installed model.
 """
 
 import os
-import sys
 import json
 import argparse
 import logging
@@ -140,6 +139,7 @@ async def startup_event():
         DTYPE = args.dtype
 
         # Load model
+        logger.info(f"Loading model with info: model_type={MODEL_INFO.get('model_type')}, model_family={MODEL_INFO.get('model_family')}")
         MODEL, TOKENIZER = load_model(
             MODEL_INFO,
             device=args.device,
@@ -194,7 +194,7 @@ async def get_model_info():
     # Add UI-specific capabilities
     capabilities = MODEL_INFO.get("capabilities", {})
     capabilities["is_video_model"] = model_family == "video-generation" or 'video' in model_id
-    
+
     # Add size recommendations for video models
     if capabilities["is_video_model"]:
         capabilities["recommended_sizes"] = {
@@ -222,8 +222,16 @@ async def generate(request: GenerateRequest):
         raise HTTPException(status_code=503, detail="Model not loaded")
 
     try:
+        # Log request for debugging
+        logger.info(f"Received request: prompt='{request.prompt[:50] if request.prompt else None}...', "
+                    f"messages={type(request.messages).__name__ if hasattr(request, 'messages') else 'no attr'}, "
+                    f"messages_value={request.messages if hasattr(request, 'messages') else 'N/A'}, "
+                    f"image_data={'present' if hasattr(request, 'image_data') and request.image_data else 'none'}")
+        
         model_family = MODEL_INFO.get("model_family", "")
         model_type = MODEL_INFO.get("model_type", "")
+        
+        logger.info(f"Model family: {model_family}, Model type: {model_type}")
 
         # Text generation models
         if model_family in ["language-model", "text-classifier"]:
@@ -256,7 +264,9 @@ async def generate(request: GenerateRequest):
             )
 
     except Exception as e:
+        import traceback
         logger.error(f"Generation error: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -409,7 +419,7 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
 
     if not request.prompt:
         raise HTTPException(status_code=400, detail="No prompt provided")
-    
+
     # Log incoming request parameters
     logger.info(f"Received generation request: width={request.width}, height={request.height}, "
                 f"steps={request.num_inference_steps}, guidance={request.guidance_scale}, "
@@ -457,10 +467,15 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
         # Default to smaller sizes for video to avoid CUDA errors
         gen_kwargs["width"] = min(request.width, 512)  # Allow up to 512 for video
         gen_kwargs["height"] = min(request.height, 512)
-        
+
         # Log if we're limiting the size
         if request.width > 512 or request.height > 512:
-            logger.info(f"Limiting video size from {request.width}x{request.height} to {gen_kwargs['width']}x{gen_kwargs['height']}")
+            logger.info(
+                f"Limiting video size from {
+                    request.width}x{
+                    request.height} to {
+                    gen_kwargs['width']}x{
+                    gen_kwargs['height']}")
 
         # Add num_frames if the model supports it
         gen_kwargs["num_frames"] = request.num_frames
@@ -490,7 +505,11 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
                 gen_kwargs["width"] = 128
                 gen_kwargs["height"] = 128
                 gen_kwargs["num_frames"] = 8
-                logger.info(f"Retrying with reduced params: {gen_kwargs['width']}x{gen_kwargs['height']}, {gen_kwargs['num_frames']} frames")
+                logger.info(
+                    f"Retrying with reduced params: {
+                        gen_kwargs['width']}x{
+                        gen_kwargs['height']}, {
+                        gen_kwargs['num_frames']} frames")
                 try:
                     output = MODEL(**gen_kwargs)
                 except RuntimeError as e2:
@@ -524,40 +543,39 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
             frames = (frames * 255).astype(np.uint8)
 
         logger.info(f"Generated video with {len(frames)} frames")
-        
+
         # Try to create video file
         try:
             import cv2
             import tempfile
-            import os
-            
+
             # Create temporary file
             with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmp_file:
                 video_path = tmp_file.name
-            
+
             # Get video properties
             num_frames, height, width = frames.shape[:3]
             fps = 8  # Default FPS for generated videos
-            
+
             # Create video writer
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             out = cv2.VideoWriter(video_path, fourcc, fps, (width, height))
-            
+
             # Write frames
             for frame in frames:
                 # Convert RGB to BGR for OpenCV
                 bgr_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                 out.write(bgr_frame)
-            
+
             out.release()
-            
+
             # Read video file and encode to base64
             with open(video_path, 'rb') as f:
                 video_data = base64.b64encode(f.read()).decode()
-            
+
             # Clean up
             os.unlink(video_path)
-            
+
             return GenerateResponse(
                 video={
                     "data": video_data,
@@ -570,7 +588,7 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
                     "requested_size": f"{request.width}x{request.height}"
                 }
             )
-            
+
         except ImportError:
             logger.warning("OpenCV not available, returning frames as images")
             # Fallback: return frames as a sequence of images
@@ -581,7 +599,7 @@ async def generate_image(request: GenerateRequest) -> GenerateResponse:
                 img.save(buffered, format="PNG")
                 img_str = base64.b64encode(buffered.getvalue()).decode()
                 images.append(img_str)
-            
+
             return GenerateResponse(
                 video={
                     "frames": images,
@@ -640,7 +658,6 @@ async def generate_vision(request: GenerateRequest) -> GenerateResponse:
     """Generate for vision models (classification, detection)."""
     import torch
     from PIL import Image
-    import numpy as np
 
     # Vision models expect image input
     if not hasattr(request, 'image_data'):
@@ -728,9 +745,7 @@ async def generate_vision(request: GenerateRequest) -> GenerateResponse:
 async def generate_audio(request: GenerateRequest) -> GenerateResponse:
     """Generate for audio models (STT, TTS)."""
     import torch
-    import numpy as np
     import tempfile
-    import os
 
     try:
         import soundfile as sf
@@ -844,8 +859,19 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
     import torch
     from PIL import Image
 
+    # Get prompt from either prompt field or messages
+    prompt = request.prompt
+    if not prompt and request.messages:
+        # Convert messages to a single prompt
+        try:
+            prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in request.messages])
+        except (TypeError, AttributeError):
+            # Handle case where messages is not iterable
+            logger.warning("Messages provided but not in expected format")
+            prompt = None
+    
     # Multimodal models typically take both text and image inputs
-    if not request.prompt:
+    if not prompt:
         raise HTTPException(status_code=400, detail="No prompt provided")
 
     # Check if image is provided
@@ -859,51 +885,369 @@ async def generate_multimodal(request: GenerateRequest) -> GenerateResponse:
 
     # Process inputs
     if TOKENIZER:
-        if image:
-            inputs = TOKENIZER(
-                text=request.prompt,
-                images=image,
-                return_tensors="pt",
-                padding=True
-            )
+        # For Janus models, we need to prepare the conversation format
+        logger.info(f"TOKENIZER type: {type(TOKENIZER)}")
+        if hasattr(TOKENIZER, 'process_one') or 'janus' in str(type(TOKENIZER)).lower():
+            # Janus expects conversations format with specific role names
+            if request.messages:
+                # Convert standard roles to Janus format
+                conversations = []
+                # System message should be prepended to the first user message
+                system_content = None
+                
+                for msg in request.messages:
+                    role = msg['role']
+                    content = msg['content']
+                    
+                    if role.lower() == 'system':
+                        # Skip system messages entirely for Janus
+                        logger.info(f"Skipping system message: {content}")
+                        continue
+                    elif role.lower() == 'user':
+                        # Use proper Janus Pro format with angle brackets
+                        role = '<|User|>'
+                    elif role.lower() == 'assistant':
+                        # Use proper Janus Pro format with angle brackets
+                        role = '<|Assistant|>'
+                    
+                    conversations.append({
+                        "role": role,
+                        "content": content
+                    })
+                
+                # For Janus, we don't need to add empty Assistant message
+                # The model will generate from the last User message
+            else:
+                # Convert single prompt to conversation format
+                conversations = [
+                    {"role": "<|User|>", "content": prompt}
+                ]
+            
+            logger.info(f"Using Janus processor with conversations: {conversations}")
+            
+            # Log the actual prompt being sent
+            if conversations:
+                logger.info(f"Number of messages: {len(conversations)}")
+                for i, msg in enumerate(conversations):
+                    logger.info(f"Message {i}: role={msg.get('role')}, content={msg.get('content')[:100] if msg.get('content') else 'None'}...")
+            
+            try:
+                if image:
+                    # Janus expects a list of images
+                    inputs = TOKENIZER(
+                        conversations=conversations,
+                        images=[image],
+                        return_tensors="pt"
+                    )
+                else:
+                    # Pass empty list instead of None for images
+                    inputs = TOKENIZER(
+                        conversations=conversations,
+                        images=[],
+                        return_tensors="pt"
+                    )
+            except Exception as e:
+                logger.error(f"Error in Janus processor: {e}")
+                # Try alternative format
+                logger.info("Trying alternative format with single message")
+                try:
+                    # Try without images parameter when no image
+                    if image:
+                        inputs = TOKENIZER(
+                            conversations=[{"role": "user", "content": prompt}],
+                            images=[image],
+                            return_tensors="pt"
+                        )
+                    else:
+                        # Try calling without images parameter at all
+                        inputs = TOKENIZER(
+                            conversations=[{"role": "user", "content": prompt}],
+                            return_tensors="pt"
+                        )
+                except Exception as e2:
+                    logger.error(f"Alternative format also failed: {e2}")
+                    # Last resort - try text-only format
+                    if hasattr(TOKENIZER, 'tokenizer'):
+                        inputs = TOKENIZER.tokenizer(
+                            prompt,
+                            return_tensors="pt",
+                            padding=True
+                        )
+                    else:
+                        raise
         else:
-            inputs = TOKENIZER(
-                text=request.prompt,
-                return_tensors="pt",
-                padding=True
-            )
+            # Standard transformers processor
+            if image:
+                inputs = TOKENIZER(
+                    text=prompt,
+                    images=image,
+                    return_tensors="pt",
+                    padding=True
+                )
+            else:
+                inputs = TOKENIZER(
+                    text=prompt,
+                    return_tensors="pt",
+                    padding=True
+                )
     else:
         raise HTTPException(
             status_code=500,
             detail="No tokenizer/processor available for multimodal model"
         )
 
+    # Move inputs to device
     if hasattr(MODEL, "device"):
-        inputs = {k: v.to(MODEL.device) for k, v in inputs.items()}
+        if hasattr(inputs, "to"):
+            # For Janus BatchedVLChatProcessorOutput or similar objects
+            inputs = inputs.to(MODEL.device)
+        elif isinstance(inputs, dict):
+            # For standard dict inputs
+            inputs = {k: v.to(MODEL.device) if hasattr(v, "to") else v for k, v in inputs.items()}
+        else:
+            logger.warning(f"Unknown input type: {type(inputs)}")
 
     # Generate
+    # Clear any cached states for Janus models
+    if hasattr(MODEL, 'language_model'):
+        # Try different cache clearing methods
+        if hasattr(MODEL.language_model, 'clear_cache'):
+            MODEL.language_model.clear_cache()
+        if hasattr(MODEL.language_model, 'model') and hasattr(MODEL.language_model.model, 'clear_cache'):
+            MODEL.language_model.model.clear_cache()
+        # Clear past key values if they exist
+        if hasattr(MODEL.language_model, 'past_key_values'):
+            MODEL.language_model.past_key_values = None
+    
+    # Clear CUDA cache
+    import torch
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    
     with torch.no_grad():
         generation_kwargs = {
             "max_new_tokens": request.max_tokens,
             "temperature": request.temperature,
             "top_p": request.top_p,
             "do_sample": request.temperature > 0,
+            "repetition_penalty": 1.2,  # Add repetition penalty to avoid loops
         }
 
-        if hasattr(MODEL, "generate"):
-            outputs = MODEL.generate(**inputs, **generation_kwargs)
+        # Debug: Check what methods the model has
+        logger.info(f"Model type: {type(MODEL)}")
+        logger.info(f"Model has generate: {hasattr(MODEL, 'generate')}")
+        logger.info(f"Model has language_model: {hasattr(MODEL, 'language_model')}")
+        if hasattr(MODEL, "__class__"):
+            logger.info(f"Model class: {MODEL.__class__.__name__}")
+        
+        # For Janus models, the generate method is on the language_model attribute
+        actual_model = MODEL
+        if hasattr(MODEL, "language_model") and hasattr(MODEL.language_model, "generate"):
+            actual_model = MODEL.language_model
+            logger.info("Using MODEL.language_model for generation")
+        
+        if hasattr(actual_model, "generate"):
+            # For Janus models, we need to unpack the BatchedVLChatProcessorOutput
+            if hasattr(inputs, "__dict__") and not isinstance(inputs, dict):
+                # Get the actual model inputs from the processor output
+                # Janus typically uses these standard transformer inputs
+                model_inputs = {}
+                
+                # Standard transformer model inputs
+                # For Janus, inputs_embeds is the key input
+                standard_keys = ['inputs_embeds', 'input_ids', 'attention_mask', 'position_ids', 
+                                'pixel_values', 'image_positions', 'labels', 
+                                'token_type_ids']
+                
+                for key in standard_keys:
+                    if hasattr(inputs, key):
+                        value = getattr(inputs, key)
+                        if value is not None:
+                            model_inputs[key] = value
+                
+                # Also check for any tensor attributes not in standard list
+                for attr_name in dir(inputs):
+                    if (not attr_name.startswith("_") and 
+                        attr_name not in ['sft_format', 'to', 'conversations'] and
+                        attr_name not in model_inputs):
+                        attr_value = getattr(inputs, attr_name)
+                        if hasattr(attr_value, "shape"):  # It's a tensor
+                            model_inputs[attr_name] = attr_value
+                
+                logger.info(f"Unpacked inputs: {list(model_inputs.keys())}")
+                
+                # For Janus models, we need to handle inputs_embeds specially
+                if 'inputs_embeds' in model_inputs and hasattr(MODEL, 'language_model'):
+                    # Janus uses inputs_embeds directly
+                    logger.info("Using inputs_embeds for Janus generation")
+                    
+                    # Debug: log the shape of inputs_embeds
+                    if 'inputs_embeds' in model_inputs:
+                        logger.info(f"inputs_embeds shape: {model_inputs['inputs_embeds'].shape}")
+                    if 'input_ids' in model_inputs:
+                        logger.info(f"input_ids shape: {model_inputs['input_ids'].shape}")
+                        # Try to decode input_ids to see what's being sent
+                        if hasattr(TOKENIZER, 'tokenizer'):
+                            decoded = TOKENIZER.tokenizer.decode(model_inputs['input_ids'][0], skip_special_tokens=False)
+                            logger.info(f"Decoded input: {decoded[:500]}...")
+                            # Also log the raw token IDs
+                            logger.info(f"First 50 token IDs: {model_inputs['input_ids'][0][:50].tolist()}")
+                    
+                    generation_inputs = {
+                        'inputs_embeds': model_inputs['inputs_embeds'],
+                        'attention_mask': model_inputs.get('attention_mask'),
+                        'pad_token_id': TOKENIZER.tokenizer.eos_token_id if hasattr(TOKENIZER, 'tokenizer') and hasattr(TOKENIZER.tokenizer, 'eos_token_id') else None,
+                        'bos_token_id': TOKENIZER.tokenizer.bos_token_id if hasattr(TOKENIZER, 'tokenizer') and hasattr(TOKENIZER.tokenizer, 'bos_token_id') else None,
+                        'eos_token_id': TOKENIZER.tokenizer.eos_token_id if hasattr(TOKENIZER, 'tokenizer') and hasattr(TOKENIZER.tokenizer, 'eos_token_id') else None,
+                    }
+                    # Filter out None values
+                    generation_inputs = {k: v for k, v in generation_inputs.items() if v is not None}
+                    outputs = actual_model.generate(**generation_inputs, **generation_kwargs)
+                elif model_inputs:
+                    # For other models, filter out vision-specific inputs that generate doesn't accept
+                    text_only_inputs = {}
+                    for key in ['input_ids', 'attention_mask', 'position_ids', 'token_type_ids']:
+                        if key in model_inputs:
+                            text_only_inputs[key] = model_inputs[key]
+                    
+                    if text_only_inputs:
+                        outputs = actual_model.generate(**text_only_inputs, **generation_kwargs)
+                    else:
+                        outputs = actual_model.generate(**model_inputs, **generation_kwargs)
+                else:
+                    # Try with just input_ids if available
+                    if hasattr(inputs, "input_ids") and inputs.input_ids is not None:
+                        outputs = actual_model.generate(input_ids=inputs.input_ids, **generation_kwargs)
+                    else:
+                        raise ValueError(f"Could not extract valid inputs from {type(inputs)}")
+            else:
+                outputs = actual_model.generate(**inputs, **generation_kwargs)
 
             # Decode output
-            generated_text = TOKENIZER.decode(outputs[0], skip_special_tokens=True)
+            if hasattr(TOKENIZER, 'decode'):
+                generated_text = TOKENIZER.decode(outputs[0], skip_special_tokens=True)
+            elif hasattr(TOKENIZER, 'tokenizer') and hasattr(TOKENIZER.tokenizer, 'decode'):
+                # For Janus VLChatProcessor
+                # Get only the generated tokens (exclude input)
+                if hasattr(inputs, 'input_ids') and inputs.input_ids is not None:
+                    input_length = inputs.input_ids.shape[-1]
+                    generated_tokens = outputs[0][input_length:]
+                    generated_text = TOKENIZER.tokenizer.decode(generated_tokens, skip_special_tokens=True)
+                else:
+                    generated_text = TOKENIZER.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            else:
+                logger.warning("No decode method found, returning raw output")
+                generated_text = str(outputs[0].tolist())
 
-            # Remove input prompt from output if present
-            if request.prompt in generated_text:
-                generated_text = generated_text.replace(request.prompt, "").strip()
+            # Log the raw generated text
+            logger.info(f"Raw generated text length: {len(generated_text)}")
+            logger.info(f"Raw generated text preview: {generated_text[:200]}...")
+            
+            # For Janus models, extract only the assistant's response
+            if 'janus' in str(type(TOKENIZER)).lower() or hasattr(TOKENIZER, 'tokenizer'):
+                # The model outputs the entire conversation including the prompt
+                # We need to extract only the new generation
+                
+                # First, try to find where the assistant's response starts
+                # Look for the last occurrence of "assistant:" or "system:"
+                lower_text = generated_text.lower()
+                
+                # Find all occurrences of role markers (both lowercase and capitalized)
+                markers = []
+                role_variants = [
+                    'assistant:', 'system:', 'user:',
+                    'Assistant:', 'System:', 'User:',
+                    '<|assistant|>', '<|system|>', '<|user|>',
+                    '<|Assistant|>', '<|System|>', '<|User|>'
+                ]
+                
+                for role in role_variants:
+                    pos = 0
+                    search_text = generated_text if role[0].isupper() or '<' in role else lower_text
+                    while True:
+                        idx = search_text.find(role, pos)
+                        if idx == -1:
+                            break
+                        markers.append((idx, role, role.strip(':><|').lower()))
+                        pos = idx + 1
+                
+                # Sort markers by position
+                markers.sort(key=lambda x: x[0])
+                
+                # Find the last assistant/system response
+                if markers:
+                    # Find the last assistant marker specifically
+                    assistant_markers = [(idx, role, role_type) for idx, role, role_type in markers 
+                                       if role_type in ['assistant', 'system']]
+                    
+                    if assistant_markers:
+                        # Get the last assistant marker
+                        last_marker_idx, last_marker_role, _ = assistant_markers[-1]
+                        
+                        # Extract text after the last assistant role marker
+                        generated_text = generated_text[last_marker_idx + len(last_marker_role):].strip()
+                    else:
+                        # No assistant marker found, get text after last marker
+                        last_marker_idx, last_marker_role, _ = markers[-1]
+                        generated_text = generated_text[last_marker_idx + len(last_marker_role):].strip()
+                    
+                    # If there's another role marker after this, cut off there
+                    next_marker_pos = len(generated_text)
+                    remaining_lower = generated_text.lower()
+                    for role in ['user:', 'assistant:', 'system:']:
+                        idx = remaining_lower.find(role)
+                        if idx != -1 and idx < next_marker_pos:
+                            next_marker_pos = idx
+                    
+                    if next_marker_pos < len(generated_text):
+                        generated_text = generated_text[:next_marker_pos].strip()
+                
+                # Additional cleanup - remove any remaining context
+                if request.prompt and request.prompt in generated_text:
+                    # Find where the prompt ends and take everything after
+                    prompt_end = generated_text.find(request.prompt) + len(request.prompt)
+                    generated_text = generated_text[prompt_end:].strip()
 
+            # Additional cleanup for Janus - remove repetitive disclaimers
+            if 'janus' in str(type(TOKENIZER)).lower():
+                # Look for common disclaimer patterns
+                disclaimer_patterns = [
+                    "(Translation:",
+                    "(Note: This is a fictional",
+                    "This is a fictional assistant",
+                    "(Note:",
+                    "(Translation: This is a fictional"
+                ]
+                
+                for pattern in disclaimer_patterns:
+                    if pattern in generated_text:
+                        # Cut off at the first disclaimer
+                        generated_text = generated_text[:generated_text.find(pattern)].strip()
+                        break
+            
+            # Final logging
+            logger.info(f"Final generated text length: {len(generated_text)}")
+            logger.info(f"Final generated text: {generated_text[:200]}...")
+            
             return GenerateResponse(text=generated_text)
         else:
             # Non-generative multimodal model (e.g., CLIP)
-            outputs = MODEL(**inputs)
+            # For these models, we need to be careful about what we pass
+            if hasattr(inputs, "__dict__") and not isinstance(inputs, dict):
+                # Extract only valid inputs
+                model_inputs = {}
+                for key in ['input_ids', 'attention_mask', 'pixel_values', 'token_type_ids']:
+                    if hasattr(inputs, key):
+                        value = getattr(inputs, key)
+                        if value is not None:
+                            model_inputs[key] = value
+                
+                if model_inputs:
+                    outputs = MODEL(**model_inputs)
+                else:
+                    raise ValueError(f"Could not extract valid inputs from {type(inputs)}")
+            else:
+                outputs = MODEL(**inputs)
 
             # Return embeddings or similarity scores
             return GenerateResponse(
@@ -1016,9 +1360,8 @@ async def generate_video(request: GenerateRequest):
         )
 
     import torch
-    import numpy as np
     import tempfile
-    import os
+    import numpy as np
 
     if not request.prompt:
         raise HTTPException(status_code=400, detail="No prompt provided")

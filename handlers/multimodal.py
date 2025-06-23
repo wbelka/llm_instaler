@@ -11,7 +11,7 @@ from pathlib import Path
 
 from handlers.base import BaseHandler
 from handlers.transformer import TransformerHandler
-from core.utils import ModelRequirements
+from core.checker import ModelRequirements
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ class MultimodalHandler(BaseHandler):
             List of pip package specifications.
         """
         base_deps = [
-            'torch>=2.0.0',
+            'torch>=2.6.0',
             'transformers>=4.36.0',
             'Pillow>=9.0.0',
             'numpy',
@@ -61,10 +61,9 @@ class MultimodalHandler(BaseHandler):
         ]
 
         if self.is_janus_model:
-            # Add Janus-specific dependency
-            base_deps.append(
-                'janus @ git+https://github.com/deepseek-ai/Janus.git'
-            )
+            # Janus is a special dependency that should be installed separately
+            # Don't add it to base_deps
+            pass
 
         # Check for specific vision encoders
         config = self.model_info.get('config', {})
@@ -111,31 +110,40 @@ class MultimodalHandler(BaseHandler):
         Returns:
             ModelRequirements object.
         """
-        from core.utils import ModelRequirements
+        from core.checker import ModelRequirements
 
         # Get model size for memory estimation
         model_size_gb = self._estimate_model_size()
 
         # Base requirements
-        requirements = ModelRequirements(
-            model_type=self.model_type,
-            model_family=self.model_family,
-            minimum_memory_gb=max(16, model_size_gb * 2),
-            recommended_memory_gb=max(24, model_size_gb * 3),
-            minimum_gpu_memory_gb=max(12, model_size_gb * 1.5),
-            recommended_gpu_memory_gb=max(16, model_size_gb * 2),
-            requires_gpu=True,
-            supported_gpus=['nvidia_a100', 'nvidia_a6000', 'nvidia_rtx_4090',
-                            'nvidia_rtx_3090', 'nvidia_v100'],
-            python_version='>=3.8',
-            python_packages=self.get_dependencies(),
-            system_packages=self.get_system_dependencies(),
-            disk_space_gb=model_size_gb * 3,
-            supports_cpu_inference=False,
-            supports_quantization=True,
-            supported_quantization=['int8', 'int4'],
-            estimated_model_size_gb=model_size_gb
-        )
+        requirements = ModelRequirements()
+        requirements.model_type = self.model_type
+        requirements.model_family = self.model_family
+        requirements.primary_library = "transformers"
+        requirements.base_dependencies = self.get_dependencies()
+        requirements.special_dependencies = ['janus @ git+https://github.com/deepseek-ai/Janus.git'] if self.is_janus_model else []
+        requirements.optional_dependencies = []
+        requirements.disk_space_gb = model_size_gb * 3
+        requirements.memory_requirements = {
+            "min": max(16, model_size_gb * 2),
+            "recommended": max(24, model_size_gb * 3),
+            "gpu_min": max(12, model_size_gb * 1.5),
+            "gpu_recommended": max(16, model_size_gb * 2)
+        }
+        requirements.capabilities = {
+            "supports_text_generation": True,
+            "supports_image_generation": True,
+            "supports_chat": True,
+            "supports_cpu_inference": False,
+            "supports_quantization": True,
+            "supported_quantization": ["int8", "int4"],
+            "requires_gpu": True
+        }
+        requirements.special_config = {
+            "is_janus_model": self.is_janus_model,
+            "supported_gpus": ['nvidia_a100', 'nvidia_a6000', 'nvidia_rtx_4090',
+                              'nvidia_rtx_3090', 'nvidia_v100']
+        }
 
         return requirements
 
@@ -263,8 +271,14 @@ class MultimodalHandler(BaseHandler):
                     )
                 )
 
-            # Load model
-            model = AutoModelForCausalLM.from_pretrained(**model_kwargs)
+            # Load model - try to use the Janus-specific model class if available
+            try:
+                # For Janus models, we might need to use their specific model class
+                from janus.models import MultiModalityCausalLM
+                model = MultiModalityCausalLM.from_pretrained(**model_kwargs)
+            except ImportError:
+                # Fallback to AutoModelForCausalLM
+                model = AutoModelForCausalLM.from_pretrained(**model_kwargs)
 
             # Move to device if not quantized
             if not (load_in_8bit or load_in_4bit):
@@ -412,7 +426,8 @@ class MultimodalHandler(BaseHandler):
         """
         capabilities = {
             'supports_streaming': True,
-            'supports_reasoning': True,
+            'supports_reasoning': False,  # Janus doesn't support o1-style reasoning
+            # Note: Janus Pro models use role names with angle brackets: <|User|> and <|Assistant|>
             'supports_system_prompt': True,
             'supports_multimodal': True,
             'supports_batch_inference': True,
@@ -427,7 +442,13 @@ class MultimodalHandler(BaseHandler):
                 # Janus can generate images
                 'output_modalities': ['text', 'image'],
                 'supports_image_generation': True,
-                'image_resolution': 384
+                'image_resolution': 384,
+                # Janus Pro models use specific role format
+                'role_format': {
+                    'user': '<|User|>',
+                    'assistant': '<|Assistant|>',
+                    'note': 'Janus Pro models require angle brackets in role names'
+                }
             })
 
         # Add video support if applicable

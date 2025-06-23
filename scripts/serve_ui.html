@@ -676,7 +676,9 @@
                 document.getElementById('modelStatus').textContent = 'Ready';
                 
                 // Show appropriate interface
-                if (modelInfo.model_family === 'language-model') {
+                if (modelInfo.model_family === 'language-model' || 
+                    modelInfo.model_family === 'multimodal' || 
+                    modelInfo.model_family === 'vision-language') {
                     document.getElementById('chatInterface').style.display = 'flex';
                     
                     // Check for reasoning support

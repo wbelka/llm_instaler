@@ -3,6 +3,7 @@
 
 from huggingface_hub import HfApi
 
+
 def list_repository_files(repo_id="stabilityai/sd-turbo"):
     """List all files in the repository with their paths and sizes."""
     api = HfApi()
@@ -13,7 +14,7 @@ def list_repository_files(repo_id="stabilityai/sd-turbo"):
 
         print(f"Repository: {repo_id}")
         print(f"Total size: {repo_info.size_on_disk / (1024**3):.2f} GB")
-        print("\n" + "="*80 + "\n")
+        print("\n" + "=" * 80 + "\n")
 
         # Get all files
         files = api.list_repo_files(repo_id=repo_id, repo_type="model")
@@ -57,7 +58,7 @@ def list_repository_files(repo_id="stabilityai/sd-turbo"):
         print(f"Total calculated size: {total_size / (1024**3):.2f} GB")
 
         # Filter and show .safetensors and .bin files
-        print("\n" + "="*80 + "\n")
+        print("\n" + "=" * 80 + "\n")
         print("Model files (.safetensors and .bin):")
         print("-" * 80)
 
@@ -80,7 +81,7 @@ def list_repository_files(repo_id="stabilityai/sd-turbo"):
         print(f"Total model files size: {model_total / (1024**3):.2f} GB")
 
         # Show file count by type
-        print("\n" + "="*80 + "\n")
+        print("\n" + "=" * 80 + "\n")
         print("File count by extension:")
         print("-" * 80)
 
@@ -103,6 +104,7 @@ def list_repository_files(repo_id="stabilityai/sd-turbo"):
         print(f"Error accessing repository: {e}")
         import traceback
         traceback.print_exc()
+
 
 if __name__ == "__main__":
     list_repository_files()

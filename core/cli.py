@@ -177,11 +177,11 @@ def update(ctx: click.Context, model_dir: str):
 
     # Import here to avoid circular imports
     from core.installer import ModelInstaller
-    
+
     # Create installer and run update
     installer = ModelInstaller()
     success = installer.update_scripts(model_dir)
-    
+
     if not success:
         sys.exit(1)
 
@@ -205,7 +205,7 @@ def fix(ctx: click.Context, model_dir: str, reinstall: bool, fix_torch: bool, fi
 
     # Import here to avoid circular imports
     from core.installer import ModelInstaller
-    
+
     # Create installer and run fix
     installer = ModelInstaller()
     success = installer.fix_dependencies(
@@ -214,7 +214,7 @@ def fix(ctx: click.Context, model_dir: str, reinstall: bool, fix_torch: bool, fi
         fix_torch=fix_torch,
         fix_cuda=fix_cuda
     )
-    
+
     if not success:
         sys.exit(1)
 

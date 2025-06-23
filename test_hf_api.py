@@ -3,6 +3,7 @@
 
 from huggingface_hub import HfApi
 
+
 def test_model_info(model_id):
     api = HfApi()
 

@@ -35,7 +35,7 @@ class HandlerRegistry:
             self._handlers['text-classifier'] = TransformerHandler
         except ImportError:
             pass
-            
+
         try:
             from handlers.diffusion import DiffusionHandler
             self._handlers['diffusion'] = DiffusionHandler
@@ -44,14 +44,14 @@ class HandlerRegistry:
             self._handlers['text-to-video'] = DiffusionHandler
         except ImportError:
             pass
-            
+
         try:
             from handlers.embedding import EmbeddingHandler
             self._handlers['embedding'] = EmbeddingHandler
             self._handlers['text-embedding'] = EmbeddingHandler
         except ImportError:
             pass
-            
+
         try:
             from handlers.vision import VisionHandler
             self._handlers['vision'] = VisionHandler
@@ -59,7 +59,7 @@ class HandlerRegistry:
             self._handlers['object-detection'] = VisionHandler
         except ImportError:
             pass
-            
+
         try:
             from handlers.audio import AudioHandler
             self._handlers['audio'] = AudioHandler
@@ -67,7 +67,7 @@ class HandlerRegistry:
             self._handlers['text-to-speech'] = AudioHandler
         except ImportError:
             pass
-            
+
         try:
             from handlers.multimodal import MultimodalHandler
             self._handlers['multimodal'] = MultimodalHandler

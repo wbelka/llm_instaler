@@ -526,7 +526,7 @@ class ModelInstaller:
         # Install PyTorch first if needed
         if any('torch' in dep for dep in base_deps):
             if not self._install_pytorch(
-                pip_path, log_path, 
+                pip_path, log_path,
                 preserve_config=preserve_torch_config,
                 device_preference=device_preference
             ):
@@ -542,11 +542,11 @@ class ModelInstaller:
         if base_deps:
             try:
                 # Ensure transformers is always installed for diffusion models
-                if (hasattr(requirements, 'primary_library') and 
-                    requirements.primary_library == 'diffusers' and 
-                    'transformers' not in base_deps):
+                if (hasattr(requirements, 'primary_library') and
+                    requirements.primary_library == 'diffusers' and
+                        'transformers' not in base_deps):
                     base_deps.append('transformers')
-                
+
                 print_info(f"Installing base dependencies: {', '.join(base_deps)}")
                 subprocess.run(
                     [str(pip_path), "install"] + base_deps,
@@ -630,9 +630,9 @@ class ModelInstaller:
         return True
 
     def _install_pytorch(
-        self, 
-        pip_path: Path, 
-        log_path: Path, 
+        self,
+        pip_path: Path,
+        log_path: Path,
         preserve_config: bool = False,
         device_preference: str = "auto"
     ) -> bool:
@@ -656,7 +656,7 @@ class ModelInstaller:
                 # Use existing configuration
                 index_url = torch_info.get("index_url")
                 cuda_suffix = torch_info.get("cuda_suffix", "")
-                
+
                 print_info(
                     f"Preserving existing PyTorch configuration: "
                     f"{cuda_suffix or 'CPU'}"
@@ -687,11 +687,11 @@ class ModelInstaller:
 
         # Handle explicit device preference
         system = platform.system().lower()
-        
+
         if device_preference == "cpu":
             # Force CPU installation
             index_url = "https://download.pytorch.org/whl/cpu"
-            torch_cmd = ["torch", "torchvision", "torchaudio"]
+            torch_cmd = ["torch>=2.6.0", "torchvision", "torchaudio"]
             cuda_available = False
             cuda_version = None
             print_info("Installing CPU-only PyTorch as requested")
@@ -728,27 +728,28 @@ class ModelInstaller:
             if device_preference == "cuda" and not cuda_available:
                 print_warning("CUDA requested but not available, falling back to CPU")
                 index_url = "https://download.pytorch.org/whl/cpu"
-                torch_cmd = ["torch", "torchvision", "torchaudio"]
+                torch_cmd = ["torch>=2.6.0", "torchvision", "torchaudio"]
             elif cuda_available and cuda_version and device_preference != "mps":
                 # Map CUDA version to PyTorch index
                 if cuda_version.startswith("12"):
-                    index_url = "https://download.pytorch.org/whl/cu121"
-                    torch_cmd = ["torch", "torchvision", "torchaudio"]
+                    # Use CUDA 12.4 for torch 2.6+ support
+                    index_url = "https://download.pytorch.org/whl/cu124"
+                    torch_cmd = ["torch>=2.6.0", "torchvision", "torchaudio"]
                 elif cuda_version.startswith("11.8"):
                     index_url = "https://download.pytorch.org/whl/cu118"
-                    torch_cmd = ["torch", "torchvision", "torchaudio"]
+                    torch_cmd = ["torch>=2.6.0", "torchvision", "torchaudio"]
                 else:
                     # Default CUDA
                     index_url = "https://download.pytorch.org/whl/cu118"
-                    torch_cmd = ["torch", "torchvision", "torchaudio"]
+                    torch_cmd = ["torch>=2.6.0", "torchvision", "torchaudio"]
             elif system == "darwin" or device_preference == "mps":  # macOS
                 # MPS support
-                torch_cmd = ["torch", "torchvision", "torchaudio"]
+                torch_cmd = ["torch>=2.6.0", "torchvision", "torchaudio"]
                 index_url = None
             else:
                 # CPU only
                 index_url = "https://download.pytorch.org/whl/cpu"
-                torch_cmd = ["torch", "torchvision", "torchaudio"]
+                torch_cmd = ["torch>=2.6.0", "torchvision", "torchaudio"]
 
         try:
             print_info(f"Installing PyTorch for {system} "
@@ -789,6 +790,7 @@ class ModelInstaller:
         # First get torch and CUDA information
         torch_info = self._get_torch_info(pip_path)
 
+        index_url_opt = f" --index-url {torch_info['index_url']}" if torch_info.get('index_url') else ""
         special_instructions = {
             "mamba-ssm": f"""
 This model requires mamba-ssm which needs additional setup:
@@ -803,7 +805,7 @@ This model requires mamba-ssm which needs additional setup:
 3. Try manual installation:
    cd {{model_dir}}
    source .venv/bin/activate
-   pip install mamba-ssm --no-cache-dir{' --index-url ' + torch_info['index_url'] if torch_info.get('index_url') else ''}
+   pip install mamba-ssm --no-cache-dir{index_url_opt}
 """,
             "flash-attn": f"""
 This model uses Flash Attention for better performance.
@@ -815,7 +817,7 @@ Flash Attention requires:
 To install manually:
    cd {{model_dir}}
    source .venv/bin/activate
-   pip install flash-attn --no-build-isolation{' --index-url ' + torch_info['index_url'] if torch_info.get('index_url') else ''}
+   pip install flash-attn --no-build-isolation{index_url_opt}
 """,
             "causal-conv1d": """
 This dependency requires CUDA and compilation.
@@ -829,7 +831,7 @@ If installation fails, the model will still work with standard attention.
 To install manually:
    cd {{model_dir}}
    source .venv/bin/activate
-   pip install xformers{' --index-url ' + torch_info['index_url'] if torch_info.get('index_url') else ''}
+   pip install xformers{index_url_opt}
 """
         }
 
@@ -1200,17 +1202,20 @@ To install manually:
         )
 
         # Determine versions based on CUDA
-        if cuda_suffix == "cu121":
-            torch_version = "torch==2.5.1"
-            vision_version = "torchvision==0.20.1"
-            audio_version = "torchaudio==2.5.1"
+        # Use >= 2.6.0 for security fix (CVE-2025-32434)
+        if cuda_suffix == "cu121" or cuda_suffix.startswith("cu12"):
+            # Use cu124 for CUDA 12.x to get torch 2.6+
+            index_url = "https://download.pytorch.org/whl/cu124"
+            torch_version = "torch>=2.6.0"
+            vision_version = "torchvision"
+            audio_version = "torchaudio"
         elif cuda_suffix == "cu118":
-            torch_version = "torch==2.5.1"
-            vision_version = "torchvision==0.20.1"
-            audio_version = "torchaudio==2.5.1"
+            torch_version = "torch>=2.6.0"
+            vision_version = "torchvision"
+            audio_version = "torchaudio"
         else:
             # CPU or default
-            torch_version = "torch"
+            torch_version = "torch>=2.6.0"
             vision_version = "torchvision"
             audio_version = "torchaudio"
 
@@ -1333,15 +1338,27 @@ To install manually:
                 self._log_install(log_path, "INFO", "Copied detectors library")
 
             # Copy core utilities (only needed files)
-            core_utils_src = installer_root / "core" / "utils.py"
             core_dst = model_dir / "core"
             core_dst.mkdir(exist_ok=True)
 
+            # Copy utils.py
+            core_utils_src = installer_root / "core" / "utils.py"
             if core_utils_src.exists():
                 shutil.copy2(core_utils_src, core_dst / "utils.py")
-                # Create __init__.py
-                (core_dst / "__init__.py").touch()
-                self._log_install(log_path, "INFO", "Copied core utilities")
+
+            # Copy checker.py (needed by handlers)
+            core_checker_src = installer_root / "core" / "checker.py"
+            if core_checker_src.exists():
+                shutil.copy2(core_checker_src, core_dst / "checker.py")
+
+            # Copy config.py (needed by checker)
+            core_config_src = installer_root / "core" / "config.py"
+            if core_config_src.exists():
+                shutil.copy2(core_config_src, core_dst / "config.py")
+
+            # Create __init__.py
+            (core_dst / "__init__.py").touch()
+            self._log_install(log_path, "INFO", "Copied core modules")
 
             return True
 
@@ -1528,7 +1545,7 @@ except Exception as e:
         console.print("\nTo train/fine-tune:")
         console.print("  ./train.sh --data your_data.json")
 
-        console.print(f"\nLogs saved to: install.log")
+        console.print("\nLogs saved to: install.log")
 
     def _calculate_directory_size(self, directory: Path) -> int:
         """Calculate total size of a directory.
