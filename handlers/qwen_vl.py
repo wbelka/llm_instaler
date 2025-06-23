@@ -177,9 +177,22 @@ class QwenVLHandler(MultimodalHandler):
         except ImportError:
             pass
         
-        # Use base handler's image resizing for memory efficiency
+        # Handle images - check if resizing is disabled
         if images:
-            pil_images = self.resize_images_for_memory(images, max_size=1024)
+            if kwargs.get('disable_image_resize', False) or kwargs.get('mode') == 'vision':
+                # Don't resize images if disabled or in vision mode
+                pil_images = []
+                for img in images:
+                    if isinstance(img, str):
+                        # Decode base64
+                        img_data = base64.b64decode(img)
+                        pil_images.append(Image.open(BytesIO(img_data)))
+                    elif isinstance(img, Image.Image):
+                        pil_images.append(img)
+                logger.info("Image resizing disabled, using original images")
+            else:
+                # Use base handler's image resizing for memory efficiency
+                pil_images = self.resize_images_for_memory(images, max_size=1024)
         else:
             pil_images = []
         

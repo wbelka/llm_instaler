@@ -611,13 +611,36 @@
             
             // Show uploaded images in chat if any
             console.log('Current mode:', currentMode, 'Uploaded images:', uploadedImages.length);
-            if (uploadedImages.length > 0 && (currentMode === 'vision' || currentMode === 'multimodal' || currentMode === 'analyze')) {
+            let imagesToShow = uploadedImages;
+            let usingHistoryImage = false;
+            
+            // In vision mode, if no new images, check for images in history
+            if (currentMode === 'vision' && uploadedImages.length === 0) {
+                for (let i = messages.length - 1; i >= 0; i--) {
+                    if (messages[i].role === 'user' && messages[i].images && messages[i].images.length > 0) {
+                        imagesToShow = messages[i].images;
+                        usingHistoryImage = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (imagesToShow.length > 0 && (currentMode === 'vision' || currentMode === 'multimodal' || currentMode === 'analyze')) {
                 const imageContainer = document.createElement('div');
                 imageContainer.style.marginLeft = '40px';
                 imageContainer.style.marginTop = '10px';
                 imageContainer.style.marginBottom = '10px';
                 
-                uploadedImages.forEach((imgBase64, index) => {
+                if (usingHistoryImage) {
+                    const note = document.createElement('span');
+                    note.style.color = 'var(--info-color)';
+                    note.style.fontSize = '12px';
+                    note.textContent = '[Using image from context] ';
+                    imageContainer.appendChild(note);
+                    imageContainer.appendChild(document.createElement('br'));
+                }
+                
+                imagesToShow.forEach((imgBase64, index) => {
                     const img = document.createElement('img');
                     img.src = `data:image/jpeg;base64,${imgBase64}`;
                     img.style.maxWidth = '300px';
@@ -652,9 +675,22 @@
                     mode: currentMode
                 };
                 
-                // Add images if present
-                if (uploadedImages.length > 0) {
-                    requestBody.images = uploadedImages;
+                // Add images if present (from current upload or history)
+                let imagesToSend = [...uploadedImages];
+                
+                // In vision mode, check if there are images in message history
+                if (currentMode === 'vision' && imagesToSend.length === 0) {
+                    // Look for the most recent user message with images
+                    for (let i = messages.length - 1; i >= 0; i--) {
+                        if (messages[i].role === 'user' && messages[i].images && messages[i].images.length > 0) {
+                            imagesToSend = messages[i].images;
+                            break;
+                        }
+                    }
+                }
+                
+                if (imagesToSend.length > 0) {
+                    requestBody.images = imagesToSend;
                 }
                 
                 const response = await fetch('/generate', {
@@ -687,13 +723,19 @@
                     await typeText(responseLine, `[MODEL] ${data.text || data.answer || 'No response'}`);
                 }
                 
-                // Save to message history (except for image generation and vision modes)
-                if (currentMode !== 'image' && currentMode !== 'vision') {
-                    messages.push({ role: 'user', content: prompt });
+                // Save to message history (except for image generation)
+                if (currentMode !== 'image') {
+                    // For vision mode, save the message with image reference
+                    const userMessage = { role: 'user', content: prompt };
+                    if (currentMode === 'vision' && uploadedImages.length > 0) {
+                        // Store image data with the message for vision mode
+                        userMessage.images = [...uploadedImages];
+                    }
+                    messages.push(userMessage);
                     messages.push({ role: 'assistant', content: data.text || data.answer || '' });
                 }
                 
-                // Clear uploaded images
+                // Clear uploaded images (but they're saved in message history for vision mode)
                 uploadedImages = [];
                 document.getElementById('imagePreview').innerHTML = '';
                 

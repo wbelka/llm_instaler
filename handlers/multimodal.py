@@ -541,9 +541,13 @@ Note: This is a large package and may take some time to install.
         except ImportError:
             pass
         
-        # Resize images for memory efficiency
+        # Resize images for memory efficiency (unless disabled or in vision mode)
         if images:
-            images = self.resize_images_for_memory(images, max_size=kwargs.get('max_image_size', 1024))
+            if kwargs.get('disable_image_resize', False) or kwargs.get('mode') == 'vision':
+                # Keep original images in vision mode
+                pass
+            else:
+                images = self.resize_images_for_memory(images, max_size=kwargs.get('max_image_size', 1024))
         
         # Prepare vision mode input if needed
         mode = kwargs.get('mode')
