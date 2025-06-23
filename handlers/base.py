@@ -7,6 +7,10 @@ management, and parameter configuration.
 
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Tuple
+import logging
+import torch
+
+logger = logging.getLogger(__name__)
 
 
 class BaseHandler(ABC):
@@ -96,6 +100,127 @@ class BaseHandler(ABC):
             Tuple of (is_valid, error_message). error_message is None if valid.
         """
         raise NotImplementedError("Subclasses must implement validate_model_files()")
+    
+    def get_quantization_config(self, dtype: str, load_in_8bit: bool = False, 
+                               load_in_4bit: bool = False) -> Tuple[Dict[str, Any], torch.dtype]:
+        """Get quantization configuration based on dtype.
+        
+        This is a common method that can be used by all handlers to setup
+        quantization consistently.
+        
+        Args:
+            dtype: Requested dtype ('auto', 'int8', 'int4', 'float16', 'float32', 'bfloat16')
+            load_in_8bit: Force 8-bit quantization
+            load_in_4bit: Force 4-bit quantization
+            
+        Returns:
+            Tuple of (model_kwargs, torch_dtype) where model_kwargs contains
+            quantization config if needed
+        """
+        model_kwargs = {}
+        
+        # Handle quantization dtype
+        if dtype == 'int8' or load_in_8bit:
+            load_in_8bit = True
+            torch_dtype = torch.float16  # Base dtype for int8
+            logger.info("Enabling 8-bit quantization for memory efficiency")
+        elif dtype == 'int4' or load_in_4bit:
+            load_in_4bit = True  
+            torch_dtype = torch.float16  # Base dtype for int4
+            logger.info("Enabling 4-bit quantization for memory efficiency")
+        elif dtype == 'auto':
+            # Auto-detect best dtype
+            if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+                torch_dtype = torch.bfloat16
+            elif torch.cuda.is_available():
+                torch_dtype = torch.float16
+            else:
+                torch_dtype = torch.float32
+        else:
+            # Explicit dtype mapping
+            dtype_map = {
+                'float32': torch.float32,
+                'float16': torch.float16,
+                'bfloat16': torch.bfloat16
+            }
+            torch_dtype = dtype_map.get(dtype, torch.float16)
+        
+        # Add quantization config if needed
+        if load_in_8bit or load_in_4bit:
+            try:
+                from transformers import BitsAndBytesConfig
+                model_kwargs['quantization_config'] = BitsAndBytesConfig(
+                    load_in_8bit=load_in_8bit,
+                    load_in_4bit=load_in_4bit,
+                    bnb_4bit_compute_dtype=torch_dtype if load_in_4bit else None,
+                )
+                # Add bitsandbytes to dependencies if not present
+                if 'bitsandbytes' not in str(self.get_dependencies()):
+                    logger.warning("Model uses quantization but bitsandbytes not in dependencies")
+            except ImportError:
+                logger.warning("BitsAndBytesConfig not available, quantization disabled")
+                load_in_8bit = False
+                load_in_4bit = False
+        
+        return model_kwargs, torch_dtype
+    
+    def get_memory_config(self, device: str = 'auto', memory_fraction: float = 0.95) -> Dict[str, Any]:
+        """Get memory configuration for model loading.
+        
+        Args:
+            device: Device to use ('auto', 'cuda', 'cpu', etc.)
+            memory_fraction: Fraction of GPU memory to use (0.0-1.0)
+            
+        Returns:
+            Dictionary with device_map and max_memory settings
+        """
+        config = {}
+        
+        if device == 'auto':
+            config['device_map'] = 'auto'
+            # Calculate available GPU memory
+            if torch.cuda.is_available():
+                gpu_memory = torch.cuda.get_device_properties(0).total_memory
+                usable_memory = int(gpu_memory * memory_fraction)
+                memory_gb = usable_memory / (1024**3)
+                config['max_memory'] = {0: f"{memory_gb:.1f}GB"}
+                logger.info(f"Using {memory_gb:.1f}GB of GPU memory for model loading")
+        elif device != 'cpu':
+            config['device_map'] = {'': device}
+            
+        return config
+    
+    def extract_assistant_response(self, generated_text: str) -> str:
+        """Extract only the assistant's response from generated text.
+        
+        This is useful for models that output the full conversation format.
+        
+        Args:
+            generated_text: Full generated text that may include conversation format
+            
+        Returns:
+            Clean assistant response without role markers
+        """
+        # Look for assistant role markers
+        for marker in ['assistant\n', 'assistant:', 'Assistant\n', 'Assistant:']:
+            if marker in generated_text:
+                parts = generated_text.split(marker)
+                if len(parts) > 1:
+                    # Take everything after the last occurrence
+                    generated_text = parts[-1].strip()
+                    break
+        
+        # Remove any remaining role markers at the start
+        for marker in ['user\n', 'system\n', 'User\n', 'System\n', 'user:', 'system:', 'User:', 'System:']:
+            if generated_text.startswith(marker):
+                generated_text = generated_text[len(marker):].strip()
+        
+        # Remove any role marker that appears later (indicating next turn)
+        for marker in ['\nuser:', '\nsystem:', '\nassistant:', '\nUser:', '\nSystem:', '\nAssistant:']:
+            if marker in generated_text:
+                generated_text = generated_text.split(marker)[0].strip()
+        
+        return generated_text
 
     def get_model_capabilities(self) -> Dict[str, Any]:
         """Get model capabilities for UI/API adaptation.

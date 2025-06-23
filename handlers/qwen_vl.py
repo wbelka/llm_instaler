@@ -111,32 +111,8 @@ class QwenVLHandler(MultimodalHandler):
         load_in_8bit = kwargs.get('load_in_8bit', False)
         load_in_4bit = kwargs.get('load_in_4bit', False)
         
-        # Determine torch dtype
-        if dtype == 'auto':
-            # Qwen VL models typically use bfloat16
-            if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
-                torch_dtype = torch.bfloat16
-            elif torch.cuda.is_available():
-                torch_dtype = torch.float16
-            else:
-                torch_dtype = torch.float32
-        elif dtype in ['int8', 'int4']:
-            # Enable quantization for memory reduction
-            if dtype == 'int8':
-                load_in_8bit = True
-                torch_dtype = torch.float16  # Base dtype for int8
-                logger.info("Enabling 8-bit quantization for memory efficiency")
-            else:  # int4
-                load_in_4bit = True
-                torch_dtype = torch.float16  # Base dtype for int4
-                logger.info("Enabling 4-bit quantization for memory efficiency")
-        else:
-            dtype_map = {
-                'float32': torch.float32,
-                'float16': torch.float16,
-                'bfloat16': torch.bfloat16
-            }
-            torch_dtype = dtype_map.get(dtype, torch.bfloat16)
+        # Use base handler's quantization config
+        quant_config, torch_dtype = self.get_quantization_config(dtype, load_in_8bit, load_in_4bit)
         
         # Model loading kwargs
         model_kwargs = {
@@ -145,31 +121,12 @@ class QwenVLHandler(MultimodalHandler):
             'low_cpu_mem_usage': True,
         }
         
-        # Add quantization config if needed
-        if load_in_8bit or load_in_4bit:
-            from transformers import BitsAndBytesConfig
-            model_kwargs['quantization_config'] = BitsAndBytesConfig(
-                load_in_8bit=load_in_8bit,
-                load_in_4bit=load_in_4bit,
-                bnb_4bit_compute_dtype=torch_dtype if load_in_4bit else None,
-            )
+        # Merge quantization config
+        model_kwargs.update(quant_config)
         
-        # Device mapping with memory optimization
-        if device == 'auto':
-            # Use more aggressive memory settings for Qwen2.5-VL
-            model_kwargs['device_map'] = 'auto'
-            # Calculate available GPU memory and use most of it
-            if torch.cuda.is_available():
-                # Get GPU memory in bytes
-                gpu_memory = torch.cuda.get_device_properties(0).total_memory
-                # Use 95% of available memory (leave some for PyTorch overhead)
-                usable_memory = int(gpu_memory * 0.95)
-                # Convert to GB string format
-                memory_gb = usable_memory / (1024**3)
-                model_kwargs['max_memory'] = {0: f"{memory_gb:.1f}GB"}
-                logger.info(f"Using {memory_gb:.1f}GB of GPU memory for model loading")
-            else:
-                logger.info("No GPU available, using CPU")
+        # Use base handler's memory config
+        memory_config = self.get_memory_config(device, memory_fraction=0.95)
+        model_kwargs.update(memory_config)
         
         # Load model
         logger.info(f"Loading Qwen VL model from {model_path}")
@@ -213,35 +170,16 @@ class QwenVLHandler(MultimodalHandler):
         if not model or not processor:
             raise ValueError("Model and processor required for multimodal processing")
         
-        # Clear GPU cache before processing
+        # Clear GPU cache before processing (from base handler)
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
         
-        # Process images with size limit for memory efficiency
-        pil_images = []
-        max_image_size = 1024  # Limit image size to reduce memory usage
-        
+        # Use base handler's image resizing for memory efficiency
         if images:
-            for img in images:
-                if isinstance(img, str):
-                    # Decode base64 image
-                    img_data = base64.b64decode(img)
-                    pil_img = Image.open(BytesIO(img_data))
-                elif isinstance(img, Image.Image):
-                    pil_img = img
-                else:
-                    continue
-                
-                # Resize if too large
-                if pil_img.width > max_image_size or pil_img.height > max_image_size:
-                    # Calculate new size maintaining aspect ratio
-                    ratio = min(max_image_size / pil_img.width, max_image_size / pil_img.height)
-                    new_size = (int(pil_img.width * ratio), int(pil_img.height * ratio))
-                    pil_img = pil_img.resize(new_size, Image.Resampling.LANCZOS)
-                    logger.info(f"Resized image from {pil_img.width}x{pil_img.height} to {new_size[0]}x{new_size[1]}")
-                
-                pil_images.append(pil_img)
+            pil_images = self.resize_images_for_memory(images, max_size=1024)
+        else:
+            pil_images = []
         
         # Format input for Qwen VL
         if pil_images:
@@ -339,25 +277,8 @@ class QwenVLHandler(MultimodalHandler):
         else:
             generated_text = processor.batch_decode(outputs, skip_special_tokens=True)[0]
         
-        # Extract only the assistant's response
-        # Look for the last occurrence of 'assistant' role
-        if 'assistant' in generated_text:
-            # Find the last occurrence of 'assistant'
-            parts = generated_text.split('assistant')
-            if len(parts) > 1:
-                # Take everything after the last 'assistant'
-                generated_text = parts[-1].strip()
-        
-        # Also check for 'Assistant' (capitalized)
-        elif 'Assistant' in generated_text:
-            parts = generated_text.split('Assistant')
-            if len(parts) > 1:
-                generated_text = parts[-1].strip()
-        
-        # Remove any remaining role markers
-        for marker in ['user\n', 'system\n', 'User\n', 'System\n']:
-            if generated_text.startswith(marker):
-                generated_text = generated_text[len(marker):].strip()
+        # Use base handler's method to extract assistant response
+        generated_text = self.extract_assistant_response(generated_text)
         
         # Remove input text from output if present
         if text_input and generated_text.startswith(text_input):

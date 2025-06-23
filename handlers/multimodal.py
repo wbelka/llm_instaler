@@ -6,8 +6,9 @@ including the Deepseek Janus models.
 """
 
 import logging
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Union
 from pathlib import Path
+import torch
 
 from handlers.base import BaseHandler
 from handlers.transformer import TransformerHandler
@@ -517,7 +518,7 @@ Note: This is a large package and may take some time to install.
         
         return descriptions
     
-    def process_multimodal(self, text: str = None, images: List[str] = None,
+    def process_multimodal(self, text: str = None, images: List[Union[str, Any]] = None,
                           audio: str = None, video: str = None,
                           model=None, processor=None, **kwargs) -> Dict[str, Any]:
         """Process multimodal inputs.
@@ -525,14 +526,28 @@ Note: This is a large package and may take some time to install.
         Note: This is a generic implementation. Model-specific handlers
         (like JanusHandler) should override this method.
         """
-        from transformers import AutoProcessor
-        import torch
         import base64
         from PIL import Image
         from io import BytesIO
         
         if not model or not processor:
             raise ValueError("Model and processor required for multimodal processing")
+        
+        # Clear GPU cache for memory efficiency
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+        
+        # Resize images for memory efficiency
+        if images:
+            images = self.resize_images_for_memory(images, max_size=kwargs.get('max_image_size', 1024))
+        
+        # Prepare vision mode input if needed
+        mode = kwargs.get('mode')
+        if mode == 'vision' and hasattr(processor, 'apply_chat_template'):
+            # Simple single-turn format for vision mode
+            messages = self.prepare_vision_mode_input(text, mode)
+            text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         
         # Prepare inputs
         inputs = {}
@@ -548,9 +563,13 @@ Note: This is a large package and may take some time to install.
         # Process images
         if images:
             pil_images = []
-            for img_base64 in images:
-                img_data = base64.b64decode(img_base64)
-                pil_images.append(Image.open(BytesIO(img_data)))
+            for img in images:
+                if isinstance(img, str):
+                    # Decode base64
+                    img_data = base64.b64decode(img)
+                    pil_images.append(Image.open(BytesIO(img_data)))
+                elif isinstance(img, Image.Image):
+                    pil_images.append(img)
             
             if hasattr(processor, 'image_processor'):
                 image_inputs = processor.image_processor(pil_images, return_tensors="pt")
@@ -563,9 +582,17 @@ Note: This is a large package and may take some time to install.
             inputs = {k: v.to(model.device) if hasattr(v, 'to') else v 
                      for k, v in inputs.items()}
         
-        # Generate
+        # Generate with memory-efficient settings
+        generation_kwargs = {
+            'max_new_tokens': min(kwargs.get('max_tokens', 256), 256),  # Limit for memory
+            'temperature': kwargs.get('temperature', 0.7),
+            'top_p': kwargs.get('top_p', 0.9),
+            'do_sample': kwargs.get('temperature', 0.7) > 0,
+            'use_cache': True
+        }
+        
         with torch.no_grad():
-            outputs = model.generate(**inputs, **kwargs)
+            outputs = model.generate(**inputs, **generation_kwargs)
         
         # Decode response
         if hasattr(processor, 'decode'):
@@ -575,7 +602,71 @@ Note: This is a large package and may take some time to install.
         else:
             response = str(outputs)
         
+        # Extract assistant response
+        response = self.extract_assistant_response(response)
+        
         return {
             'text': response,
-            'type': 'multimodal_response'
+            'usage': {
+                'prompt_tokens': inputs.get('input_ids', torch.tensor([[]])).shape[1],
+                'completion_tokens': outputs.shape[1] - inputs.get('input_ids', torch.tensor([[]])).shape[1],
+                'total_tokens': outputs.shape[1]
+            }
         }
+    
+    def resize_images_for_memory(self, images: List[Any], max_size: int = 1024) -> List[Any]:
+        """Resize images to reduce memory usage.
+        
+        Args:
+            images: List of images to resize
+            max_size: Maximum dimension size
+            
+        Returns:
+            List of resized images
+        """
+        from PIL import Image
+        import base64
+        from io import BytesIO
+        
+        resized = []
+        for img in images:
+            if isinstance(img, str):
+                # Decode base64
+                img_data = base64.b64decode(img)
+                pil_img = Image.open(BytesIO(img_data))
+            elif isinstance(img, Image.Image):
+                pil_img = img
+            else:
+                resized.append(img)
+                continue
+            
+            # Resize if needed
+            if pil_img.width > max_size or pil_img.height > max_size:
+                ratio = min(max_size / pil_img.width, max_size / pil_img.height)
+                new_size = (int(pil_img.width * ratio), int(pil_img.height * ratio))
+                pil_img = pil_img.resize(new_size, Image.Resampling.LANCZOS)
+                logger.info(f"Resized image from original to {new_size[0]}x{new_size[1]}")
+            
+            resized.append(pil_img)
+        
+        return resized
+    
+    def prepare_vision_mode_input(self, text: str, mode: str = None) -> List[Dict[str, str]]:
+        """Prepare input for vision mode (single-turn, no history).
+        
+        Args:
+            text: User input text
+            mode: Current mode (e.g., 'vision')
+            
+        Returns:
+            Prepared input for the model
+        """
+        if mode == 'vision':
+            # For vision mode, create simple single-turn format
+            return [{
+                'role': 'user',
+                'content': text or 'What is in this image?'
+            }]
+        else:
+            # Standard format
+            return [{'role': 'user', 'content': text}]
