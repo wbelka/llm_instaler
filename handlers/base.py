@@ -144,6 +144,14 @@ class BaseHandler(ABC):
             'training_full': base_memory * 4.0   # Model + optimizer states
         }
 
+    def get_installation_notes(self) -> Dict[str, str]:
+        """Get special installation instructions for dependencies.
+        
+        Returns:
+            Dictionary mapping dependency names to installation instructions.
+        """
+        return {}
+    
     def get_quantization_options(self) -> List[Dict[str, Any]]:
         """Get available quantization options for this model.
 

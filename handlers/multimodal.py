@@ -61,9 +61,8 @@ class MultimodalHandler(BaseHandler):
         ]
 
         if self.is_janus_model:
-            # Janus is a special dependency that should be installed separately
-            # Don't add it to base_deps
-            pass
+            # Add Janus dependency for Janus models
+            base_deps.append('git+https://github.com/deepseek-ai/Janus.git')
 
         # Check for specific vision encoders
         config = self.model_info.get('config', {})
@@ -97,12 +96,45 @@ class MultimodalHandler(BaseHandler):
         # CUDA support for GPU acceleration
         if self.model_info.get('requires_gpu', True):
             deps.append('cuda>=11.7')
+        
+        # Git is required for Janus models
+        if self.is_janus_model:
+            deps.append('git')
 
         # Video processing system deps
         if 'video' in self.model_type.lower():
             deps.extend(['ffmpeg', 'libavcodec-dev', 'libavformat-dev'])
 
         return deps
+    
+    def get_installation_notes(self) -> Dict[str, str]:
+        """Get special installation instructions for dependencies.
+        
+        Returns:
+            Dictionary mapping dependency names to installation instructions.
+        """
+        notes = {}
+        
+        if self.is_janus_model:
+            notes['git+https://github.com/deepseek-ai/Janus.git'] = """
+Janus is required for Deepseek/FreedomIntelligence Janus multimodal models.
+
+This package provides:
+- VLChatProcessor for multimodal processing
+- MultiModalityCausalLM model architecture
+- Special handling for image generation with CFG
+
+If installation fails:
+1. Ensure git is installed: sudo apt-get install git (Ubuntu) or brew install git (macOS)
+2. Try manual installation:
+   cd {model_dir}
+   source .venv/bin/activate
+   pip install git+https://github.com/deepseek-ai/Janus.git
+
+Note: This is a large package and may take some time to install.
+"""
+        
+        return notes
 
     def analyze(self) -> 'ModelRequirements':
         """Analyze model and return requirements.

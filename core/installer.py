@@ -146,7 +146,8 @@ class ModelInstaller:
 
             if not self._install_dependencies(
                 model_dir, requirements, install_log_path,
-                device_preference=device
+                device_preference=device,
+                handler=handler if 'handler' in locals() else None
             ):
                 return False
 
@@ -498,7 +499,8 @@ class ModelInstaller:
         requirements: Any,
         log_path: Path,
         preserve_torch_config: bool = False,
-        device_preference: str = "auto"
+        device_preference: str = "auto",
+        handler=None
     ) -> bool:
         """Install model dependencies in virtual environment.
 
@@ -561,7 +563,7 @@ class ModelInstaller:
 
         # Install special dependencies with error handling
         for dep in special_deps:
-            if not self._install_special_dependency(dep, pip_path, model_dir, log_path):
+            if not self._install_special_dependency(dep, pip_path, model_dir, log_path, handler):
                 # Special dependencies might fail but shouldn't block installation
                 print_warning(f"Failed to install {dep}, continuing...")
 
@@ -774,7 +776,8 @@ class ModelInstaller:
         dep: str,
         pip_path: Path,
         model_dir: Path,
-        log_path: Path
+        log_path: Path,
+        handler=None
     ) -> bool:
         """Install special dependency with custom handling.
 
@@ -783,6 +786,7 @@ class ModelInstaller:
             pip_path: Path to pip executable.
             model_dir: Model directory.
             log_path: Path to installation log.
+            handler: Optional handler instance for getting installation notes.
 
         Returns:
             True if installed successfully, False otherwise.
@@ -791,6 +795,13 @@ class ModelInstaller:
         torch_info = self._get_torch_info(pip_path)
 
         index_url_opt = f" --index-url {torch_info['index_url']}" if torch_info.get('index_url') else ""
+        
+        # Get handler-specific installation notes if available
+        handler_notes = {}
+        if handler and hasattr(handler, 'get_installation_notes'):
+            handler_notes = handler.get_installation_notes()
+        
+        # Default special instructions (can be overridden by handler)
         special_instructions = {
             "mamba-ssm": f"""
 This model requires mamba-ssm which needs additional setup:
@@ -834,6 +845,9 @@ To install manually:
    pip install xformers{index_url_opt}
 """
         }
+        
+        # Merge handler notes with default instructions
+        special_instructions.update(handler_notes)
 
         try:
             print_info(f"Installing {dep}...")
@@ -845,6 +859,11 @@ To install manually:
             if dep in ["mamba-ssm", "flash-attn", "causal-conv1d"]:
                 if torch_info.get("index_url"):
                     install_cmd.extend(["--index-url", torch_info["index_url"]])
+            
+            # Special handling for git-based packages
+            elif dep.startswith("git+"):
+                # Git packages don't need index-url
+                pass
 
                 # For flash-attn, use specific build options
                 if dep == "flash-attn":
