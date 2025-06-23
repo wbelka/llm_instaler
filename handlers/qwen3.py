@@ -33,6 +33,11 @@ class Qwen3Handler(TransformerHandler):
                 updated_deps.append('transformers>=4.51.0')
             else:
                 updated_deps.append(dep)
+        
+        # Add bitsandbytes for quantization support
+        if 'bitsandbytes' not in str(updated_deps):
+            updated_deps.append('bitsandbytes>=0.41.0')
+        
         return updated_deps
     
     def get_supported_modes(self) -> List[str]:
@@ -213,6 +218,8 @@ class Qwen3Handler(TransformerHandler):
             'supports_reasoning': True,
             'supports_agent': True,
             'supports_tools': True,
+            'supports_quantization': True,
+            'supported_quantization': ['int8', 'int4'],
             'max_context_length': 32768,
             'max_context_with_yarn': 131072,
             'supports_yarn_scaling': True,

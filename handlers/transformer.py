@@ -132,33 +132,18 @@ class TransformerHandler(BaseHandler):
         load_in_8bit = kwargs.get('load_in_8bit', False)
         load_in_4bit = kwargs.get('load_in_4bit', False)
 
-        # Determine torch dtype
-        if dtype == 'auto':
-            if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 7:
-                torch_dtype = torch.float16
-            else:
-                torch_dtype = torch.float32
-        else:
-            dtype_map = {
-                'float32': torch.float32,
-                'float16': torch.float16,
-                'bfloat16': torch.bfloat16
-            }
-            torch_dtype = dtype_map.get(dtype, torch.float16)
-
+        # Use base handler's quantization config
+        quant_config, torch_dtype = self.get_quantization_config(dtype, load_in_8bit, load_in_4bit)
+        
         # Load configuration
         model_kwargs = {
             'torch_dtype': torch_dtype,
             'low_cpu_mem_usage': True,
             'trust_remote_code': self.model_info.get('trust_remote_code', False)
         }
-
-        # Add quantization if requested
-        if load_in_8bit:
-            model_kwargs['load_in_8bit'] = True
-        elif load_in_4bit:
-            model_kwargs['load_in_4bit'] = True
-            model_kwargs['bnb_4bit_compute_dtype'] = torch_dtype
+        
+        # Merge quantization config
+        model_kwargs.update(quant_config)
 
         # Device map for multi-GPU or CPU offloading
         if device == 'auto':
