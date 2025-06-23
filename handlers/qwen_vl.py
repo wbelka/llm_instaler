@@ -45,6 +45,7 @@ class QwenVLHandler(MultimodalHandler):
         qwen_deps = [
             'qwen-vl-utils>=0.0.2',  # Qwen VL utilities
             'torchvision>=0.15.0',   # For image preprocessing
+            'bitsandbytes>=0.41.0',  # For int8/int4 quantization
         ]
         
         return base_deps + qwen_deps
