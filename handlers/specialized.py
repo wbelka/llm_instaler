@@ -7,7 +7,6 @@ and other specialized architectures.
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
-import torch
 
 from handlers.base import BaseHandler
 from handlers.transformer import TransformerHandler

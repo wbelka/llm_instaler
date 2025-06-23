@@ -6,7 +6,6 @@ including GPT, LLaMA, Mistral, and similar architectures.
 
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
-import torch
 import logging
 from handlers.base import BaseHandler
 from core.checker import ModelRequirements

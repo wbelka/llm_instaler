@@ -7,7 +7,6 @@ or multimodal inputs (CLIP, sentence transformers, etc.).
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
-import torch
 import numpy as np
 
 from handlers.base import BaseHandler

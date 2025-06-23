@@ -7,7 +7,6 @@ segmentation, and other vision tasks.
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
-import torch
 
 from handlers.base import BaseHandler
 
@@ -172,6 +171,7 @@ class VisionHandler(BaseHandler):
     
     def _load_detectron2_model(self, model_path: str, **kwargs):
         """Load Detectron2 model."""
+        import torch
         from detectron2.config import get_cfg
         from detectron2.engine import DefaultPredictor
         
@@ -185,6 +185,7 @@ class VisionHandler(BaseHandler):
     
     def _load_transformers_vision(self, model_path: str, **kwargs):
         """Load vision model using transformers."""
+        import torch
         from transformers import AutoModelForImageClassification, AutoImageProcessor
         
         device = kwargs.get('device', 'auto')
@@ -279,6 +280,7 @@ class VisionHandler(BaseHandler):
         from PIL import Image
         from io import BytesIO
         import numpy as np
+        import torch
         
         # Decode image from base64
         img_data = base64.b64decode(image)

@@ -101,7 +101,7 @@ class BaseHandler(ABC):
         raise NotImplementedError("Subclasses must implement validate_model_files()")
     
     def get_quantization_config(self, dtype: str, load_in_8bit: bool = False, 
-                               load_in_4bit: bool = False) -> Tuple[Dict[str, Any], torch.dtype]:
+                               load_in_4bit: bool = False) -> Tuple[Dict[str, Any], Any]:
         """Get quantization configuration based on dtype.
         
         This is a common method that can be used by all handlers to setup

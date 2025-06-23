@@ -5,7 +5,6 @@ both text and image generation with special architecture.
 """
 
 import logging
-import torch
 import numpy as np
 from typing import List, Dict, Any, Optional, Tuple
 from PIL import Image
@@ -60,6 +59,8 @@ class JanusHandler(MultimodalHandler):
         Returns:
             Dictionary with generated text
         """
+        import torch
+        
         if not model or not tokenizer:
             raise ValueError("Model and tokenizer required for text generation")
         
@@ -126,6 +127,8 @@ class JanusHandler(MultimodalHandler):
         Returns:
             Dictionary with image data
         """
+        import torch
+        
         if not model or not tokenizer:
             raise ValueError("Model and tokenizer required for image generation")
         
@@ -264,6 +267,8 @@ class JanusHandler(MultimodalHandler):
         Returns:
             Dictionary with processed output
         """
+        import torch
+        
         logger.info(f"JanusHandler.process_multimodal called with text={text[:50] if text else None}..., images count={len(images) if images else 0}")
         
         if not model or not processor:
