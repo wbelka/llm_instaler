@@ -72,11 +72,12 @@ class QwenVLHandler(MultimodalHandler):
         # For Qwen2.5-VL, we need to use the specific model class
         if config.get('model_type') == 'qwen2_5_vl':
             try:
-                # Try to import the specific Qwen2VL model class
-                from transformers import Qwen2VLForConditionalGeneration
-                model_class = Qwen2VLForConditionalGeneration
-                logger.info("Using Qwen2VLForConditionalGeneration for Qwen2.5-VL")
+                # Try to import the specific Qwen2.5-VL model class (with underscore)
+                from transformers import Qwen2_5_VLForConditionalGeneration
+                model_class = Qwen2_5_VLForConditionalGeneration
+                logger.info("Using Qwen2_5_VLForConditionalGeneration for Qwen2.5-VL")
             except ImportError:
+                logger.info("Qwen2_5_VLForConditionalGeneration not found in transformers, trying fallback approaches")
                 # Fallback: try to load the modeling file to register classes
                 try:
                     import importlib.util
@@ -89,11 +90,16 @@ class QwenVLHandler(MultimodalHandler):
                         # After loading, try to get the class
                         if hasattr(module, 'Qwen2_5_VLForConditionalGeneration'):
                             model_class = module.Qwen2_5_VLForConditionalGeneration
+                            logger.info("Using Qwen2_5_VLForConditionalGeneration from modeling file")
                         else:
-                            model_class = AutoModel  # Use AutoModel which should pick up registered class
+                            # Use AutoModel with trust_remote_code to let it figure out the class
+                            model_class = AutoModel
+                            logger.info("Using AutoModel to auto-detect the correct class")
                 except Exception as e:
                     logger.warning(f"Could not load modeling file: {e}")
+                    # Final fallback: use AutoModel with trust_remote_code
                     model_class = AutoModel
+                    logger.info("Using AutoModel as final fallback")
         else:
             model_class = AutoModelForCausalLM
             logger.info("Using AutoModelForCausalLM")
