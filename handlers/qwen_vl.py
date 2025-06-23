@@ -8,7 +8,6 @@ import os
 import logging
 from typing import List, Dict, Any, Optional, Tuple, Union
 from pathlib import Path
-import torch
 import base64
 from io import BytesIO
 from PIL import Image
@@ -60,7 +59,6 @@ class QwenVLHandler(MultimodalHandler):
         Returns:
             Tuple of (model, processor)
         """
-        import torch
         from transformers import AutoProcessor
         
         # For Qwen2.5-VL, we MUST use the correct auto class
@@ -171,9 +169,13 @@ class QwenVLHandler(MultimodalHandler):
             raise ValueError("Model and processor required for multimodal processing")
         
         # Clear GPU cache before processing (from base handler)
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+        except ImportError:
+            pass
         
         # Use base handler's image resizing for memory efficiency
         if images:
@@ -244,6 +246,7 @@ class QwenVLHandler(MultimodalHandler):
         # Check if model has generate method
         if hasattr(model, 'generate'):
             # Model has generate, use it directly
+            import torch
             with torch.no_grad():
                 outputs = model.generate(
                     **inputs,
@@ -364,6 +367,7 @@ class QwenVLHandler(MultimodalHandler):
         if not hasattr(model, 'generate') and hasattr(model, 'language_model'):
             generate_model = model.language_model
         
+        import torch
         with torch.no_grad():
             outputs = generate_model.generate(
                 **inputs,
