@@ -245,16 +245,24 @@ class QwenVLHandler(MultimodalHandler):
         
         # Format input for Qwen VL
         if pil_images:
-            # Qwen VL expects a specific format for multimodal inputs
-            if hasattr(processor, 'apply_chat_template'):
-                # Use chat template if available
+            # For vision mode, create a simple single-turn conversation
+            if kwargs.get('mode') == 'vision':
+                # Simple format for vision mode - no system message, no history
+                messages = [{
+                    'role': 'user',
+                    'content': text or 'What is in this image?'
+                }]
+            else:
+                # Standard format with multimodal content
                 messages = [{
                     'role': 'user',
                     'content': [
                         {'type': 'text', 'text': text or 'What is in this image?'}
                     ] + [{'type': 'image'} for _ in pil_images]
                 }]
-                
+            
+            # Apply chat template if available
+            if hasattr(processor, 'apply_chat_template'):
                 text_input = processor.apply_chat_template(
                     messages,
                     tokenize=False,
@@ -330,6 +338,26 @@ class QwenVLHandler(MultimodalHandler):
             generated_text = processor.tokenizer.decode(outputs[0], skip_special_tokens=True)
         else:
             generated_text = processor.batch_decode(outputs, skip_special_tokens=True)[0]
+        
+        # Extract only the assistant's response
+        # Look for the last occurrence of 'assistant' role
+        if 'assistant' in generated_text:
+            # Find the last occurrence of 'assistant'
+            parts = generated_text.split('assistant')
+            if len(parts) > 1:
+                # Take everything after the last 'assistant'
+                generated_text = parts[-1].strip()
+        
+        # Also check for 'Assistant' (capitalized)
+        elif 'Assistant' in generated_text:
+            parts = generated_text.split('Assistant')
+            if len(parts) > 1:
+                generated_text = parts[-1].strip()
+        
+        # Remove any remaining role markers
+        for marker in ['user\n', 'system\n', 'User\n', 'System\n']:
+            if generated_text.startswith(marker):
+                generated_text = generated_text[len(marker):].strip()
         
         # Remove input text from output if present
         if text_input and generated_text.startswith(text_input):
