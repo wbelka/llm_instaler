@@ -42,6 +42,16 @@ def get_handler_class(model_info: Dict[str, Any]) -> Type[BaseHandler]:
     # Special cases for specific model types
     if model_type in ['mamba', 'rwkv', 'jamba']:
         handler_module = 'specialized'
+    
+    # Check for reasoning models
+    model_id = model_info.get('model_id', '').lower()
+    tags = model_info.get('tags', [])
+    if 'o1' in model_id or 'reasoning' in tags or model_type in ['o1', 'reasoning-llm']:
+        handler_module = 'specialized'
+    
+    # Check for code models
+    if any(kw in model_id for kw in ['code', 'codegen', 'starcoder', 'codellama']):
+        handler_module = 'specialized'
 
     if not handler_module:
         raise ValueError(

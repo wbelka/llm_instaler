@@ -83,6 +83,16 @@ class HandlerRegistry:
             self._handlers['janus'] = JanusHandler
         except ImportError:
             pass
+        
+        try:
+            from handlers.specialized import SpecializedHandler
+            # Register specialized handler for unique model types
+            self._handlers['specialized'] = SpecializedHandler
+            self._handlers['reasoning'] = SpecializedHandler
+            self._handlers['code-generation'] = SpecializedHandler
+            self._handlers['o1'] = SpecializedHandler
+        except ImportError:
+            pass
 
     def register_handler(
         self,
@@ -129,6 +139,16 @@ class HandlerRegistry:
         if 'janus' in model_id:
             if 'janus' in self._handlers:
                 return self._handlers['janus']
+        
+        # Check for reasoning models (o1-style)
+        if 'o1' in model_id or 'reasoning' in model_info.get('tags', []):
+            if 'reasoning' in self._handlers:
+                return self._handlers['reasoning']
+        
+        # Check for code models
+        if any(kw in model_id for kw in ['code', 'codegen', 'starcoder', 'codellama']):
+            if 'code-generation' in self._handlers:
+                return self._handlers['code-generation']
 
         # Try to find in registered handlers
         if model_family and model_family in self._handlers:
