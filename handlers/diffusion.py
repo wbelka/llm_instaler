@@ -329,3 +329,224 @@ class DiffusionHandler(BaseHandler):
             return False, f"Missing components: {', '.join(missing)}"
 
         return True, None
+    
+    def generate_image(self, prompt: str, negative_prompt: str = None,
+                      model=None, **kwargs) -> Dict[str, Any]:
+        """Generate image using diffusion model.
+        
+        Args:
+            prompt: Text description of image to generate
+            negative_prompt: What to avoid in the image
+            model: Model instance (pipeline)
+            **kwargs: Generation parameters
+            
+        Returns:
+            Dictionary with image data and metadata
+        """
+        import torch
+        from PIL import Image
+        import base64
+        from io import BytesIO
+        
+        if not model:
+            raise ValueError("Model (pipeline) required for image generation")
+        
+        # Extract parameters
+        params = {
+            'prompt': prompt,
+            'negative_prompt': negative_prompt or kwargs.get('negative_prompt', ''),
+            'num_inference_steps': kwargs.get('num_inference_steps', 50),
+            'guidance_scale': kwargs.get('guidance_scale', 7.5),
+            'width': kwargs.get('width', 512),
+            'height': kwargs.get('height', 512),
+            'num_images_per_prompt': kwargs.get('num_images_per_prompt', 1)
+        }
+        
+        # Add seed if provided
+        if 'seed' in kwargs and kwargs['seed'] is not None:
+            generator = torch.Generator(device=model.device).manual_seed(kwargs['seed'])
+            params['generator'] = generator
+        
+        # Clear CUDA cache before generation
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
+        try:
+            # Generate image
+            with torch.no_grad():
+                result = model(**params)
+            
+            # Get first image
+            image = result.images[0]
+            
+            # Convert to base64
+            buffered = BytesIO()
+            image.save(buffered, format="PNG")
+            img_base64 = base64.b64encode(buffered.getvalue()).decode()
+            
+            # Clear CUDA cache after generation
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+            return {
+                'image': img_base64,
+                'metadata': {
+                    'width': params['width'],
+                    'height': params['height'],
+                    'format': 'png',
+                    'steps': params['num_inference_steps'],
+                    'guidance_scale': params['guidance_scale'],
+                    'model': 'diffusion'
+                }
+            }
+            
+        except Exception as e:
+            # Clear CUDA cache on error
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            raise e
+    
+    def generate_video(self, prompt: str, image: str = None,
+                      model=None, **kwargs) -> Dict[str, Any]:
+        """Generate video using video diffusion model.
+        
+        Args:
+            prompt: Text description of video to generate
+            image: Base64 image for image-to-video generation (optional)
+            model: Model instance (pipeline)
+            **kwargs: Generation parameters
+            
+        Returns:
+            Dictionary with video data and metadata
+        """
+        import torch
+        import numpy as np
+        import cv2
+        import base64
+        from io import BytesIO
+        import tempfile
+        
+        if not model:
+            raise ValueError("Model (pipeline) required for video generation")
+        
+        # Check if model supports video generation
+        model_class = model.__class__.__name__
+        if 'video' not in model_class.lower():
+            raise ValueError(f"Model {model_class} does not support video generation")
+        
+        # Extract parameters
+        params = {
+            'prompt': prompt,
+            'num_inference_steps': kwargs.get('num_inference_steps', 50),
+            'guidance_scale': kwargs.get('guidance_scale', 7.5),
+            'num_frames': kwargs.get('num_frames', 16),
+            'height': kwargs.get('height', 256),
+            'width': kwargs.get('width', 256)
+        }
+        
+        # Clear CUDA cache before generation
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
+        try:
+            # Generate video
+            with torch.no_grad():
+                video_frames = model(**params).frames[0]
+            
+            # Convert frames to video
+            fps = kwargs.get('fps', 8)
+            
+            # Create temporary file for video
+            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmp_file:
+                video_path = tmp_file.name
+            
+            # Write video using cv2
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(video_path, fourcc, fps, (params['width'], params['height']))
+            
+            for frame in video_frames:
+                # Convert PIL image to numpy array
+                frame_array = np.array(frame)
+                # Convert RGB to BGR for cv2
+                frame_bgr = cv2.cvtColor(frame_array, cv2.COLOR_RGB2BGR)
+                out.write(frame_bgr)
+            
+            out.release()
+            
+            # Read video and convert to base64
+            with open(video_path, 'rb') as f:
+                video_base64 = base64.b64encode(f.read()).decode()
+            
+            # Clean up temporary file
+            import os
+            os.unlink(video_path)
+            
+            # Clear CUDA cache after generation
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+            return {
+                'video': video_base64,
+                'metadata': {
+                    'width': params['width'],
+                    'height': params['height'],
+                    'format': 'mp4',
+                    'fps': fps,
+                    'num_frames': params['num_frames'],
+                    'model': 'video-diffusion'
+                }
+            }
+            
+        except Exception as e:
+            # Clear CUDA cache on error
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            raise e
+    
+    def get_supported_modes(self) -> List[str]:
+        """Get supported generation modes."""
+        model_family = self.analyze().model_family
+        
+        if model_family == 'video-generation':
+            return ['video', 'auto']
+        else:
+            return ['image', 'auto']
+    
+    def get_mode_descriptions(self) -> Dict[str, str]:
+        """Get mode descriptions."""
+        return {
+            'auto': 'Automatic mode selection',
+            'image': 'Text-to-image generation',
+            'video': 'Text-to-video generation'
+        }
+    
+    def get_model_capabilities(self) -> Dict[str, Any]:
+        """Get model capabilities."""
+        capabilities = super().get_model_capabilities()
+        model_family = self.analyze().model_family
+        
+        capabilities.update({
+            'supports_streaming': False,
+            'supports_batch_inference': True,
+            'input_modalities': ['text'],
+            'output_modalities': ['image'] if model_family == 'image-generation' else ['video']
+        })
+        
+        return capabilities
+    
+    def get_installation_notes(self) -> Dict[str, str]:
+        """Get installation notes for special dependencies."""
+        return {
+            'xformers': """
+xformers provides memory efficient attention for diffusion models.
+It can significantly reduce memory usage and speed up generation.
+
+If installation fails, the model will still work with standard attention.
+To install manually:
+   pip install xformers --index-url https://download.pytorch.org/whl/cu118
+""",
+            'invisible-watermark': """
+Required for SDXL models to add invisible watermarks to generated images.
+This is a safety feature required by some models.
+"""
+        }
