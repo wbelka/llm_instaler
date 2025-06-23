@@ -213,17 +213,35 @@ class QwenVLHandler(MultimodalHandler):
         if not model or not processor:
             raise ValueError("Model and processor required for multimodal processing")
         
-        # Process images
+        # Clear GPU cache before processing
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+        
+        # Process images with size limit for memory efficiency
         pil_images = []
+        max_image_size = 1024  # Limit image size to reduce memory usage
+        
         if images:
             for img in images:
                 if isinstance(img, str):
                     # Decode base64 image
                     img_data = base64.b64decode(img)
                     pil_img = Image.open(BytesIO(img_data))
-                    pil_images.append(pil_img)
                 elif isinstance(img, Image.Image):
-                    pil_images.append(img)
+                    pil_img = img
+                else:
+                    continue
+                
+                # Resize if too large
+                if pil_img.width > max_image_size or pil_img.height > max_image_size:
+                    # Calculate new size maintaining aspect ratio
+                    ratio = min(max_image_size / pil_img.width, max_image_size / pil_img.height)
+                    new_size = (int(pil_img.width * ratio), int(pil_img.height * ratio))
+                    pil_img = pil_img.resize(new_size, Image.Resampling.LANCZOS)
+                    logger.info(f"Resized image from {pil_img.width}x{pil_img.height} to {new_size[0]}x{new_size[1]}")
+                
+                pil_images.append(pil_img)
         
         # Format input for Qwen VL
         if pil_images:
@@ -283,12 +301,13 @@ class QwenVLHandler(MultimodalHandler):
             with torch.no_grad():
                 outputs = model.generate(
                     **inputs,
-                    max_new_tokens=kwargs.get('max_tokens', 512),
+                    max_new_tokens=min(kwargs.get('max_tokens', 256), 256),  # Limit to 256 for memory
                     temperature=kwargs.get('temperature', 0.7),
                     top_p=kwargs.get('top_p', 0.9),
                     do_sample=kwargs.get('temperature', 0.7) > 0,
                     pad_token_id=processor.tokenizer.pad_token_id if hasattr(processor, 'tokenizer') else getattr(processor, 'pad_token_id', None),
                     eos_token_id=processor.tokenizer.eos_token_id if hasattr(processor, 'tokenizer') else getattr(processor, 'eos_token_id', None),
+                    use_cache=True,  # Enable KV cache for efficiency
                 )
         else:
             # Model doesn't have generate - this is likely the base VL model
