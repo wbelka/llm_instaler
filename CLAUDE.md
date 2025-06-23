@@ -27,3 +27,31 @@ Key options:
 
 For updating installed models with new fixes:
 `./llm-installer update /home/wblk/LLM/models/deepseek-ai_Janus-Pro-7B`
+
+## Handler System
+
+The LLM Installer uses a handler-based architecture for model-specific logic:
+
+### Key Concepts:
+1. **BaseHandler** - Abstract base class defining the interface
+2. **Model-specific handlers** - Inherit from BaseHandler and implement required methods
+3. **Registry** - Maps model types to appropriate handlers
+
+### When Working with Handlers:
+1. Check HANDLER_DEVELOPMENT_GUIDE.md for detailed instructions
+2. All handlers must implement abstract methods from BaseHandler
+3. Use existing handlers (transformer, multimodal, janus) as references
+4. Add new handlers to handlers/registry.py
+5. Test handler with actual model before committing
+
+### Handler Methods:
+- **Required**: get_dependencies(), analyze(), load_model(), validate_model_files()
+- **Generation**: generate_text(), generate_image(), process_multimodal() etc.
+- **Configuration**: get_supported_modes(), get_model_capabilities()
+- **Installation**: get_installation_notes() for special dependencies
+
+### Important:
+- Handlers manage model-specific dependencies (like Janus for multimodal models)
+- Memory management is critical (use torch.cuda.empty_cache())
+- Return standardized responses for API compatibility
+- Support mode switching for terminal UI
