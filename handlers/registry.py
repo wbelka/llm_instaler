@@ -76,14 +76,14 @@ class HandlerRegistry:
             self._handlers['multi_modality'] = MultimodalHandler
         except ImportError:
             pass
-        
+
         try:
             from handlers.janus import JanusHandler
             # Register Janus handler for specific model IDs
             self._handlers['janus'] = JanusHandler
         except ImportError:
             pass
-        
+
         try:
             from handlers.specialized import SpecializedHandler
             # Register specialized handler for unique model types
@@ -93,7 +93,7 @@ class HandlerRegistry:
             self._handlers['o1'] = SpecializedHandler
         except ImportError:
             pass
-        
+
         try:
             from handlers.qwen_vl import QwenVLHandler
             # Register Qwen VL handler
@@ -102,12 +102,22 @@ class HandlerRegistry:
             self._handlers['qwen2_5_vl'] = QwenVLHandler
         except ImportError:
             pass
-        
+
         try:
             from handlers.qwen3 import Qwen3Handler
             # Register Qwen3 handler for thinking mode support
             self._handlers['qwen3'] = Qwen3Handler
             self._handlers['qwen-3'] = Qwen3Handler
+        except ImportError:
+            pass
+
+        try:
+            from handlers.gemma3 import Gemma3Handler
+            # Register Gemma 3 multimodal handler
+            self._handlers['gemma3'] = Gemma3Handler
+            self._handlers['gemma-3'] = Gemma3Handler
+            self._handlers['gemma3_vlm'] = Gemma3Handler
+            self._handlers['paligemma'] = Gemma3Handler
         except ImportError:
             pass
 
@@ -151,27 +161,40 @@ class HandlerRegistry:
         model_id = model_info.get('model_id', '').lower()
         model_family = model_info.get('model_family', '')
         model_type = model_info.get('model_type', '')
-        
+
         # Check for model-specific handlers
         if 'janus' in model_id:
             if 'janus' in self._handlers:
                 return self._handlers['janus']
-        
+
         # Check for Qwen3 models first (before Qwen VL)
         if 'qwen3' in model_id or 'qwen-3' in model_id or model_type in ['qwen3', 'qwen-3']:
             if 'qwen3' in self._handlers:
                 return self._handlers['qwen3']
-        
+
+        # Check for Gemma 3 multimodal models
+        if (('gemma-3' in model_id or 'gemma3' in model_id) and
+            (model_info.get('is_gemma3_multimodal', False) or
+             'vision' in str(model_info.get('config', {})).lower() or
+             model_family == 'multimodal')):
+            if 'gemma3' in self._handlers:
+                return self._handlers['gemma3']
+
+        # Check for PaliGemma models
+        if 'paligemma' in model_id:
+            if 'paligemma' in self._handlers:
+                return self._handlers['paligemma']
+
         # Check for Qwen VL models
         if 'qwen' in model_id and ('vl' in model_id or model_type == 'qwen2_5_vl'):
             if 'qwen_vl' in self._handlers:
                 return self._handlers['qwen_vl']
-        
+
         # Check for reasoning models (o1-style)
         if 'o1' in model_id or 'reasoning' in model_info.get('tags', []):
             if 'reasoning' in self._handlers:
                 return self._handlers['reasoning']
-        
+
         # Check for code models
         if any(kw in model_id for kw in ['code', 'codegen', 'starcoder', 'codellama']):
             if 'code-generation' in self._handlers:

@@ -6,7 +6,7 @@ from configuration files and determine appropriate handlers.
 
 import json
 import logging
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Tuple
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 class ArchitectureDetector:
     """Detects model architecture from configuration."""
-    
+
     # Mapping of model types to model families
     MODEL_TYPE_MAPPING = {
         # Language models
@@ -25,6 +25,7 @@ class ArchitectureDetector:
         'qwen3': 'language-model',
         'gemma': 'language-model',
         'gemma2': 'language-model',
+        'gemma3': 'language-model',  # Base Gemma 3 text models
         'phi': 'language-model',
         'phi3': 'language-model',
         'gpt2': 'language-model',
@@ -42,7 +43,7 @@ class ArchitectureDetector:
         'jamba': 'language-model',
         'qwen3': 'language-model',
         'qwen-3': 'language-model',
-        
+
         # Multimodal models
         'llava': 'multimodal',
         'clip': 'multimodal',
@@ -56,7 +57,9 @@ class ArchitectureDetector:
         'qwen2_5_vl': 'multimodal',
         'janus': 'multimodal',
         'multi_modality': 'multimodal',
-        
+        'paligemma': 'multimodal',  # Google's PaliGemma VLM
+        'gemma3_vlm': 'multimodal',  # Gemma 3 multimodal variant
+
         # Vision models
         'vit': 'vision',
         'deit': 'vision',
@@ -64,14 +67,14 @@ class ArchitectureDetector:
         'convnext': 'vision',
         'resnet': 'vision',
         'efficientnet': 'vision',
-        
+
         # Audio models
         'whisper': 'audio-model',
         'wav2vec2': 'audio-model',
         'hubert': 'audio-model',
         'seamless_m4t': 'audio-model',
         'musicgen': 'audio-model',
-        
+
         # Diffusion models
         'stable_diffusion': 'image-generation',
         'sdxl': 'image-generation',
@@ -79,12 +82,12 @@ class ArchitectureDetector:
         'pixart': 'image-generation',
         'dalle': 'image-generation',
         'kandinsky': 'image-generation',
-        
+
         # Video models
         'text_to_video': 'video-generation',
         'video_diffusion': 'video-generation',
         'animatediff': 'video-generation',
-        
+
         # Embedding models
         'bert': 'embedding',
         'roberta': 'embedding',
@@ -92,69 +95,72 @@ class ArchitectureDetector:
         'e5': 'embedding',
         'bge': 'embedding',
         'gte': 'embedding',
-        
+
         # Reasoning models
         'o1': 'reasoning',
         'reasoning': 'reasoning',
     }
-    
+
     # Architecture to handler mapping
     ARCHITECTURE_HANDLERS = {
         # Qwen2.5-VL specific
         'Qwen2_5_VLForConditionalGeneration': 'multimodal',
         'Qwen2VLForConditionalGeneration': 'multimodal',
-        
+
         # Janus specific
         'MultiModalityPreTrainedModel': 'multimodal',
-        
+
         # Standard transformers
         'LlamaForCausalLM': 'language-model',
         'MistralForCausalLM': 'language-model',
         'Qwen2ForCausalLM': 'language-model',
         'Qwen3ForCausalLM': 'language-model',
         'GemmaForCausalLM': 'language-model',
+        'Gemma2ForCausalLM': 'language-model',
+        'Gemma3ForConditionalGeneration': 'multimodal',  # Gemma 3 multimodal
+        'PaliGemmaForConditionalGeneration': 'multimodal',  # PaliGemma VLM
         'PhiForCausalLM': 'language-model',
-        
+
         # Vision-language models
         'LlavaForConditionalGeneration': 'multimodal',
         'Blip2ForConditionalGeneration': 'multimodal',
         'ClipModel': 'multimodal',
-        
+
         # Diffusion models
         'StableDiffusionPipeline': 'image-generation',
         'StableDiffusionXLPipeline': 'image-generation',
         'PixArtAlphaPipeline': 'image-generation',
         'TextToVideoSDPipeline': 'video-generation',
-        
+
         # Audio models
         'WhisperForConditionalGeneration': 'audio-model',
         'Wav2Vec2ForCTC': 'audio-model',
         'MusicgenForConditionalGeneration': 'audio-model',
     }
-    
+
     def detect_from_config(self, config_path: Path) -> Tuple[str, str, Dict[str, Any]]:
         """Detect model type and family from config.json.
-        
+
         Args:
             config_path: Path to config.json file
-            
+
         Returns:
             Tuple of (model_type, model_family, additional_info)
         """
         try:
             with open(config_path, 'r') as f:
                 config = json.load(f)
-            
+
             # Get model type from config
             model_type = config.get('model_type', '').lower()
-            
+
             # Get architectures if available
             architectures = config.get('architectures', [])
             architecture = architectures[0] if architectures else None
-            
+
             # Determine model family
             model_family = 'unknown'
-            
+
             # First check architecture mapping
             if architecture and architecture in self.ARCHITECTURE_HANDLERS:
                 model_family = self.ARCHITECTURE_HANDLERS[architecture]
@@ -168,7 +174,7 @@ class ArchitectureDetector:
                 model_family = 'image-generation'
             elif 'text-to-video' in model_type:
                 model_family = 'video-generation'
-            
+
             # Additional info
             additional_info = {
                 'architectures': architectures,
@@ -180,30 +186,39 @@ class ArchitectureDetector:
                 'model_type': model_type,
                 'trust_remote_code': self._requires_trust_remote_code(model_type, architecture),
             }
-            
+
             # Special handling for multimodal models
             if model_family == 'multimodal':
                 additional_info['vision_config'] = config.get('vision_config', {})
                 additional_info['text_config'] = config.get('text_config', {})
-                
+
                 # Check for special tokens that indicate multimodal capability
                 for key in ['image_token_id', 'video_token_id', 'vision_start_token_id']:
                     if key in config:
                         additional_info[key] = config[key]
-            
+
+            # Special detection for Gemma 3 multimodal
+            if self._is_gemma3_multimodal(config, model_type, architecture):
+                model_family = 'multimodal'
+                additional_info['is_gemma3_multimodal'] = True
+                additional_info['max_context_length'] = config.get(
+                    'max_position_embeddings', 131072)
+                additional_info['vision_config'] = config.get('vision_config', {})
+                additional_info['supports_multimodal'] = True
+
             return model_type, model_family, additional_info
-            
+
         except Exception as e:
             logger.error(f"Error detecting architecture from config: {e}")
             return 'unknown', 'unknown', {}
-    
+
     def _requires_trust_remote_code(self, model_type: str, architecture: str) -> bool:
         """Determine if model requires trust_remote_code.
-        
+
         Args:
             model_type: Model type string
             architecture: Architecture string
-            
+
         Returns:
             Whether trust_remote_code is required
         """
@@ -212,7 +227,7 @@ class ArchitectureDetector:
             'qwen3',
             'qwen-3',
             'qwen2_5_vl',
-            'qwen2_vl', 
+            'qwen2_vl',
             'janus',
             'multi_modality',
             'deepseek',
@@ -221,24 +236,66 @@ class ArchitectureDetector:
             'baichuan',
             'chatglm',
             'internlm',
+            'gemma3',  # Gemma 3 multimodal may require trust_remote_code
+            'gemma-3',
+            'paligemma',
         ]
-        
+
         # Check if model type requires trust
         if any(t in model_type.lower() for t in trust_required):
             return True
-            
+
         # Check architecture
         if architecture and any(t in architecture.lower() for t in trust_required):
             return True
-            
+
         return False
-    
+
+    def _is_gemma3_multimodal(
+            self, config: Dict[str, Any], model_type: str, architecture: str
+    ) -> bool:
+        """Check if model is a Gemma 3 multimodal variant.
+
+        Args:
+            config: Model configuration dictionary
+            model_type: Detected model type
+            architecture: Model architecture
+
+        Returns:
+            True if it's a Gemma 3 multimodal model
+        """
+        # Check architecture first
+        if architecture and 'Gemma3ForConditionalGeneration' in architecture:
+            return True
+
+        # Check model type
+        if model_type and ('gemma3' in model_type.lower() or 'gemma-3' in model_type.lower()):
+            # Check for vision config or multimodal indicators
+            if 'vision_config' in config:
+                return True
+            if 'image_token_id' in config:
+                return True
+            if 'max_image_tokens' in config:
+                return True
+
+        # Check for specific Gemma 3 multimodal model names in _name_or_path
+        name_or_path = config.get('_name_or_path', '').lower()
+        if 'gemma-3' in name_or_path or 'gemma3' in name_or_path:
+            # Check if it's the instruction-tuned multimodal variant
+            indicators = ['-it', 'instruct', 'chat', 'vlm', 'vision']
+            if any(indicator in name_or_path for indicator in indicators):
+                # Additional check for multimodal capabilities
+                if any(key in config for key in ['vision_config', 'image_token_id', 'vocab_size']):
+                    return True
+
+        return False
+
     def detect_from_model_files(self, model_path: Path) -> Tuple[str, str, Dict[str, Any]]:
         """Detect model type from model files in directory.
-        
+
         Args:
             model_path: Path to model directory
-            
+
         Returns:
             Tuple of (model_type, model_family, additional_info)
         """
@@ -246,30 +303,30 @@ class ArchitectureDetector:
         config_path = model_path / 'config.json'
         if config_path.exists():
             return self.detect_from_config(config_path)
-        
+
         # Check for model_index.json (diffusers)
         model_index_path = model_path / 'model_index.json'
         if model_index_path.exists():
             return self._detect_diffusers_model(model_index_path)
-        
+
         # Check for specific model files
         return self._detect_by_file_patterns(model_path)
-    
+
     def _detect_diffusers_model(self, model_index_path: Path) -> Tuple[str, str, Dict[str, Any]]:
         """Detect diffusers model type.
-        
+
         Args:
             model_index_path: Path to model_index.json
-            
+
         Returns:
             Tuple of (model_type, model_family, additional_info)
         """
         try:
             with open(model_index_path, 'r') as f:
                 model_index = json.load(f)
-            
+
             pipeline_class = model_index.get('_class_name', '')
-            
+
             # Determine family from pipeline class
             if 'Video' in pipeline_class:
                 model_family = 'video-generation'
@@ -280,39 +337,39 @@ class ArchitectureDetector:
             else:
                 model_family = 'image-generation'
                 model_type = 'stable-diffusion'
-            
+
             additional_info = {
                 'pipeline_class': pipeline_class,
                 'scheduler': model_index.get('scheduler', [None])[0],
                 'requires_safety_checker': 'safety_checker' in model_index,
             }
-            
+
             return model_type, model_family, additional_info
-            
+
         except Exception as e:
             logger.error(f"Error detecting diffusers model: {e}")
             return 'unknown', 'unknown', {}
-    
+
     def _detect_by_file_patterns(self, model_path: Path) -> Tuple[str, str, Dict[str, Any]]:
         """Detect model type by file patterns.
-        
+
         Args:
             model_path: Path to model directory
-            
+
         Returns:
             Tuple of (model_type, model_family, additional_info)
         """
         # Check for common patterns
         files = list(model_path.glob('*'))
         file_names = [f.name for f in files]
-        
+
         # Diffusers models
         if 'unet' in file_names or 'vae' in file_names:
             if any('video' in f for f in file_names):
                 return 'text-to-video', 'video-generation', {}
             else:
                 return 'stable-diffusion', 'image-generation', {}
-        
+
         # Transformers models
         if any(f.endswith('.safetensors') or f.endswith('.bin') for f in file_names):
             # Try to guess from file names
@@ -322,10 +379,10 @@ class ArchitectureDetector:
                     return 'vision-language', 'multimodal', {}
                 elif 'whisper' in fname_lower or 'wav2vec' in fname_lower:
                     return 'speech', 'audio-model', {}
-            
+
             # Default to language model
             return 'transformer', 'language-model', {}
-        
+
         return 'unknown', 'unknown', {}
 
 

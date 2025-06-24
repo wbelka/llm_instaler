@@ -42,19 +42,30 @@ def get_handler_class(model_info: Dict[str, Any]) -> Type[BaseHandler]:
     # Special cases for specific model types
     if model_type in ['mamba', 'rwkv', 'jamba']:
         handler_module = 'specialized'
-    
-    # Check for Qwen models
+
+    # Check for specific models
     model_id = model_info.get('model_id', '').lower()
-    if 'qwen3' in model_id or model_type in ['qwen3', 'qwen-3']:
+
+    # Check for Gemma 3 multimodal models
+    if (('gemma-3' in model_id or 'gemma3' in model_id) and
+        (model_info.get('is_gemma3_multimodal', False) or
+         model_family == 'multimodal' or
+         'vision' in str(model_info.get('config', {})).lower())):
+        handler_module = 'gemma3'
+    # Check for PaliGemma models
+    elif 'paligemma' in model_id:
+        handler_module = 'gemma3'
+    # Check for Qwen models
+    elif 'qwen3' in model_id or model_type in ['qwen3', 'qwen-3']:
         handler_module = 'qwen3'
     elif 'qwen' in model_id and ('vl' in model_id or model_type == 'qwen2_5_vl'):
         handler_module = 'qwen_vl'
-    
+
     # Check for reasoning models
     tags = model_info.get('tags', [])
     if 'o1' in model_id or 'reasoning' in tags or model_type in ['o1', 'reasoning-llm']:
         handler_module = 'specialized'
-    
+
     # Check for code models
     if any(kw in model_id for kw in ['code', 'codegen', 'starcoder', 'codellama']):
         handler_module = 'specialized'
@@ -67,7 +78,8 @@ def get_handler_class(model_info: Dict[str, Any]) -> Type[BaseHandler]:
 
     # Import handler class
     try:
-        module = __import__(f'handlers.{handler_module}', fromlist=[f'{handler_module.title()}Handler'])
+        module = __import__(f'handlers.{handler_module}', fromlist=[
+                            f'{handler_module.title()}Handler'])
         handler_class = getattr(module, f'{handler_module.title()}Handler')
         return handler_class
     except (ImportError, AttributeError) as e:
