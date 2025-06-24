@@ -147,6 +147,8 @@ class ModelInstaller:
             if not self._install_dependencies(
                 model_dir, requirements, install_log_path,
                 device_preference=device,
+                dtype_preference=dtype,
+                quantization=quantization,
                 handler=handler if 'handler' in locals() else None
             ):
                 return False
@@ -500,6 +502,8 @@ class ModelInstaller:
         log_path: Path,
         preserve_torch_config: bool = False,
         device_preference: str = "auto",
+        dtype_preference: str = "auto",
+        quantization: str = "none",
         handler=None
     ) -> bool:
         """Install model dependencies in virtual environment.
@@ -510,6 +514,9 @@ class ModelInstaller:
             log_path: Path to installation log.
             preserve_torch_config: If True, preserve existing PyTorch configuration.
             device_preference: Device preference (auto/cuda/cpu/mps).
+            dtype_preference: Data type preference (auto/float16/float32/int8/int4).
+            quantization: Quantization method (none/8bit/4bit).
+            handler: Optional handler instance.
 
         Returns:
             True if dependencies installed successfully, False otherwise.
@@ -522,6 +529,32 @@ class ModelInstaller:
         # Get dependencies from requirements
         base_deps = requirements.base_dependencies.copy()  # Make a copy
         special_deps = requirements.special_dependencies
+        optional_deps = getattr(requirements, 'optional_dependencies', [])
+
+        # Check if quantization is requested and add bitsandbytes
+        needs_quantization = (
+            dtype_preference in ['int8', 'int4'] or
+            quantization in ['8bit', '4bit']
+        )
+
+        if needs_quantization:
+            # Check if bitsandbytes is in optional deps
+            bitsandbytes_found = False
+            for dep in optional_deps:
+                if 'bitsandbytes' in dep:
+                    # Move from optional to required
+                    base_deps.append(dep)
+                    optional_deps.remove(dep)
+                    bitsandbytes_found = True
+                    self._log_install(log_path, "INFO",
+                                      f"Added {dep} to required dependencies for quantization")
+                    break
+
+            # If not found anywhere, add it
+            if not bitsandbytes_found:
+                base_deps.append('bitsandbytes>=0.41.0')
+                self._log_install(log_path, "INFO",
+                                  "Added bitsandbytes>=0.41.0 for quantization support")
 
         self._log_install(log_path, "INFO", f"Installing dependencies: {base_deps}")
 
@@ -550,8 +583,27 @@ class ModelInstaller:
                     base_deps.append('transformers')
 
                 print_info(f"Installing base dependencies: {', '.join(base_deps)}")
+
+                # Special handling for CUDA-dependent packages
+                cuda_deps = ["xformers", "triton", "ninja",
+                             "flash-attn", "deepspeed", "bitsandbytes"]
+                needs_cuda_url = any(any(cuda_dep in dep for cuda_dep in cuda_deps)
+                                     for dep in base_deps)
+
+                install_cmd = [str(pip_path), "install"]
+
+                # Add CUDA index URL if needed
+                if needs_cuda_url:
+                    torch_info = self._get_torch_info(pip_path)
+                    if torch_info.get("index_url"):
+                        install_cmd.extend(["--index-url", torch_info["index_url"]])
+                        self._log_install(log_path, "INFO",
+                                          f"Using CUDA index URL: {torch_info['index_url']}")
+
+                install_cmd.extend(base_deps)
+
                 subprocess.run(
-                    [str(pip_path), "install"] + base_deps,
+                    install_cmd,
                     check=True,
                     capture_output=True,
                     text=True
@@ -567,8 +619,7 @@ class ModelInstaller:
                 # Special dependencies might fail but shouldn't block installation
                 print_warning(f"Failed to install {dep}, continuing...")
 
-        # Install optional dependencies
-        optional_deps = getattr(requirements, 'optional_dependencies', [])
+        # Install remaining optional dependencies (after quantization deps were moved)
         if optional_deps:
             print_info(f"Installing optional dependencies: {', '.join(optional_deps)}")
 
@@ -581,7 +632,8 @@ class ModelInstaller:
                     install_cmd = [str(pip_path), "install", dep]
 
                     # Add index URL for CUDA-dependent packages
-                    cuda_deps = ["xformers", "triton", "ninja", "flash-attn", "deepspeed", "bitsandbytes"]
+                    cuda_deps = ["xformers", "triton", "ninja",
+                                 "flash-attn", "deepspeed", "bitsandbytes"]
                     if dep in cuda_deps and torch_info.get("index_url"):
                         install_cmd.extend(["--index-url", torch_info["index_url"]])
 
@@ -794,13 +846,14 @@ class ModelInstaller:
         # First get torch and CUDA information
         torch_info = self._get_torch_info(pip_path)
 
-        index_url_opt = f" --index-url {torch_info['index_url']}" if torch_info.get('index_url') else ""
-        
+        index_url_opt = f" --index-url {torch_info['index_url']}" if torch_info.get(
+            'index_url') else ""
+
         # Get handler-specific installation notes if available
         handler_notes = {}
         if handler and hasattr(handler, 'get_installation_notes'):
             handler_notes = handler.get_installation_notes()
-        
+
         # Default special instructions (can be overridden by handler)
         special_instructions = {
             "mamba-ssm": f"""
@@ -845,7 +898,7 @@ To install manually:
    pip install xformers{index_url_opt}
 """
         }
-        
+
         # Merge handler notes with default instructions
         special_instructions.update(handler_notes)
 
@@ -859,7 +912,7 @@ To install manually:
             if dep in ["mamba-ssm", "flash-attn", "causal-conv1d"]:
                 if torch_info.get("index_url"):
                     install_cmd.extend(["--index-url", torch_info["index_url"]])
-            
+
             # Special handling for git-based packages
             elif dep.startswith("git+"):
                 # Git packages don't need index-url
@@ -874,7 +927,8 @@ To install manually:
                     install_cmd.extend(["--no-deps"])
                     # Install dependencies separately
                     subprocess.run(
-                        [str(pip_path), "install", "einops", "triton", "--index-url", torch_info.get("index_url", "")],
+                        [str(pip_path), "install", "einops", "triton",
+                         "--index-url", torch_info.get("index_url", "")],
                         capture_output=True,
                         text=True
                     )
@@ -1027,7 +1081,8 @@ To install manually:
             if not torch_info["torch_version"]:
                 return False
 
-            print_info(f"Installing xformers compatible with torch {torch_info['torch_version']}...")
+            print_info(
+                f"Installing xformers compatible with torch {torch_info['torch_version']}...")
 
             # Try to install compatible xformers
             subprocess.run(
@@ -1036,7 +1091,8 @@ To install manually:
                 capture_output=True,
                 text=True
             )
-            self._log_install(log_path, "INFO", f"Installed xformers for {torch_info.get('cuda_suffix', 'unknown')}")
+            self._log_install(log_path, "INFO",
+                              f"Installed xformers for {torch_info.get('cuda_suffix', 'unknown')}")
             return True
 
         except Exception as e:
@@ -1117,7 +1173,8 @@ To install manually:
             # Fix torch if requested
             if fix_torch:
                 print_info("Fixing torch/torchvision/torchaudio versions...")
-                self._fix_torch_versions(pip_path, torch_info.get("cuda_suffix", "cpu"), torch_info["index_url"])
+                self._fix_torch_versions(pip_path, torch_info.get(
+                    "cuda_suffix", "cpu"), torch_info["index_url"])
 
             # Fix CUDA dependencies if requested
             if fix_cuda:
@@ -1141,7 +1198,8 @@ To install manually:
                     handler = get_handler_class(model_info)
                     if handler:
                         requirements = handler(model_info).analyze()
-                        self._install_dependencies(model_path, requirements, log_path, preserve_torch_config=True)
+                        self._install_dependencies(
+                            model_path, requirements, log_path, preserve_torch_config=True)
                     else:
                         print_warning("Could not determine model requirements")
                 finally:
@@ -1240,7 +1298,8 @@ To install manually:
 
         print_info(f"Installing torch packages for {cuda_suffix}...")
         subprocess.run(
-            [str(pip_path), "install", torch_version, vision_version, audio_version, "--index-url", index_url],
+            [str(pip_path), "install", torch_version, vision_version,
+             audio_version, "--index-url", index_url],
             check=True,
             capture_output=True,
             text=True
@@ -1287,7 +1346,8 @@ To install manually:
                 if dep == "xformers":
                     self._install_xformers_with_cuda(pip_path, model_path / "fix_log.txt")
                 else:
-                    install_cmd = [str(pip_path), "install", dep, "--index-url", torch_info["index_url"]]
+                    install_cmd = [str(pip_path), "install", dep,
+                                   "--index-url", torch_info["index_url"]]
                     if dep == "flash-attn":
                         install_cmd.append("--no-build-isolation")
 
