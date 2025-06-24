@@ -75,7 +75,7 @@ def load_model(
         model_info: Model information dictionary.
         model_path: Path to model files.
         device: Device to load model on (auto/cuda/cpu/mps).
-        dtype: Data type for model (auto/float16/float32/bfloat16).
+        dtype: Data type for model (auto/float16/float32/bfloat16/int8/int4).
         load_in_8bit: Whether to load in 8-bit quantization.
         load_in_4bit: Whether to load in 4-bit quantization.
         **kwargs: Additional arguments for model loading.
@@ -83,6 +83,14 @@ def load_model(
     Returns:
         Tuple of (model, tokenizer/processor).
     """
+    # Convert dtype to quantization flags
+    if dtype == "int8":
+        load_in_8bit = True
+        dtype = "auto"  # Let the model decide the compute dtype
+    elif dtype == "int4":
+        load_in_4bit = True
+        dtype = "auto"  # Let the model decide the compute dtype
+    
     # Try to get handler
     handler = get_handler(model_info)
     
@@ -90,6 +98,7 @@ def load_model(
     logger.info(f"Model type: {model_info.get('model_type', 'unknown')}")
     logger.info(f"Model family: {model_info.get('model_family', 'unknown')}")
     logger.info(f"Handler found: {handler is not None}")
+    logger.info(f"Dtype: {dtype}, load_in_8bit: {load_in_8bit}, load_in_4bit: {load_in_4bit}")
     
     if handler:
         # Use handler to load model

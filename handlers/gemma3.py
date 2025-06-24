@@ -269,8 +269,12 @@ class Gemma3Handler(MultimodalHandler):
             # Fallback to base multimodal handler
             logger.info("Attempting fallback to standard multimodal loading")
             return super().load_model(
-                model_path, device, dtype,
-                load_in_8bit, load_in_4bit, **kwargs
+                model_path,
+                device=device,
+                dtype=dtype,
+                load_in_8bit=load_in_8bit,
+                load_in_4bit=load_in_4bit,
+                **kwargs
             )
 
     def get_inference_params(self) -> Dict[str, Any]:
