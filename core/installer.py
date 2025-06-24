@@ -808,19 +808,14 @@ class ModelInstaller:
                 print_warning("CUDA requested but not available, falling back to CPU")
                 index_url = "https://download.pytorch.org/whl/cpu"
                 torch_cmd = ["torch>=2.6.0", "torchvision", "torchaudio"]
-            elif cuda_available and cuda_version and device_preference != "mps":
-                # Map CUDA version to PyTorch index
-                if cuda_version.startswith("12"):
-                    # Use CUDA 12.4 for torch 2.6+ support
-                    index_url = "https://download.pytorch.org/whl/cu124"
-                    torch_cmd = ["torch>=2.6.0", "torchvision", "torchaudio"]
-                elif cuda_version.startswith("11.8"):
-                    index_url = "https://download.pytorch.org/whl/cu118"
-                    torch_cmd = ["torch>=2.6.0", "torchvision", "torchaudio"]
+            elif cuda_available and device_preference != "mps":
+                # Always use CUDA 12.4 for modern PyTorch
+                index_url = "https://download.pytorch.org/whl/cu124"
+                torch_cmd = ["torch>=2.6.0", "torchvision", "torchaudio"]
+                if cuda_version:
+                    print_info(f"CUDA {cuda_version} detected, using CUDA 12.4 PyTorch")
                 else:
-                    # Default CUDA
-                    index_url = "https://download.pytorch.org/whl/cu118"
-                    torch_cmd = ["torch>=2.6.0", "torchvision", "torchaudio"]
+                    print_info("CUDA detected, using CUDA 12.4 PyTorch")
             elif system == "darwin" or device_preference == "mps":  # macOS
                 # MPS support
                 torch_cmd = ["torch>=2.6.0", "torchvision", "torchaudio"]

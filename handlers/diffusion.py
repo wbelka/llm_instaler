@@ -543,7 +543,7 @@ It can significantly reduce memory usage and speed up generation.
 
 If installation fails, the model will still work with standard attention.
 To install manually:
-   pip install xformers --index-url https://download.pytorch.org/whl/cu118
+   pip install xformers --index-url https://download.pytorch.org/whl/cu124
 """,
             'invisible-watermark': """
 Required for SDXL models to add invisible watermarks to generated images.
