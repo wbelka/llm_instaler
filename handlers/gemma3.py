@@ -324,6 +324,29 @@ class Gemma3Handler(MultimodalHandler):
             'analyze': 'Detailed image analysis with reasoning'
         }
 
+    def generate_text(self, prompt: str, model=None, tokenizer=None,
+                      processor=None, **kwargs) -> Dict[str, Any]:
+        """Generate text from a text-only prompt.
+
+        Args:
+            prompt: Text prompt
+            model: The loaded model
+            tokenizer: The loaded tokenizer (or processor)
+            processor: The loaded processor (preferred over tokenizer)
+            **kwargs: Additional generation arguments
+
+        Returns:
+            Dictionary with generated text and usage statistics
+        """
+        # For text-only generation, delegate to process_multimodal without images
+        return self.process_multimodal(
+            text=prompt,
+            images=None,
+            model=model,
+            processor=processor or tokenizer,
+            **kwargs
+        )
+
     def process_multimodal(self, text: str = None, images: List[Union[str, Any]] = None,
                            audio: str = None, video: str = None,
                            model=None, processor=None, **kwargs) -> Dict[str, Any]:
@@ -369,33 +392,45 @@ class Gemma3Handler(MultimodalHandler):
                         pil_images.append(img)
 
             # Prepare messages in Gemma 3 format
-            messages = []
+            messages = kwargs.get('messages', [])
 
-            # Add system message if needed
-            if kwargs.get('system_prompt'):
-                messages.append({
-                    "role": "system",
-                    "content": [{"type": "text", "text": kwargs['system_prompt']}]
-                })
+            if not messages:
+                # Build messages from text/images if not provided
+                messages = []
 
-            # Build user message with images and text
-            user_content = []
+                # Add system message if needed
+                if kwargs.get('system_prompt'):
+                    messages.append({
+                        "role": "system",
+                        "content": [{"type": "text", "text": kwargs['system_prompt']}]
+                    })
 
-            # Add images first (Gemma 3 processes images before text)
-            for img in pil_images:
-                user_content.append({"type": "image", "image": img})
+                # Build user message
+                if pil_images:
+                    # Multimodal input with images
+                    user_content = []
 
-            # Add text
-            if text:
-                user_content.append({"type": "text", "text": text})
-            elif pil_images:
-                # Default prompt if only images provided
-                user_content.append({"type": "text", "text": "What is in this image?"})
+                    # Add images first (Gemma 3 processes images before text)
+                    for img in pil_images:
+                        user_content.append({"type": "image", "image": img})
 
-            messages.append({
-                "role": "user",
-                "content": user_content
-            })
+                    # Add text
+                    if text:
+                        user_content.append({"type": "text", "text": text})
+                    else:
+                        # Default prompt if only images provided
+                        user_content.append({"type": "text", "text": "What is in this image?"})
+
+                    messages.append({
+                        "role": "user",
+                        "content": user_content
+                    })
+                else:
+                    # Text-only input
+                    messages.append({
+                        "role": "user",
+                        "content": text or ""
+                    })
 
             # Apply chat template and prepare inputs
             text_input = processor.apply_chat_template(

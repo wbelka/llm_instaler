@@ -28,6 +28,17 @@ Key options:
 For updating installed models with new fixes:
 `./llm-installer update /home/wblk/LLM/models/deepseek-ai_Janus-Pro-7B`
 
+## Documentation
+
+- [Full Installer Manual](docs/installer-manual.md) - Detailed documentation with all options, examples, and troubleshooting
+
+### Quick Fix for Quantization
+If quantization is not working (model uses full memory despite --dtype int4):
+```bash
+./llm-installer fix <model_dir> --fix-cuda
+```
+This will install bitsandbytes and other CUDA dependencies.
+
 ## Model Detection Algorithm
 
 - See detailed detection algorithm in [DETECTION_ALGORITHM.md](/home/wblk/llm_instaler/DETECTION_ALGORITHM.md)

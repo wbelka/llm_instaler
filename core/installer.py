@@ -1333,6 +1333,7 @@ To install manually:
             )
 
             if result.returncode == 0:
+                # Package is installed, reinstall with correct CUDA version
                 print_info(f"Reinstalling {dep} for {torch_info.get('cuda_suffix', 'CUDA')}...")
 
                 # Uninstall first
@@ -1341,21 +1342,37 @@ To install manually:
                     capture_output=True,
                     text=True
                 )
-
-                # Reinstall with correct index
-                if dep == "xformers":
-                    self._install_xformers_with_cuda(pip_path, model_path / "fix_log.txt")
+            else:
+                # Package not installed, check if it's needed
+                if dep == "bitsandbytes":
+                    # Always install bitsandbytes for quantization support
+                    print_info(f"Installing {dep} for quantization support...")
                 else:
-                    install_cmd = [str(pip_path), "install", dep,
-                                   "--index-url", torch_info["index_url"]]
-                    if dep == "flash-attn":
-                        install_cmd.append("--no-build-isolation")
+                    # Skip other optional packages if not installed
+                    continue
 
-                    try:
-                        subprocess.run(install_cmd, check=True, capture_output=True, text=True)
-                        print_success(f"Fixed {dep}")
-                    except Exception:
-                        print_warning(f"Could not reinstall {dep}")
+            # Install/reinstall with correct index
+            if dep == "xformers":
+                self._install_xformers_with_cuda(pip_path, model_path / "fix_log.txt")
+            else:
+                install_cmd = [str(pip_path), "install", dep]
+                
+                # Add index URL for packages that need it
+                # bitsandbytes should use PyPI, not PyTorch index
+                if dep in ["flash-attn", "triton", "mamba-ssm"]:
+                    install_cmd.extend(["--index-url", torch_info["index_url"]])
+                elif dep == "bitsandbytes":
+                    # Use specific version that supports latest CUDA
+                    install_cmd[2] = "bitsandbytes>=0.41.0"
+                    
+                if dep == "flash-attn":
+                    install_cmd.append("--no-build-isolation")
+
+                try:
+                    subprocess.run(install_cmd, check=True, capture_output=True, text=True)
+                    print_success(f"Fixed {dep}")
+                except subprocess.CalledProcessError as e:
+                    print_warning(f"Could not install/reinstall {dep}: {e.stderr if e.stderr else 'Unknown error'}")
 
     def _copy_scripts(self, model_dir: Path, log_path: Path) -> bool:
         """Copy universal scripts and required libraries to model directory.
