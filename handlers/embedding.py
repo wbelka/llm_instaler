@@ -124,16 +124,38 @@ class EmbeddingHandler(BaseHandler):
         else:
             return 0.5  # Default
     
-    def load_model(self, model_path: str, **kwargs):
-        """Load embedding model with optimal settings."""
+    def load_model(self, model_path: str, device: str = 'auto', dtype: str = 'auto',
+                   load_in_8bit: bool = False, load_in_4bit: bool = False, **kwargs):
+        """Load embedding model with optimal settings.
+        
+        Args:
+            model_path: Path to model files.
+            device: Device to load on.
+            dtype: Data type for model.
+            load_in_8bit: Whether to use 8-bit quantization.
+            load_in_4bit: Whether to use 4-bit quantization.
+            **kwargs: Additional loading arguments.
+            
+        Returns:
+            Tuple of (model, tokenizer/processor).
+        """
         primary_lib = self._determine_primary_library()
         
+        # Pass quantization parameters to underlying loaders
+        load_kwargs = kwargs.copy()
+        load_kwargs.update({
+            'device': device,
+            'dtype': dtype,
+            'load_in_8bit': load_in_8bit,
+            'load_in_4bit': load_in_4bit
+        })
+        
         if primary_lib == 'sentence-transformers':
-            return self._load_sentence_transformer(model_path, **kwargs)
+            return self._load_sentence_transformer(model_path, **load_kwargs)
         elif primary_lib == 'clip':
-            return self._load_clip_model(model_path, **kwargs)
+            return self._load_clip_model(model_path, **load_kwargs)
         else:
-            return self._load_transformers_embedding(model_path, **kwargs)
+            return self._load_transformers_embedding(model_path, **load_kwargs)
     
     def _load_sentence_transformer(self, model_path: str, **kwargs):
         """Load sentence transformer model."""
@@ -167,27 +189,42 @@ class EmbeddingHandler(BaseHandler):
         from transformers import AutoModel, AutoTokenizer
         
         device = kwargs.get('device', 'auto')
-        if device == 'auto':
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        
         dtype = kwargs.get('dtype', 'auto')
-        if dtype == 'auto':
-            torch_dtype = torch.float16 if device == 'cuda' else torch.float32
-        else:
-            dtype_map = {
-                'float32': torch.float32,
-                'float16': torch.float16,
-                'bfloat16': torch.bfloat16
-            }
-            torch_dtype = dtype_map.get(dtype, torch.float32)
+        load_in_8bit = kwargs.get('load_in_8bit', False)
+        load_in_4bit = kwargs.get('load_in_4bit', False)
         
-        model = AutoModel.from_pretrained(
+        # Use base handler's quantization config
+        quant_config, torch_dtype = self.get_quantization_config(dtype, load_in_8bit, load_in_4bit)
+        
+        # Prepare model loading arguments
+        model_kwargs = {
+            'pretrained_model_name_or_path': model_path,
+            'torch_dtype': torch_dtype,
+            'trust_remote_code': self.model_info.get('trust_remote_code', False),
+            'low_cpu_mem_usage': True
+        }
+        
+        # Merge quantization config
+        model_kwargs.update(quant_config)
+        
+        # Handle device placement
+        if device == 'auto':
+            if load_in_8bit or load_in_4bit:
+                model_kwargs['device_map'] = 'auto'
+            else:
+                device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        
+        # Load model
+        model = AutoModel.from_pretrained(**model_kwargs)
+        
+        # Move to device if not using quantization
+        if not (load_in_8bit or load_in_4bit) and device != 'auto':
+            model = model.to(device)
+        
+        tokenizer = AutoTokenizer.from_pretrained(
             model_path,
-            torch_dtype=torch_dtype,
             trust_remote_code=self.model_info.get('trust_remote_code', False)
-        ).to(device)
-        
-        tokenizer = AutoTokenizer.from_pretrained(model_path)
+        )
         
         model.eval()
         

@@ -271,19 +271,8 @@ Note: This is a large package and may take some time to install.
             # Load processor
             processor = VLChatProcessor.from_pretrained(model_path)
 
-            # Determine torch dtype
-            if dtype == 'auto':
-                torch_dtype = (
-                    torch.bfloat16 if torch.cuda.is_available()
-                    else torch.float32
-                )
-            else:
-                dtype_map = {
-                    'float32': torch.float32,
-                    'float16': torch.float16,
-                    'bfloat16': torch.bfloat16
-                }
-                torch_dtype = dtype_map.get(dtype, torch.float32)
+            # Use base handler's quantization config
+            quant_config, torch_dtype = self.get_quantization_config(dtype, load_in_8bit, load_in_4bit)
 
             # Load model with trust_remote_code
             model_kwargs = {
@@ -292,16 +281,8 @@ Note: This is a large package and may take some time to install.
                 'torch_dtype': torch_dtype
             }
 
-            # Add quantization config if needed
-            if load_in_8bit or load_in_4bit:
-                from transformers import BitsAndBytesConfig
-                model_kwargs['quantization_config'] = BitsAndBytesConfig(
-                    load_in_8bit=load_in_8bit,
-                    load_in_4bit=load_in_4bit,
-                    bnb_4bit_compute_dtype=(
-                        torch_dtype if load_in_4bit else None
-                    )
-                )
+            # Merge quantization config
+            model_kwargs.update(quant_config)
 
             # Load model - try to use the Janus-specific model class if available
             try:
