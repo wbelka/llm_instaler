@@ -552,9 +552,11 @@ class ModelInstaller:
 
             # If not found anywhere, add it
             if not bitsandbytes_found:
-                base_deps.append('bitsandbytes>=0.41.0')
+                from core.quantization_config import QuantizationConfig
+                bitsandbytes_version = QuantizationConfig.get_bitsandbytes_version()
+                base_deps.append(bitsandbytes_version)
                 self._log_install(log_path, "INFO",
-                                  "Added bitsandbytes>=0.41.0 for quantization support")
+                                  f"Added {bitsandbytes_version} for quantization support")
 
         self._log_install(log_path, "INFO", f"Installing dependencies: {base_deps}")
 
@@ -1363,7 +1365,8 @@ To install manually:
                     install_cmd.extend(["--index-url", torch_info["index_url"]])
                 elif dep == "bitsandbytes":
                     # Use specific version that supports latest CUDA
-                    install_cmd[2] = "bitsandbytes>=0.41.0"
+                    from core.quantization_config import QuantizationConfig
+                    install_cmd[2] = QuantizationConfig.get_bitsandbytes_version()
                     
                 if dep == "flash-attn":
                     install_cmd.append("--no-build-isolation")
@@ -1451,6 +1454,11 @@ To install manually:
             core_config_src = installer_root / "core" / "config.py"
             if core_config_src.exists():
                 shutil.copy2(core_config_src, core_dst / "config.py")
+
+            # Copy quantization_config.py (needed by handlers)
+            core_quant_src = installer_root / "core" / "quantization_config.py"
+            if core_quant_src.exists():
+                shutil.copy2(core_quant_src, core_dst / "quantization_config.py")
 
             # Create __init__.py
             (core_dst / "__init__.py").touch()

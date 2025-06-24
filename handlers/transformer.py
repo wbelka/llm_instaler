@@ -38,7 +38,17 @@ class TransformerHandler(BaseHandler):
             requirements.special_dependencies.append('flash-attn')
 
         # Optional dependencies
-        requirements.optional_dependencies = ['flash-attn', 'deepspeed', 'bitsandbytes']
+        from core.quantization_config import QuantizationConfig
+        
+        optional_deps = ['flash-attn', 'deepspeed']
+        
+        # Add quantization dependencies if supported
+        quant_deps = QuantizationConfig.get_quantization_dependencies(
+            self.model_type, self.model_family
+        )
+        optional_deps.extend(quant_deps)
+        
+        requirements.optional_dependencies = optional_deps
 
         # Memory requirements
         model_size = self._estimate_model_size()

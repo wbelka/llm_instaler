@@ -41,11 +41,18 @@ class QwenVLHandler(MultimodalHandler):
         base_deps = super().get_dependencies()
         
         # Add Qwen-specific dependencies
+        from core.quantization_config import QuantizationConfig
+        
         qwen_deps = [
             'qwen-vl-utils>=0.0.2',  # Qwen VL utilities
             'torchvision>=0.15.0',   # For image preprocessing
-            'bitsandbytes>=0.41.0',  # For int8/int4 quantization
         ]
+        
+        # Add quantization dependencies if supported
+        quant_deps = QuantizationConfig.get_quantization_dependencies(
+            self.model_type, self.model_family
+        )
+        qwen_deps.extend(quant_deps)
         
         return base_deps + qwen_deps
     

@@ -162,13 +162,19 @@ Note: This is a large package and may take some time to install.
             "gpu_min": max(12, model_size_gb * 1.5),
             "gpu_recommended": max(16, model_size_gb * 2)
         }
+        from core.quantization_config import QuantizationConfig
+        
+        supports_quant = QuantizationConfig.supports_quantization(
+            self.model_type, self.model_family, self.model_info
+        )
+        
         requirements.capabilities = {
             "supports_text_generation": True,
             "supports_image_generation": True,
             "supports_chat": True,
             "supports_cpu_inference": False,
-            "supports_quantization": True,
-            "supported_quantization": ["int8", "int4"],
+            "supports_quantization": supports_quant,
+            "supported_quantization": ["int8", "int4"] if supports_quant else [],
             "requires_gpu": True
         }
         requirements.special_config = {

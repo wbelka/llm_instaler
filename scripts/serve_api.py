@@ -274,16 +274,24 @@ async def get_model_info():
     capabilities["is_video_model"] = model_family == "video-generation" or 'video' in model_id
     
     # Add handler-specific capabilities if available
+    handler_modes = None
+    handler_descriptions = None
+    
     if HANDLER:
+        logger.info(f"Handler type: {type(HANDLER).__name__}")
         handler_caps = HANDLER.get_model_capabilities()
         capabilities.update(handler_caps)
         
-        # Add supported modes from handler
-        capabilities["supported_modes"] = HANDLER.get_supported_modes()
-        capabilities["mode_descriptions"] = HANDLER.get_mode_descriptions()
+        # Get supported modes from handler
+        try:
+            handler_modes = HANDLER.get_supported_modes()
+            handler_descriptions = HANDLER.get_mode_descriptions()
+            logger.info(f"Handler provided modes: {handler_modes}")
+        except Exception as e:
+            logger.warning(f"Failed to get modes from handler: {e}")
 
     # Add size recommendations for video models
-    if capabilities["is_video_model"]:
+    if capabilities.get("is_video_model"):
         capabilities["recommended_sizes"] = {
             "video": {
                 "small": {"width": 128, "height": 128, "label": "128×128 (Fast)"},
@@ -292,55 +300,68 @@ async def get_model_info():
             }
         }
     
-    # Add supported modes based on model type
-    supported_modes = ["auto"]  # All models support auto mode
-    
-    if model_family == "language-model":
-        supported_modes.extend(["chat", "complete", "instruct", "creative", "code", "analyze", "translate", "summarize"])
-        # Add thinking modes for Qwen3
-        if MODEL_INFO.get("model_type") in ["qwen3", "qwen-3"]:
-            supported_modes.extend(["thinking", "no-thinking", "math", "reasoning"])
-    elif model_family == "multimodal" or MODEL_INFO.get("model_type") == "multi_modality":
-        supported_modes.extend(["chat", "complete", "analyze", "image", "creative", "vision"])
-    elif model_family == "image-generation":
-        supported_modes.extend(["image", "creative", "artistic", "photorealistic"])
-    elif model_family == "video-generation":
-        supported_modes.extend(["video", "creative", "animate"])
-    elif model_family == "audio-model":
-        supported_modes.extend(["audio", "transcribe", "voice"])
-    elif model_family == "embedding-model":
-        supported_modes.extend(["embed", "similarity"])
+    # Use handler modes if available, otherwise fall back to defaults
+    if handler_modes:
+        supported_modes = handler_modes
+        logger.info(f"Using handler modes: {supported_modes}")
+    else:
+        logger.info("No handler modes, using defaults")
+        # Add supported modes based on model type
+        supported_modes = ["auto"]  # All models support auto mode
+        
+        if model_family == "language-model":
+            supported_modes.extend(["chat", "complete", "instruct", "creative", "code", "analyze", "translate", "summarize"])
+            # Add thinking modes for Qwen3
+            if MODEL_INFO.get("model_type") in ["qwen3", "qwen-3"]:
+                supported_modes.extend(["thinking", "no-thinking", "math", "reasoning"])
+        elif model_family == "multimodal" or MODEL_INFO.get("model_type") == "multi_modality":
+            supported_modes.extend(["chat", "complete", "analyze", "image", "creative", "vision"])
+        elif model_family == "image-generation":
+            supported_modes.extend(["image", "creative", "artistic", "photorealistic"])
+        elif model_family == "video-generation":
+            supported_modes.extend(["video", "creative", "animate"])
+        elif model_family == "audio-model":
+            supported_modes.extend(["audio", "transcribe", "voice"])
+        elif model_family == "embedding-model":
+            supported_modes.extend(["embed", "similarity"])
     
     capabilities["supported_modes"] = supported_modes
     
-    # Add mode descriptions
-    capabilities["mode_descriptions"] = {
-        "auto": "Automatic mode selection",
-        "chat": "Conversational dialogue",
-        "complete": "Text completion",
-        "instruct": "Follow instructions",
-        "creative": "Creative generation",
-        "code": "Code generation",
-        "analyze": "Analysis & reasoning",
-        "translate": "Language translation",
-        "summarize": "Text summarization",
-        "image": "Image generation",
-        "vision": "Image understanding",
-        "audio": "Audio processing",
-        "video": "Video generation",
-        "embed": "Text embeddings",
-        "transcribe": "Speech to text",
-        "voice": "Text to speech",
-        "artistic": "Artistic style",
-        "photorealistic": "Realistic images",
-        "animate": "Animation generation",
-        "similarity": "Similarity search",
-        "thinking": "Enable thinking mode for complex reasoning",
-        "no-thinking": "Disable thinking for efficient responses",
-        "math": "Mathematical problem solving with thinking",
-        "reasoning": "Complex logical reasoning with thinking"
-    }
+    # Use handler descriptions if available, otherwise fall back to defaults
+    if handler_descriptions:
+        capabilities["mode_descriptions"] = handler_descriptions
+    else:
+        # Add mode descriptions
+        capabilities["mode_descriptions"] = {
+            "auto": "Automatic mode selection",
+            "chat": "Conversational dialogue",
+            "complete": "Text completion",
+            "instruct": "Follow instructions",
+            "creative": "Creative generation",
+            "code": "Code generation",
+            "analyze": "Analysis & reasoning",
+            "translate": "Language translation",
+            "summarize": "Text summarization",
+            "image": "Image generation",
+            "vision": "Image understanding",
+            "audio": "Audio processing",
+            "video": "Video generation",
+            "embed": "Text embeddings",
+            "transcribe": "Speech to text",
+            "voice": "Text to speech",
+            "artistic": "Artistic style",
+            "photorealistic": "Realistic images",
+            "animate": "Animation generation",
+            "similarity": "Similarity search",
+            "thinking": "Enable thinking mode for complex reasoning",
+            "no-thinking": "Disable thinking for efficient responses",
+            "math": "Mathematical problem solving with thinking",
+            "reasoning": "Complex logical reasoning with thinking"
+        }
 
+    logger.info(f"Final supported_modes: {capabilities.get('supported_modes', [])}")
+    logger.info(f"Final mode_descriptions: {list(capabilities.get('mode_descriptions', {}).keys())}")
+    
     return ModelInfoResponse(
         model_id=MODEL_INFO.get("model_id", "unknown"),
         model_type=MODEL_INFO.get("model_type", "unknown"),

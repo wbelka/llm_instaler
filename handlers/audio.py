@@ -90,11 +90,17 @@ class AudioHandler(BaseHandler):
         }
         
         # Capabilities
+        from core.quantization_config import QuantizationConfig
+        
+        supports_quant = QuantizationConfig.supports_quantization(
+            self.model_type, self.model_family, self.model_info
+        )
+        
         requirements.capabilities = {
             "supports_streaming": True,
             "supports_batch_inference": True,
             "supports_cpu_inference": True,
-            "supports_quantization": False,
+            "supports_quantization": supports_quant,
             "input_formats": ["wav", "mp3", "flac", "m4a"],
             "output_formats": ["wav", "mp3"],
             "sample_rates": [16000, 22050, 44100, 48000]

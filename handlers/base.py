@@ -128,11 +128,19 @@ class BaseHandler(ABC):
         # Handle quantization dtype
         if dtype == 'int8' or load_in_8bit:
             load_in_8bit = True
-            torch_dtype = torch.float16  # Base dtype for int8
+            # Check if model prefers bfloat16
+            if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+                torch_dtype = torch.bfloat16
+            else:
+                torch_dtype = torch.float16
             logger.info("Enabling 8-bit quantization for memory efficiency")
         elif dtype == 'int4' or load_in_4bit:
             load_in_4bit = True  
-            torch_dtype = torch.float16  # Base dtype for int4
+            # Check if model prefers bfloat16
+            if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+                torch_dtype = torch.bfloat16
+            else:
+                torch_dtype = torch.float16
             logger.info("Enabling 4-bit quantization for memory efficiency")
         elif dtype == 'auto':
             # Auto-detect best dtype
@@ -155,13 +163,23 @@ class BaseHandler(ABC):
         if load_in_8bit or load_in_4bit:
             try:
                 from transformers import BitsAndBytesConfig
-                model_kwargs['quantization_config'] = BitsAndBytesConfig(
-                    load_in_8bit=load_in_8bit,
-                    load_in_4bit=load_in_4bit,
-                    bnb_4bit_compute_dtype=torch_dtype if load_in_4bit else None,
-                )
+                if load_in_4bit:
+                    model_kwargs['quantization_config'] = BitsAndBytesConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_quant_type="nf4",  # Use NormalFloat4 quantization
+                        bnb_4bit_compute_dtype=torch_dtype,
+                        bnb_4bit_use_double_quant=True,  # Nested quantization for more memory savings
+                    )
+                else:
+                    model_kwargs['quantization_config'] = BitsAndBytesConfig(
+                        load_in_8bit=True,
+                        bnb_4bit_compute_dtype=None,
+                    )
                 # Add bitsandbytes to dependencies if not present
-                if 'bitsandbytes' not in str(self.get_dependencies()):
+                from core.quantization_config import QuantizationConfig
+                if QuantizationConfig.should_include_bitsandbytes(
+                    self.model_type, self.model_family, self.get_dependencies()
+                ):
                     logger.warning("Model uses quantization but bitsandbytes not in dependencies")
             except ImportError:
                 logger.warning("BitsAndBytesConfig not available, quantization disabled")

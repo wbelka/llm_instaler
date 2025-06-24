@@ -524,6 +524,9 @@
             const modes = modelInfo.capabilities.supported_modes || ['auto'];
             const descriptions = modelInfo.capabilities.mode_descriptions || {};
             
+            console.log('Creating mode buttons:', modes);
+            console.log('ModelInfo:', modelInfo);
+            
             modes.forEach(mode => {
                 const btn = document.createElement('button');
                 btn.className = 'mode-btn';
@@ -705,11 +708,21 @@
             
             try {
                 // Prepare messages
-                const chatMessages = [
-                    { role: 'system', content: settings.systemPrompt },
-                    ...messages,
-                    { role: 'user', content: processedPrompt }
-                ];
+                let chatMessages;
+                
+                // In vision mode, don't include conversation history
+                if (currentMode === 'vision') {
+                    chatMessages = [
+                        { role: 'system', content: settings.systemPrompt },
+                        { role: 'user', content: processedPrompt }
+                    ];
+                } else {
+                    chatMessages = [
+                        { role: 'system', content: settings.systemPrompt },
+                        ...messages,
+                        { role: 'user', content: processedPrompt }
+                    ];
+                }
                 
                 // Prepare request
                 const requestBody = {
@@ -724,11 +737,11 @@
                 // Add images if present (from current upload or history)
                 let imagesToSend = [...uploadedImages];
                 
-                // In vision mode or auto mode for multimodal models, check if there are images in message history
-                if (imagesToSend.length === 0 && 
-                    (currentMode === 'vision' || 
-                     (currentMode === 'auto' && (modelInfo.model_family === 'multimodal' || 
-                                                modelInfo.capabilities.supports_multimodal)))) {
+                // In auto mode for multimodal models, check if there are images in message history
+                // (but not in vision mode - vision mode should be stateless)
+                if (imagesToSend.length === 0 && currentMode !== 'vision' &&
+                    (currentMode === 'auto' && (modelInfo.model_family === 'multimodal' || 
+                                               modelInfo.capabilities.supports_multimodal))) {
                     // Look for the most recent user message with images
                     for (let i = messages.length - 1; i >= 0; i--) {
                         if (messages[i].role === 'user' && messages[i].images && messages[i].images.length > 0) {
@@ -838,16 +851,17 @@
                                         // Clean final text
                                         displayText = fullText.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
                                         
-                                        // Save to message history
-                                        const userMessage = { role: 'user', content: prompt };
-                                        if (uploadedImages.length > 0 && 
-                                            (currentMode === 'vision' || 
-                                             (currentMode === 'auto' && (modelInfo.model_family === 'multimodal' || 
-                                                                         modelInfo.capabilities.supports_multimodal)))) {
-                                            userMessage.images = [...uploadedImages];
+                                        // Save to message history (but not in vision mode to keep context clean)
+                                        if (currentMode !== 'vision') {
+                                            const userMessage = { role: 'user', content: prompt };
+                                            if (uploadedImages.length > 0 && 
+                                                (currentMode === 'auto' && (modelInfo.model_family === 'multimodal' || 
+                                                                           modelInfo.capabilities.supports_multimodal))) {
+                                                userMessage.images = [...uploadedImages];
+                                            }
+                                            messages.push(userMessage);
+                                            messages.push({ role: 'assistant', content: displayText });
                                         }
-                                        messages.push(userMessage);
-                                        messages.push({ role: 'assistant', content: displayText });
                                     }
                                 } catch (e) {
                                     console.error('Failed to parse SSE data:', e);
@@ -933,15 +947,14 @@
                     await typeText(responseLine, `[MODEL] ${data.text || data.answer || 'No response'}`);
                     }
                     
-                    // Save to message history (except for image generation)
-                    if (currentMode !== 'image') {
+                    // Save to message history (except for image generation and vision mode)
+                    if (currentMode !== 'image' && currentMode !== 'vision') {
                         // Save the message with image reference if images were uploaded
                         const userMessage = { role: 'user', content: prompt };
-                        // Save images in context for vision mode or multimodal models in auto mode
+                        // Save images in context for multimodal models in auto mode
                         if (uploadedImages.length > 0 && 
-                            (currentMode === 'vision' || 
-                             (currentMode === 'auto' && (modelInfo.model_family === 'multimodal' || 
-                                                         modelInfo.capabilities.supports_multimodal)))) {
+                            (currentMode === 'auto' && (modelInfo.model_family === 'multimodal' || 
+                                                       modelInfo.capabilities.supports_multimodal))) {
                             // Store image data with the message
                             userMessage.images = [...uploadedImages];
                         }

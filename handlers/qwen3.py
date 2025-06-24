@@ -34,9 +34,7 @@ class Qwen3Handler(TransformerHandler):
             else:
                 updated_deps.append(dep)
 
-        # Add bitsandbytes for quantization support
-        if 'bitsandbytes' not in str(updated_deps):
-            updated_deps.append('bitsandbytes>=0.41.0')
+        # Quantization support is inherited from TransformerHandler
 
         return updated_deps
 

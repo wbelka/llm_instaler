@@ -118,7 +118,9 @@ class HandlerRegistry:
             self._handlers['gemma-3'] = Gemma3Handler
             self._handlers['gemma3_vlm'] = Gemma3Handler
             self._handlers['paligemma'] = Gemma3Handler
-        except ImportError:
+        except ImportError as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to import Gemma3Handler: {e}")
             pass
 
     def register_handler(
@@ -161,6 +163,10 @@ class HandlerRegistry:
         model_id = model_info.get('model_id', '').lower()
         model_family = model_info.get('model_family', '')
         model_type = model_info.get('model_type', '')
+        
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Registry: Looking for handler - model_id={model_id}, model_type={model_type}, model_family={model_family}")
 
         # Check for model-specific handlers
         if 'janus' in model_id:
@@ -173,11 +179,23 @@ class HandlerRegistry:
                 return self._handlers['qwen3']
 
         # Check for Gemma 3 multimodal models
+        # Check model_type first as it's more specific
+        if model_type == 'gemma3':
+            logger.info(f"Registry: Checking for gemma3 handler by model_type")
+            if 'gemma3' in self._handlers:
+                logger.info(f"Registry: Found Gemma3Handler by model_type")
+                return self._handlers['gemma3']
+            else:
+                logger.warning(f"Registry: gemma3 not in handlers: {list(self._handlers.keys())}")
+        
+        # Also check by model ID patterns
         if (('gemma-3' in model_id or 'gemma3' in model_id) and
             (model_info.get('is_gemma3_multimodal', False) or
              'vision' in str(model_info.get('config', {})).lower() or
              model_family == 'multimodal')):
+            logger.info(f"Registry: Checking for gemma3 handler by model_id pattern")
             if 'gemma3' in self._handlers:
+                logger.info(f"Registry: Found Gemma3Handler by model_id pattern")
                 return self._handlers['gemma3']
 
         # Check for PaliGemma models
@@ -201,11 +219,14 @@ class HandlerRegistry:
                 return self._handlers['code-generation']
 
         # Try to find in registered handlers
-        if model_family and model_family in self._handlers:
-            return self._handlers[model_family]
-
+        # Check model_type first as it's more specific than model_family
         if model_type and model_type in self._handlers:
+            logger.info(f"Registry: Found handler for model_type '{model_type}': {self._handlers[model_type].__name__}")
             return self._handlers[model_type]
+        
+        if model_family and model_family in self._handlers:
+            logger.info(f"Registry: Found handler for model_family '{model_family}': {self._handlers[model_family].__name__}")
+            return self._handlers[model_family]
 
         # Fall back to dynamic loading
         try:
