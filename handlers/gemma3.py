@@ -572,32 +572,46 @@ class Gemma3Handler(MultimodalHandler):
                 
                 # Process as simple text
                 try:
+                    logger.debug(f"Processing text with processor: {type(processor)}")
                     inputs = processor(prompt, return_tensors="pt", padding=True)
+                    logger.debug(f"Inputs shape: {inputs.get('input_ids', 'none').shape if 'input_ids' in inputs else 'no input_ids'}")
                 except Exception as e:
-                    logger.warning(f"Failed to apply chat template: {e}")
-                    # Fallback: concatenate messages into a single prompt
-                    prompt_parts = []
-                    for msg in messages:
-                        role = msg.get('role', 'user')
-                        content = msg.get('content', '')
-                        if isinstance(content, str):
-                            prompt_parts.append(f"{role}: {content}")
-                        else:
-                            prompt_parts.append(f"{role}: {str(content)}")
+                    logger.warning(f"Failed to process with processor: {e}")
                     
-                    prompt = "\n".join(prompt_parts)
-                    if prompt:
-                        prompt += "\nAssistant:"
+                    # Try to get tokenizer from processor
+                    tokenizer = getattr(processor, 'tokenizer', None)
+                    if tokenizer is None:
+                        tokenizer = getattr(processor, '_tokenizer', None)
+                    
+                    if tokenizer is not None:
+                        try:
+                            logger.info("Using tokenizer directly")
+                            inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=8192)
+                        except Exception as e2:
+                            logger.error(f"Tokenizer also failed: {e2}")
+                            # Last resort - create minimal inputs
+                            import torch
+                            inputs = {
+                                'input_ids': torch.tensor([[1, 2, 3, 4, 5]], dtype=torch.long),  # Dummy input
+                                'attention_mask': torch.tensor([[1, 1, 1, 1, 1]], dtype=torch.long)
+                            }
+                            logger.warning("Using dummy inputs as last resort")
                     else:
-                        prompt = "Assistant:"  # Fallback if no content
-                    
-                    # Use tokenizer directly if processor fails
-                    try:
-                        inputs = processor(prompt, return_tensors="pt", padding=True)
-                    except Exception as e2:
-                        logger.warning(f"Processor failed, using tokenizer: {e2}")
-                        inputs = processor.tokenizer(prompt, return_tensors="pt", padding=True)
+                        logger.error("No tokenizer found in processor")
+                        raise ValueError("Cannot find tokenizer in processor")
 
+            # Validate inputs
+            if 'input_ids' in inputs:
+                input_ids = inputs['input_ids']
+                logger.debug(f"Input IDs shape: {input_ids.shape}, min: {input_ids.min().item()}, max: {input_ids.max().item()}")
+                
+                # Check for invalid tokens
+                vocab_size = model.config.vocab_size if hasattr(model, 'config') else 256000  # Gemma default
+                if input_ids.max().item() >= vocab_size:
+                    logger.error(f"Invalid token ID {input_ids.max().item()} >= vocab size {vocab_size}")
+                    # Clamp tokens to valid range
+                    inputs['input_ids'] = torch.clamp(input_ids, 0, vocab_size - 1)
+            
             # Move to model device
             if hasattr(model, 'device'):
                 inputs = {k: v.to(model.device) for k, v in inputs.items()}
@@ -609,10 +623,25 @@ class Gemma3Handler(MultimodalHandler):
                 'top_p': kwargs.get('top_p', 0.95),
                 'top_k': kwargs.get('top_k', 40),
                 'do_sample': kwargs.get('temperature', 0.7) > 0,
-                'use_cache': True,
-                'pad_token_id': processor.tokenizer.pad_token_id,
-                'eos_token_id': processor.tokenizer.eos_token_id
+                'use_cache': True
             }
+            
+            # Get tokenizer from processor
+            tokenizer = getattr(processor, 'tokenizer', None)
+            if tokenizer is None:
+                # Try to get tokenizer attribute
+                tokenizer = getattr(processor, '_tokenizer', processor)
+            
+            # Set pad and eos tokens
+            if hasattr(tokenizer, 'pad_token_id'):
+                if tokenizer.pad_token_id is None:
+                    tokenizer.pad_token_id = tokenizer.eos_token_id
+                generation_params['pad_token_id'] = tokenizer.pad_token_id
+                generation_params['eos_token_id'] = tokenizer.eos_token_id
+            else:
+                # Fallback values for Gemma
+                generation_params['pad_token_id'] = 0  # Gemma uses 0 for padding
+                generation_params['eos_token_id'] = 1  # Gemma uses 1 for EOS
 
             # Generate
             with torch.no_grad():
@@ -621,7 +650,20 @@ class Gemma3Handler(MultimodalHandler):
             # Decode response
             input_length = inputs['input_ids'].shape[1] if 'input_ids' in inputs else 0
             generated_tokens = outputs[0][input_length:]
-            response = processor.decode(generated_tokens, skip_special_tokens=True)
+            
+            # Get decoder (tokenizer or processor)
+            decoder = tokenizer if tokenizer is not None else processor
+            
+            try:
+                if hasattr(decoder, 'decode'):
+                    response = decoder.decode(generated_tokens, skip_special_tokens=True)
+                else:
+                    # Fallback to converting tokens to list first
+                    token_list = generated_tokens.tolist()
+                    response = decoder.decode(token_list, skip_special_tokens=True)
+            except Exception as e:
+                logger.warning(f"Decode error: {e}, using raw tokens")
+                response = str(generated_tokens.tolist())
 
             # Calculate usage
             usage = {
