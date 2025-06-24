@@ -406,6 +406,9 @@ class Gemma3Handler(MultimodalHandler):
 
             # Prepare messages in Gemma 3 format
             messages = kwargs.get('messages', [])
+            
+            # Debug: log incoming messages format
+            logger.debug(f"Incoming messages: {messages}")
 
             if not messages:
                 # Build messages from text/images if not provided
@@ -425,36 +428,57 @@ class Gemma3Handler(MultimodalHandler):
                         "content": text
                     })
             else:
-                # Convert messages to simple format if needed
-                simple_messages = []
+                # For text-only chat, ensure messages are in the correct format
+                # If messages contain structured content, we need to handle it
+                processed_messages = []
                 for msg in messages:
                     role = msg.get('role', 'user')
                     content = msg.get('content', '')
                     
-                    # Handle different content formats
+                    # If content is already a string, keep it simple
                     if isinstance(content, str):
-                        simple_messages.append({
+                        processed_messages.append({
                             "role": role,
                             "content": content
                         })
                     elif isinstance(content, list):
-                        # Extract text from structured content
-                        text_parts = []
+                        # For Gemma3, we need to keep the structured format for processor
+                        # but ensure it's valid
+                        processed_content = []
                         for item in content:
-                            if isinstance(item, dict) and item.get('type') == 'text':
-                                text_parts.append(item.get('text', ''))
+                            if isinstance(item, dict) and 'type' in item:
+                                if item['type'] == 'text':
+                                    processed_content.append({
+                                        'type': 'text',
+                                        'text': item.get('text', '')
+                                    })
+                                elif item['type'] == 'image' and pil_images:
+                                    # Skip image entries if we're in text-only mode
+                                    continue
                             elif isinstance(item, str):
-                                text_parts.append(item)
-                        simple_messages.append({
-                            "role": role,
-                            "content": ' '.join(text_parts)
-                        })
+                                processed_content.append({
+                                    'type': 'text',
+                                    'text': item
+                                })
+                        
+                        # If we only have text content, simplify to string
+                        if all(item.get('type') == 'text' for item in processed_content):
+                            text_parts = [item.get('text', '') for item in processed_content]
+                            processed_messages.append({
+                                "role": role,
+                                "content": ' '.join(text_parts)
+                            })
+                        else:
+                            processed_messages.append({
+                                "role": role,
+                                "content": processed_content
+                            })
                     else:
-                        simple_messages.append({
+                        processed_messages.append({
                             "role": role,
                             "content": str(content)
                         })
-                messages = simple_messages
+                messages = processed_messages
 
             # Handle multimodal input with images
             if pil_images:
@@ -468,13 +492,28 @@ class Gemma3Handler(MultimodalHandler):
                 )
             else:
                 # Text-only input - apply chat template
-                inputs = processor.apply_chat_template(
-                    messages,
-                    add_generation_prompt=True,
-                    tokenize=True,
-                    return_dict=True,
-                    return_tensors="pt"
-                )
+                try:
+                    inputs = processor.apply_chat_template(
+                        messages,
+                        add_generation_prompt=True,
+                        tokenize=True,
+                        return_dict=True,
+                        return_tensors="pt"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to apply chat template: {e}")
+                    # Fallback: concatenate messages into a single prompt
+                    prompt_parts = []
+                    for msg in messages:
+                        role = msg.get('role', 'user')
+                        content = msg.get('content', '')
+                        if isinstance(content, str):
+                            prompt_parts.append(f"{role}: {content}")
+                        else:
+                            prompt_parts.append(f"{role}: {str(content)}")
+                    
+                    prompt = "\n".join(prompt_parts) + "\nAssistant:"
+                    inputs = processor(prompt, return_tensors="pt", padding=True)
 
             # Move to model device
             if hasattr(model, 'device'):
