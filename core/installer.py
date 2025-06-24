@@ -128,16 +128,32 @@ class ModelInstaller:
                     handler = handler_class(model_info)
                     # Get handler's requirements
                     handler_requirements = handler.analyze()
-                    # Update base dependencies with handler's dependencies
-                    if hasattr(handler_requirements, 'python_packages'):
-                        requirements.base_dependencies = (
-                            handler_requirements.python_packages
-                        )
-                        self._log_install(
-                            install_log_path, "INFO",
-                            f"Updated dependencies from handler: "
-                            f"{requirements.base_dependencies}"
-                        )
+                    # Update requirements with handler's analysis
+                    if handler_requirements:
+                        # Use handler's base_dependencies if available
+                        if hasattr(handler_requirements, 'base_dependencies') and handler_requirements.base_dependencies:
+                            requirements.base_dependencies = handler_requirements.base_dependencies
+                            self._log_install(
+                                install_log_path, "INFO",
+                                f"Updated dependencies from handler: "
+                                f"{requirements.base_dependencies}"
+                            )
+                        # Also check for python_packages (backward compatibility)
+                        elif hasattr(handler_requirements, 'python_packages'):
+                            requirements.base_dependencies = handler_requirements.python_packages
+                            self._log_install(
+                                install_log_path, "INFO",
+                                f"Updated dependencies from handler (python_packages): "
+                                f"{requirements.base_dependencies}"
+                            )
+                        
+                        # Update other requirements attributes if available
+                        if hasattr(handler_requirements, 'special_dependencies'):
+                            requirements.special_dependencies = handler_requirements.special_dependencies
+                        if hasattr(handler_requirements, 'optional_dependencies'):
+                            requirements.optional_dependencies = handler_requirements.optional_dependencies
+                        if hasattr(handler_requirements, 'capabilities'):
+                            requirements.capabilities = handler_requirements.capabilities
             except Exception as e:
                 self._log_install(
                     install_log_path, "WARNING",
@@ -538,25 +554,32 @@ class ModelInstaller:
         )
 
         if needs_quantization:
-            # Check if bitsandbytes is in optional deps
-            bitsandbytes_found = False
-            for dep in optional_deps:
-                if 'bitsandbytes' in dep:
-                    # Move from optional to required
-                    base_deps.append(dep)
-                    optional_deps.remove(dep)
-                    bitsandbytes_found = True
-                    self._log_install(log_path, "INFO",
-                                      f"Added {dep} to required dependencies for quantization")
-                    break
+            # Check if bitsandbytes is already in base_deps
+            bitsandbytes_in_base = any('bitsandbytes' in dep for dep in base_deps)
+            
+            if not bitsandbytes_in_base:
+                # Check if bitsandbytes is in optional deps
+                bitsandbytes_found = False
+                for dep in optional_deps:
+                    if 'bitsandbytes' in dep:
+                        # Move from optional to required
+                        base_deps.append(dep)
+                        optional_deps.remove(dep)
+                        bitsandbytes_found = True
+                        self._log_install(log_path, "INFO",
+                                          f"Moved {dep} from optional to required dependencies for quantization")
+                        break
 
-            # If not found anywhere, add it
-            if not bitsandbytes_found:
-                from core.quantization_config import QuantizationConfig
-                bitsandbytes_version = QuantizationConfig.get_bitsandbytes_version()
-                base_deps.append(bitsandbytes_version)
+                # If not found anywhere, add it
+                if not bitsandbytes_found:
+                    from core.quantization_config import QuantizationConfig
+                    bitsandbytes_version = QuantizationConfig.get_bitsandbytes_version()
+                    base_deps.append(bitsandbytes_version)
+                    self._log_install(log_path, "INFO",
+                                      f"Added {bitsandbytes_version} for quantization support")
+            else:
                 self._log_install(log_path, "INFO",
-                                  f"Added {bitsandbytes_version} for quantization support")
+                                  "bitsandbytes already in base dependencies for quantization")
 
         self._log_install(log_path, "INFO", f"Installing dependencies: {base_deps}")
 
