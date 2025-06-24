@@ -796,13 +796,18 @@ def main():
     tb_process = None
     if 'tensorboard' in training_config.report_to:
         try:
+            # Kill any existing TensorBoard process first
+            subprocess.run(['pkill', '-f', 'tensorboard'], capture_output=True)
+            time.sleep(1)  # Give it time to shut down
+            
             tb_process = subprocess.Popen([
                 'tensorboard',
                 '--logdir', str(output_dir / "logs"),
                 '--port', '6006',
                 '--bind_all'
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            print("📊 TensorBoard started at http://localhost:6006")
+            print(f"📊 TensorBoard started at http://localhost:6006")
+            print(f"   Monitoring logs at: {output_dir / 'logs'}")
         except Exception as e:
             logger.warning(f"Failed to start TensorBoard: {e}")
     
