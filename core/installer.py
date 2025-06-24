@@ -984,7 +984,7 @@ To install manually:
         info = {
             "torch_version": None,
             "cuda_suffix": None,
-            "index_url": "https://download.pytorch.org/whl/cu118"  # Default
+            "index_url": "https://download.pytorch.org/whl/cu124"  # Default to CUDA 12.4
         }
 
         try:
@@ -1006,15 +1006,9 @@ To install manually:
                 if info["torch_version"] and '+cu' in info["torch_version"]:
                     info["cuda_suffix"] = info["torch_version"].split('+')[1]
 
-                    # Map to index URL
-                    index_urls = {
-                        "cu121": "https://download.pytorch.org/whl/cu121",
-                        "cu118": "https://download.pytorch.org/whl/cu118",
-                        "cu117": "https://download.pytorch.org/whl/cu117",
-                    }
-                    info["index_url"] = index_urls.get(
-                        info["cuda_suffix"], info["index_url"]
-                    )
+                    # Map to index URL - always use cu124 for CUDA
+                    if info["cuda_suffix"].startswith("cu"):
+                        info["index_url"] = "https://download.pytorch.org/whl/cu124"
                 elif info["torch_version"] and '+cpu' in info["torch_version"]:
                     # CPU-only installation
                     info["cuda_suffix"] = "cpu"
@@ -1056,25 +1050,12 @@ To install manually:
                                                 line.split('release')[1]
                                                 .split(',')[0].strip()
                                             )
-                                            if cuda_version.startswith("12"):
-                                                info["cuda_suffix"] = "cu121"
-                                                info["index_url"] = (
-                                                    "https://download.pytorch.org"
-                                                    "/whl/cu121"
-                                                )
-                                            elif cuda_version.startswith("11.8"):
-                                                info["cuda_suffix"] = "cu118"
-                                                info["index_url"] = (
-                                                    "https://download.pytorch.org"
-                                                    "/whl/cu118"
-                                                )
-                                            else:
-                                                # Default CUDA
-                                                info["cuda_suffix"] = "cu118"
-                                                info["index_url"] = (
-                                                    "https://download.pytorch.org"
-                                                    "/whl/cu118"
-                                                )
+                                            # Always use CUDA 12.4
+                                            info["cuda_suffix"] = "cu124"
+                                            info["index_url"] = (
+                                                "https://download.pytorch.org"
+                                                "/whl/cu124"
+                                            )
                                             break
                     except Exception:
                         # If detection fails, assume CPU
@@ -1299,22 +1280,20 @@ To install manually:
         )
 
         # Determine versions based on CUDA
-        # Use >= 2.6.0 for security fix (CVE-2025-32434)
-        if cuda_suffix == "cu121" or cuda_suffix.startswith("cu12"):
-            # Use cu124 for CUDA 12.x to get torch 2.6+
+        # Always use cu124 for CUDA, or CPU for non-CUDA
+        torch_version = "torch>=2.6.0"
+        vision_version = "torchvision"
+        audio_version = "torchaudio"
+        
+        if cuda_suffix and cuda_suffix.startswith("cu"):
+            # Any CUDA version - use cu124
             index_url = "https://download.pytorch.org/whl/cu124"
-            torch_version = "torch>=2.6.0"
-            vision_version = "torchvision"
-            audio_version = "torchaudio"
-        elif cuda_suffix == "cu118":
-            torch_version = "torch>=2.6.0"
-            vision_version = "torchvision"
-            audio_version = "torchaudio"
+        elif cuda_suffix == "cpu":
+            # CPU only
+            index_url = "https://download.pytorch.org/whl/cpu"
         else:
-            # CPU or default
-            torch_version = "torch>=2.6.0"
-            vision_version = "torchvision"
-            audio_version = "torchaudio"
+            # Default to CUDA 12.4
+            index_url = "https://download.pytorch.org/whl/cu124"
 
         print_info(f"Installing torch packages for {cuda_suffix}...")
         subprocess.run(
