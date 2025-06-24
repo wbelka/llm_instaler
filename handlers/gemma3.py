@@ -432,48 +432,70 @@ class Gemma3Handler(MultimodalHandler):
                 if kwargs.get('system_prompt'):
                     messages.append({
                         "role": "system",
-                        "content": [{"type": "text", "text": kwargs['system_prompt']}]
+                        "content": kwargs['system_prompt']
                     })
 
                 # Build user message
-                if pil_images:
-                    # Multimodal input with images
-                    user_content = []
-
-                    # Add images first (Gemma 3 processes images before text)
-                    for img in pil_images:
-                        user_content.append({"type": "image", "image": img})
-
-                    # Add text
-                    if text:
-                        user_content.append({"type": "text", "text": text})
+                if text:
+                    messages.append({
+                        "role": "user",
+                        "content": text
+                    })
+            else:
+                # Convert messages to simple format if needed
+                simple_messages = []
+                for msg in messages:
+                    role = msg.get('role', 'user')
+                    content = msg.get('content', '')
+                    
+                    # Handle different content formats
+                    if isinstance(content, str):
+                        simple_messages.append({
+                            "role": role,
+                            "content": content
+                        })
+                    elif isinstance(content, list):
+                        # Extract text from structured content
+                        text_parts = []
+                        for item in content:
+                            if isinstance(item, dict) and item.get('type') == 'text':
+                                text_parts.append(item.get('text', ''))
+                            elif isinstance(item, str):
+                                text_parts.append(item)
+                        simple_messages.append({
+                            "role": role,
+                            "content": ' '.join(text_parts)
+                        })
                     else:
-                        # Default prompt if only images provided
-                        user_content.append({"type": "text", "text": "What is in this image?"})
+                        simple_messages.append({
+                            "role": role,
+                            "content": str(content)
+                        })
+                messages = simple_messages
 
-                    messages.append({
-                        "role": "user",
-                        "content": user_content
-                    })
-                else:
-                    # Text-only input
-                    messages.append({
-                        "role": "user",
-                        "content": text or ""
-                    })
-
-            # Apply chat template and prepare inputs
-            text_input = processor.apply_chat_template(
-                messages,
-                add_generation_prompt=True,
-                tokenize=True,
-                return_dict=True,
-                return_tensors="pt"
-            )
+            # Handle multimodal input with images
+            if pil_images:
+                # For multimodal input, we need to prepare it differently
+                # Gemma 3 expects images to be processed separately
+                inputs = processor(
+                    text=messages,
+                    images=pil_images,
+                    return_tensors="pt",
+                    padding=True
+                )
+            else:
+                # Text-only input - apply chat template
+                inputs = processor.apply_chat_template(
+                    messages,
+                    add_generation_prompt=True,
+                    tokenize=True,
+                    return_dict=True,
+                    return_tensors="pt"
+                )
 
             # Move to model device
             if hasattr(model, 'device'):
-                text_input = {k: v.to(model.device) for k, v in text_input.items()}
+                inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
             # Prepare generation parameters
             generation_params = {
@@ -489,22 +511,23 @@ class Gemma3Handler(MultimodalHandler):
 
             # Generate
             with torch.no_grad():
-                outputs = model.generate(**text_input, **generation_params)
+                outputs = model.generate(**inputs, **generation_params)
 
             # Decode response
-            generated_tokens = outputs[0][text_input['input_ids'].shape[1]:]
+            input_length = inputs['input_ids'].shape[1] if 'input_ids' in inputs else 0
+            generated_tokens = outputs[0][input_length:]
             response = processor.decode(generated_tokens, skip_special_tokens=True)
 
             # Calculate usage
             usage = {
-                'prompt_tokens': text_input['input_ids'].shape[1],
+                'prompt_tokens': input_length,
                 'completion_tokens': len(generated_tokens),
                 'total_tokens': outputs.shape[1]
             }
 
             # Clean up to free memory
             del outputs
-            del text_input
+            del inputs
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
