@@ -48,6 +48,10 @@ TENSORBOARD_PORT=6006
 PATIENCE=3
 OVERFITTING_THRESHOLD=0.1
 MIN_EVALUATIONS=5
+USE_8BIT=false
+USE_4BIT=false
+MAX_SEQ_LENGTH=""
+MODE=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -113,6 +117,22 @@ while [[ $# -gt 0 ]]; do
             ;;
         --min-evaluations)
             MIN_EVALUATIONS="$2"
+            shift 2
+            ;;
+        --use-8bit)
+            USE_8BIT=true
+            shift
+            ;;
+        --use-4bit)
+            USE_4BIT=true
+            shift
+            ;;
+        --max-seq-length)
+            MAX_SEQ_LENGTH="$2"
+            shift 2
+            ;;
+        --mode)
+            MODE="$2"
             shift 2
             ;;
         *)
@@ -204,6 +224,10 @@ CMD="python train_lora.py --data \"$DATA_PATH\" --output \"$OUTPUT_PATH\""
 [ ! -z "$RESUME_FROM" ] && CMD="$CMD --resume-from \"$RESUME_FROM\""
 [ ! -z "$PATIENCE" ] && CMD="$CMD --patience $PATIENCE"
 [ ! -z "$OVERFITTING_THRESHOLD" ] && CMD="$CMD --overfitting-threshold $OVERFITTING_THRESHOLD"
+[ "$USE_8BIT" = true ] && CMD="$CMD --use-8bit"
+[ "$USE_4BIT" = true ] && CMD="$CMD --use-4bit"
+[ ! -z "$MAX_SEQ_LENGTH" ] && CMD="$CMD --max-seq-length $MAX_SEQ_LENGTH"
+[ ! -z "$MODE" ] && CMD="$CMD --mode $MODE"
 
 # Function to cleanup on exit
 cleanup() {
