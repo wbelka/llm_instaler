@@ -134,33 +134,54 @@ class TransformerHandler(BaseHandler):
 
         # Use base handler's quantization config
         quant_config, torch_dtype = self.get_quantization_config(dtype, load_in_8bit, load_in_4bit)
-        
+
         # Load configuration
         model_kwargs = {
             'torch_dtype': torch_dtype,
             'low_cpu_mem_usage': True,
             'trust_remote_code': self.model_info.get('trust_remote_code', False)
         }
-        
+
         # Merge quantization config
         model_kwargs.update(quant_config)
 
         # Device map for multi-GPU or CPU offloading
         if device == 'auto':
             model_kwargs['device_map'] = 'auto'
+            # Add offload settings for better memory management
+            model_kwargs['offload_folder'] = 'offload'
+            model_kwargs['offload_state_dict'] = True
+
+            # For very large models, use sequential device map
+            model_size = self.model_info.get('model_size_b', 0)
+            if model_size > 30:  # 30B+ models
+                model_kwargs['device_map'] = 'sequential'
+                model_kwargs['max_memory'] = {0: '20GiB', 'cpu': '100GiB'}
         elif device != 'cpu':
             model_kwargs['device_map'] = {'': device}
 
-        # Load model
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            **model_kwargs
-        )
+        # Try to use Flash Attention 2 if available
+        try:
+            model_kwargs['attn_implementation'] = 'flash_attention_2'
+            model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                **model_kwargs
+            )
+            logger.info("Using Flash Attention 2 for better performance")
+        except Exception:
+            # Fallback to standard attention
+            model_kwargs.pop('attn_implementation', None)
+            model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                **model_kwargs
+            )
+            logger.info("Using standard attention implementation")
 
-        # Load tokenizer
+        # Load tokenizer with use_fast=True
         tokenizer = AutoTokenizer.from_pretrained(
             model_path,
-            trust_remote_code=self.model_info.get('trust_remote_code', False)
+            trust_remote_code=self.model_info.get('trust_remote_code', False),
+            use_fast=True
         )
 
         # Set padding token if not present
@@ -340,24 +361,24 @@ class TransformerHandler(BaseHandler):
 
         else:
             raise ValueError(f"Unknown training method: {training_method}")
-    
+
     def generate_text(self, prompt: str = None, messages: List[Dict] = None,
-                     model=None, tokenizer=None, **kwargs) -> Dict[str, Any]:
+                      model=None, tokenizer=None, **kwargs) -> Dict[str, Any]:
         """Generate text using transformer model.
-        
+
         Args:
             prompt: Text prompt
             messages: Chat messages
             model: Model instance
             tokenizer: Tokenizer instance
             **kwargs: Generation parameters
-            
+
         Returns:
             Dictionary with generated text and metadata
         """
         if not model or not tokenizer:
             raise ValueError("Model and tokenizer required for text generation")
-        
+
         # Prepare input
         if messages:
             # Apply chat template if available
@@ -368,16 +389,22 @@ class TransformerHandler(BaseHandler):
                 text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
         else:
             text = prompt or ""
-        
+
         # Tokenize
-        inputs = tokenizer(text, return_tensors="pt", truncation=True, 
-                          max_length=kwargs.get('max_length', 2048))
-        
+        inputs = tokenizer(text, return_tensors="pt", truncation=True,
+                           max_length=kwargs.get('max_length', 2048))
+
         if hasattr(model, "device"):
             inputs = {k: v.to(model.device) for k, v in inputs.items()}
-        
-        # Generate
+
+        # Generate with memory optimization
         import torch
+
+        # Clear GPU cache before generation
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
@@ -390,24 +417,33 @@ class TransformerHandler(BaseHandler):
                 eos_token_id=tokenizer.eos_token_id,
                 **{k: v for k, v in kwargs.items() if k in ['repetition_penalty', 'length_penalty']}
             )
-        
+
         # Decode
         generated_ids = outputs[0][inputs['input_ids'].shape[1]:]
         generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
-        
+
+        # Calculate usage
+        usage = {
+            'prompt_tokens': inputs['input_ids'].shape[1],
+            'completion_tokens': generated_ids.shape[0],
+            'total_tokens': outputs[0].shape[0]
+        }
+
+        # Clean up to free memory
+        del outputs
+        del inputs
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
         return {
             'text': generated_text,
-            'usage': {
-                'prompt_tokens': inputs['input_ids'].shape[1],
-                'completion_tokens': generated_ids.shape[0],
-                'total_tokens': outputs[0].shape[0]
-            }
+            'usage': usage
         }
-    
+
     def get_supported_modes(self) -> List[str]:
         """Get supported generation modes for transformer models."""
         return ['auto', 'chat', 'complete', 'instruct', 'creative', 'code', 'analyze', 'translate', 'summarize']
-    
+
     def get_mode_descriptions(self) -> Dict[str, str]:
         """Get mode descriptions."""
         return {
@@ -421,7 +457,7 @@ class TransformerHandler(BaseHandler):
             'translate': 'Translation mode',
             'summarize': 'Summarization mode'
         }
-    
+
     def apply_mode_settings(self, mode: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """Apply mode-specific settings."""
         mode_settings = {
@@ -431,8 +467,8 @@ class TransformerHandler(BaseHandler):
             'translate': {'temperature': 0.3, 'top_p': 0.9},
             'summarize': {'temperature': 0.5, 'top_p': 0.9}
         }
-        
+
         if mode in mode_settings:
             params.update(mode_settings[mode])
-        
+
         return params
