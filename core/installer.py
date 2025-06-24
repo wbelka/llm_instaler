@@ -610,8 +610,8 @@ class ModelInstaller:
                 print_info(f"Installing base dependencies: {', '.join(base_deps)}")
 
                 # Separate CUDA-dependent packages from regular PyPI packages
-                cuda_deps = ["xformers", "triton", "ninja",
-                             "flash-attn", "deepspeed", "bitsandbytes"]
+                # Only packages that are actually in PyTorch index
+                cuda_deps = ["xformers", "triton"]
                 
                 # Split dependencies
                 cuda_packages = []
@@ -673,10 +673,9 @@ class ModelInstaller:
                     # Build install command
                     install_cmd = [str(pip_path), "install", dep]
 
-                    # Add index URL for CUDA-dependent packages
-                    cuda_deps = ["xformers", "triton", "ninja",
-                                 "flash-attn", "deepspeed", "bitsandbytes"]
-                    if dep in cuda_deps and torch_info.get("index_url"):
+                    # Add index URL for packages that are in PyTorch index
+                    pytorch_index_deps = ["xformers", "triton"]
+                    if dep in pytorch_index_deps and torch_info.get("index_url"):
                         install_cmd.extend(["--index-url", torch_info["index_url"]])
 
                     subprocess.run(
