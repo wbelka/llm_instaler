@@ -189,21 +189,27 @@ class Qwen3Handler(TransformerHandler):
         # Decode and parse thinking content
         output_ids = outputs[0][len(inputs['input_ids'][0]):].tolist()
         
+        # Decode the full response
+        full_response = tokenizer.decode(output_ids, skip_special_tokens=True).strip()
+        
         # Parse thinking content if present
         thinking_content = ""
-        response_content = ""
+        response_content = full_response
         
-        if enable_thinking:
-            try:
-                # Find </think> token (151668)
-                index = len(output_ids) - output_ids[::-1].index(self.thinking_token_id)
-                thinking_content = tokenizer.decode(output_ids[:index], skip_special_tokens=True).strip()
-                response_content = tokenizer.decode(output_ids[index:], skip_special_tokens=True).strip()
-            except ValueError:
-                # No thinking token found, all content is response
-                response_content = tokenizer.decode(output_ids, skip_special_tokens=True).strip()
-        else:
-            response_content = tokenizer.decode(output_ids, skip_special_tokens=True).strip()
+        if enable_thinking and '<think>' in full_response and '</think>' in full_response:
+            # Extract thinking content using text markers
+            think_start = full_response.find('<think>')
+            think_end = full_response.find('</think>')
+            
+            if think_start >= 0 and think_end > think_start:
+                # Extract thinking content (without tags)
+                thinking_content = full_response[think_start + 7:think_end].strip()
+                
+                # Remove the entire thinking block from response
+                response_content = (
+                    full_response[:think_start] + 
+                    full_response[think_end + 8:]
+                ).strip()
         
         result = {
             'text': response_content,

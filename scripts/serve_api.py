@@ -1838,13 +1838,40 @@ async def generate_stream(request: GenerateRequest):
             
             # Stream tokens
             generated_text = ""
+            in_thinking = False
+            thinking_text = ""
+            
             for new_text in streamer:
                 if new_text:
                     generated_text += new_text
+                    
+                    # Check for thinking tags (for Qwen3)
+                    if '<think>' in new_text:
+                        in_thinking = True
+                    if '</think>' in new_text:
+                        in_thinking = False
+                        # Send the complete thinking block
+                        if thinking_text:
+                            yield {
+                                "data": json.dumps({
+                                    "token": new_text,
+                                    "text": generated_text,
+                                    "thinking": thinking_text,
+                                    "finished": False
+                                })
+                            }
+                            thinking_text = ""
+                            await asyncio.sleep(0)
+                            continue
+                    
+                    if in_thinking:
+                        thinking_text += new_text
+                    
                     yield {
                         "data": json.dumps({
                             "token": new_text,
                             "text": generated_text,
+                            "is_thinking": in_thinking,
                             "finished": False
                         })
                     }
