@@ -400,9 +400,9 @@
         
         <div class="image-upload-area" id="imageUploadArea">
             <button class="control-btn" onclick="document.getElementById('imageInput').click()">
-                [+] ATTACH IMAGE
+                [+] ATTACH FILE
             </button>
-            <input type="file" id="imageInput" accept="image/*" multiple style="display: none;" onchange="handleImageUpload(event)">
+            <input type="file" id="imageInput" accept="image/*,.txt,.md,.log,.csv,.json,.xml,.yaml,.yml,.py,.js,.java,.cpp,.c,.h,.hpp,.rs,.go,.php,.rb,.swift,.kt,.scala,.r,.m,.html,.css,.sql" multiple style="display: none;" onchange="handleFileUpload(event)">
             <div class="image-preview" id="imagePreview"></div>
         </div>
         
@@ -465,6 +465,7 @@
         let currentMode = 'auto';
         let messages = [];
         let uploadedImages = [];
+        let uploadedFiles = [];
         let isProcessing = false;
         let commandHistory = [];
         let historyIndex = -1;
@@ -504,10 +505,11 @@
                 addTerminalLine('SYSTEM', `Type 'help' for available commands`, 'info');
                 addTerminalLine('SYSTEM', '─'.repeat(80), 'info');
                 
-                // Show/hide image upload based on model capabilities
+                // Show/hide upload area based on model capabilities
                 if (modelInfo.model_family === 'multimodal' || 
                     modelInfo.capabilities.supports_multimodal ||
-                    modelInfo.capabilities.supported_modes?.includes('vision')) {
+                    modelInfo.capabilities.supported_modes?.includes('vision') ||
+                    modelInfo.model_family === 'language-model') {
                     document.getElementById('imageUploadArea').style.display = 'block';
                 }
                 
@@ -630,6 +632,21 @@
             if (isProcessing) return;
             
             isProcessing = true;
+            
+            // Process files for analyze/translate/summarize modes
+            let processedPrompt = prompt;
+            if (uploadedFiles.length > 0 && ['analyze', 'translate', 'summarize'].includes(currentMode)) {
+                // Add file contents to prompt
+                let fileContents = '\n\n--- Attached Files ---\n';
+                uploadedFiles.forEach(file => {
+                    fileContents += `\n[File: ${file.name}]\n${file.content}\n[End of ${file.name}]\n`;
+                });
+                processedPrompt = prompt + fileContents;
+                
+                // Show file indicators
+                addTerminalLine('SYSTEM', `Processing ${uploadedFiles.length} file(s): ${uploadedFiles.map(f => f.name).join(', ')}`, 'info');
+            }
+            
             addTerminalLine('USER', prompt, 'prompt');
             
             // Show uploaded images in chat if any
@@ -691,7 +708,7 @@
                 const chatMessages = [
                     { role: 'system', content: settings.systemPrompt },
                     ...messages,
-                    { role: 'user', content: prompt }
+                    { role: 'user', content: processedPrompt }
                 ];
                 
                 // Prepare request
@@ -839,8 +856,9 @@
                         }
                     }
                     
-                    // Clear uploaded images
+                    // Clear uploaded images and files
                     uploadedImages = [];
+                    uploadedFiles = [];
                     document.getElementById('imagePreview').innerHTML = '';
                     
                 } else {
@@ -931,8 +949,9 @@
                         messages.push({ role: 'assistant', content: data.text || data.answer || '' });
                     }
                     
-                    // Clear uploaded images (but they're saved in message history for vision mode)
+                    // Clear uploaded images and files (but images are saved in message history for vision mode)
                     uploadedImages = [];
+                    uploadedFiles = [];
                     document.getElementById('imagePreview').innerHTML = '';
                 }
                 
@@ -980,6 +999,7 @@
             commandHistory = [];
             historyIndex = -1;
             uploadedImages = [];
+            uploadedFiles = [];
             document.getElementById('imagePreview').innerHTML = '';
             addTerminalLine('SYSTEM', 'Session reset - conversation history cleared', 'info');
         }
@@ -1034,8 +1054,8 @@
             addTerminalLine('SYSTEM', 'Settings saved', 'info');
         }
 
-        // Image handling
-        function handleImageUpload(event) {
+        // File handling (images and text files)
+        function handleFileUpload(event) {
             const files = event.target.files;
             if (!files || files.length === 0) return;
             
@@ -1043,6 +1063,7 @@
             
             Array.from(files).forEach((file, index) => {
                 if (file.type.startsWith('image/')) {
+                    // Handle image files
                     const reader = new FileReader();
                     reader.onload = (e) => {
                         const base64Data = e.target.result.split(',')[1];
@@ -1059,7 +1080,8 @@
                         removeBtn.className = 'image-remove';
                         removeBtn.textContent = '×';
                         removeBtn.onclick = () => {
-                            uploadedImages.splice(index, 1);
+                            const imgIndex = uploadedImages.indexOf(base64Data);
+                            if (imgIndex > -1) uploadedImages.splice(imgIndex, 1);
                             thumbContainer.remove();
                         };
                         
@@ -1068,6 +1090,51 @@
                         preview.appendChild(thumbContainer);
                     };
                     reader.readAsDataURL(file);
+                } else {
+                    // Handle text files
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const fileContent = e.target.result;
+                        uploadedFiles.push({
+                            name: file.name,
+                            content: fileContent,
+                            type: file.type || 'text/plain'
+                        });
+                        
+                        // Create preview for text file
+                        const fileContainer = document.createElement('div');
+                        fileContainer.className = 'image-thumb';
+                        fileContainer.style.display = 'flex';
+                        fileContainer.style.alignItems = 'center';
+                        fileContainer.style.justifyContent = 'center';
+                        fileContainer.style.fontSize = '10px';
+                        fileContainer.style.padding = '5px';
+                        fileContainer.style.textAlign = 'center';
+                        fileContainer.style.wordBreak = 'break-all';
+                        
+                        const fileIcon = document.createElement('div');
+                        fileIcon.textContent = '📄';
+                        fileIcon.style.fontSize = '20px';
+                        
+                        const fileName = document.createElement('div');
+                        fileName.textContent = file.name.length > 8 ? file.name.substring(0, 8) + '...' : file.name;
+                        fileName.style.color = 'var(--text-color)';
+                        
+                        const removeBtn = document.createElement('button');
+                        removeBtn.className = 'image-remove';
+                        removeBtn.textContent = '×';
+                        removeBtn.onclick = () => {
+                            const fileIndex = uploadedFiles.findIndex(f => f.name === file.name);
+                            if (fileIndex > -1) uploadedFiles.splice(fileIndex, 1);
+                            fileContainer.remove();
+                        };
+                        
+                        fileContainer.appendChild(fileIcon);
+                        fileContainer.appendChild(fileName);
+                        fileContainer.appendChild(removeBtn);
+                        preview.appendChild(fileContainer);
+                    };
+                    reader.readAsText(file);
                 }
             });
             
