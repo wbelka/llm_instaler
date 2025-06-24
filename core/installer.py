@@ -609,30 +609,47 @@ class ModelInstaller:
 
                 print_info(f"Installing base dependencies: {', '.join(base_deps)}")
 
-                # Special handling for CUDA-dependent packages
+                # Separate CUDA-dependent packages from regular PyPI packages
                 cuda_deps = ["xformers", "triton", "ninja",
                              "flash-attn", "deepspeed", "bitsandbytes"]
-                needs_cuda_url = any(any(cuda_dep in dep for cuda_dep in cuda_deps)
-                                     for dep in base_deps)
-
-                install_cmd = [str(pip_path), "install"]
-
-                # Add CUDA index URL if needed
-                if needs_cuda_url:
+                
+                # Split dependencies
+                cuda_packages = []
+                pypi_packages = []
+                
+                for dep in base_deps:
+                    # Check if this is a CUDA-dependent package
+                    is_cuda_dep = any(cuda_dep in dep.lower() for cuda_dep in cuda_deps)
+                    if is_cuda_dep:
+                        cuda_packages.append(dep)
+                    else:
+                        pypi_packages.append(dep)
+                
+                # Install regular PyPI packages first (without CUDA index URL)
+                if pypi_packages:
+                    print_info(f"Installing PyPI packages: {', '.join(pypi_packages)}")
+                    subprocess.run(
+                        [str(pip_path), "install"] + pypi_packages,
+                        check=True,
+                        capture_output=True,
+                        text=True
+                    )
+                
+                # Install CUDA packages separately with CUDA index URL
+                if cuda_packages:
+                    print_info(f"Installing CUDA packages: {', '.join(cuda_packages)}")
                     torch_info = self._get_torch_info(pip_path)
+                    install_cmd = [str(pip_path), "install"]
                     if torch_info.get("index_url"):
                         install_cmd.extend(["--index-url", torch_info["index_url"]])
-                        self._log_install(log_path, "INFO",
-                                          f"Using CUDA index URL: {torch_info['index_url']}")
-
-                install_cmd.extend(base_deps)
-
-                subprocess.run(
-                    install_cmd,
-                    check=True,
-                    capture_output=True,
-                    text=True
-                )
+                    install_cmd.extend(cuda_packages)
+                    
+                    subprocess.run(
+                        install_cmd,
+                        check=True,
+                        capture_output=True,
+                        text=True
+                    )
             except subprocess.CalledProcessError as e:
                 self._log_install(log_path, "ERROR", f"Failed to install base deps: {e}")
                 print_error(f"Failed to install dependencies: {e}")
