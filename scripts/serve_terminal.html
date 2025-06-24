@@ -462,6 +462,8 @@
         let isProcessing = false;
         let commandHistory = [];
         let historyIndex = -1;
+        let streamMode = false;
+        let currentEventSource = null;
 
         // Settings
         let settings = {
@@ -484,9 +486,15 @@
                 // Create mode buttons
                 createModeButtons();
                 
+                // Check if streaming mode is enabled
+                streamMode = modelInfo.stream_mode || false;
+                
                 // Show welcome message
                 addTerminalLine('SYSTEM', `LLM Terminal Interface v1.0`, 'info');
                 addTerminalLine('SYSTEM', `Model: ${modelInfo.model_id}`, 'info');
+                if (streamMode) {
+                    addTerminalLine('SYSTEM', `Streaming mode: ENABLED`, 'info');
+                }
                 addTerminalLine('SYSTEM', `Type 'help' for available commands`, 'info');
                 addTerminalLine('SYSTEM', '─'.repeat(80), 'info');
                 
@@ -718,35 +726,110 @@
                     images: requestBody.images ? requestBody.images.length + ' images' : 'no images'
                 });
                 
-                const response = await fetch('/generate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(requestBody)
-                });
-                
-                // Check response status first
-                if (!response.ok) {
-                    const errorData = await response.json();
+                // Use streaming if enabled and not generating images
+                if (streamMode && currentMode !== 'image' && modelInfo.model_family === 'language-model') {
+                    // Streaming mode
                     loadingLine.remove();
-                    console.error('API Error:', errorData);
-                    addTerminalLine('ERROR', `Request failed (${response.status}): ${errorData.detail || errorData.error || 'Unknown error'}`, 'error');
-                    if (errorData.detail && typeof errorData.detail === 'object') {
-                        // Show validation errors
-                        errorData.detail.forEach(err => {
-                            addTerminalLine('ERROR', `  - ${err.loc ? err.loc.join('.') : 'Field'}: ${err.msg}`, 'error');
-                        });
+                    
+                    const responseLine = addTerminalLine('', '[MODEL] ', 'output');
+                    let fullText = '';
+                    
+                    // Close any existing event source
+                    if (currentEventSource) {
+                        currentEventSource.close();
                     }
-                    return;
-                }
-                
-                const data = await response.json();
-                
-                // Remove loading line
-                loadingLine.remove();
-                
-                // Display response
-                if (data.error) {
-                    addTerminalLine('ERROR', data.error, 'error');
+                    
+                    // Create event source for streaming
+                    currentEventSource = new EventSource('/generate/stream?' + new URLSearchParams({
+                        body: JSON.stringify(requestBody)
+                    }));
+                    
+                    // Use fetch with streaming for POST
+                    const streamResponse = await fetch('/generate/stream', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(requestBody)
+                    });
+                    
+                    if (!streamResponse.ok) {
+                        const errorData = await streamResponse.json();
+                        console.error('Stream API Error:', errorData);
+                        addTerminalLine('ERROR', `Stream failed (${streamResponse.status}): ${errorData.detail || 'Unknown error'}`, 'error');
+                        return;
+                    }
+                    
+                    // Read stream
+                    const reader = streamResponse.body.getReader();
+                    const decoder = new TextDecoder();
+                    
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+                        
+                        const chunk = decoder.decode(value);
+                        const lines = chunk.split('\n');
+                        
+                        for (const line of lines) {
+                            if (line.startsWith('data: ')) {
+                                try {
+                                    const data = JSON.parse(line.slice(6));
+                                    if (data.token && !data.finished) {
+                                        fullText += data.token;
+                                        responseLine.textContent = `[MODEL] ${fullText}`;
+                                    } else if (data.finished) {
+                                        // Save to message history
+                                        const userMessage = { role: 'user', content: prompt };
+                                        if (uploadedImages.length > 0 && 
+                                            (currentMode === 'vision' || 
+                                             (currentMode === 'auto' && (modelInfo.model_family === 'multimodal' || 
+                                                                         modelInfo.capabilities.supports_multimodal)))) {
+                                            userMessage.images = [...uploadedImages];
+                                        }
+                                        messages.push(userMessage);
+                                        messages.push({ role: 'assistant', content: fullText });
+                                    }
+                                } catch (e) {
+                                    console.error('Failed to parse SSE data:', e);
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Clear uploaded images
+                    uploadedImages = [];
+                    document.getElementById('imagePreview').innerHTML = '';
+                    
+                } else {
+                    // Non-streaming mode
+                    const response = await fetch('/generate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(requestBody)
+                    });
+                    
+                    // Check response status first
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        loadingLine.remove();
+                        console.error('API Error:', errorData);
+                        addTerminalLine('ERROR', `Request failed (${response.status}): ${errorData.detail || errorData.error || 'Unknown error'}`, 'error');
+                        if (errorData.detail && typeof errorData.detail === 'object') {
+                            // Show validation errors
+                            errorData.detail.forEach(err => {
+                                addTerminalLine('ERROR', `  - ${err.loc ? err.loc.join('.') : 'Field'}: ${err.msg}`, 'error');
+                            });
+                        }
+                        return;
+                    }
+                    
+                    const data = await response.json();
+                    
+                    // Remove loading line
+                    loadingLine.remove();
+                    
+                    // Display response
+                    if (data.error) {
+                        addTerminalLine('ERROR', data.error, 'error');
                 } else if (data.image) {
                     // Handle image response
                     const imgLine = addTerminalLine('MODEL', 'Generated image:', 'output');
@@ -788,29 +871,30 @@
                         }
                     }
                     
-                    const responseLine = addTerminalLine('', '', 'output');
-                    await typeText(responseLine, `[MODEL] ${data.text || data.answer || 'No response'}`);
-                }
-                
-                // Save to message history (except for image generation)
-                if (currentMode !== 'image') {
-                    // Save the message with image reference if images were uploaded
-                    const userMessage = { role: 'user', content: prompt };
-                    // Save images in context for vision mode or multimodal models in auto mode
-                    if (uploadedImages.length > 0 && 
-                        (currentMode === 'vision' || 
-                         (currentMode === 'auto' && (modelInfo.model_family === 'multimodal' || 
-                                                     modelInfo.capabilities.supports_multimodal)))) {
-                        // Store image data with the message
-                        userMessage.images = [...uploadedImages];
+                        const responseLine = addTerminalLine('', '', 'output');
+                        await typeText(responseLine, `[MODEL] ${data.text || data.answer || 'No response'}`);
                     }
-                    messages.push(userMessage);
-                    messages.push({ role: 'assistant', content: data.text || data.answer || '' });
+                    
+                    // Save to message history (except for image generation)
+                    if (currentMode !== 'image') {
+                        // Save the message with image reference if images were uploaded
+                        const userMessage = { role: 'user', content: prompt };
+                        // Save images in context for vision mode or multimodal models in auto mode
+                        if (uploadedImages.length > 0 && 
+                            (currentMode === 'vision' || 
+                             (currentMode === 'auto' && (modelInfo.model_family === 'multimodal' || 
+                                                         modelInfo.capabilities.supports_multimodal)))) {
+                            // Store image data with the message
+                            userMessage.images = [...uploadedImages];
+                        }
+                        messages.push(userMessage);
+                        messages.push({ role: 'assistant', content: data.text || data.answer || '' });
+                    }
+                    
+                    // Clear uploaded images (but they're saved in message history for vision mode)
+                    uploadedImages = [];
+                    document.getElementById('imagePreview').innerHTML = '';
                 }
-                
-                // Clear uploaded images (but they're saved in message history for vision mode)
-                uploadedImages = [];
-                document.getElementById('imagePreview').innerHTML = '';
                 
             } catch (error) {
                 loadingLine.remove();

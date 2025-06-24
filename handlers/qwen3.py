@@ -160,11 +160,9 @@ class Qwen3Handler(TransformerHandler):
         import torch
         with torch.no_grad():
             # Get max tokens with proper default
-            max_tokens = kwargs.get('max_tokens', 32768)
-            # Ensure it's not artificially limited
-            if max_tokens < 1000:
-                logger.warning(f"Low max_tokens value: {max_tokens}, using 32768 instead")
-                max_tokens = 32768
+            max_tokens = kwargs.get('max_tokens', 4096)  # More reasonable default
+            # Log the actual value being used
+            logger.info(f"Generating with max_tokens={max_tokens}, enable_thinking={enable_thinking}")
             
             generation_kwargs = {
                 'max_new_tokens': max_tokens,
@@ -180,7 +178,13 @@ class Qwen3Handler(TransformerHandler):
             if 'presence_penalty' in kwargs:
                 generation_kwargs['presence_penalty'] = kwargs['presence_penalty']
             
-            outputs = model.generate(**inputs, **generation_kwargs)
+            logger.info("Starting generation...")
+            try:
+                outputs = model.generate(**inputs, **generation_kwargs)
+                logger.info(f"Generation completed, output length: {outputs.shape[1]}")
+            except Exception as e:
+                logger.error(f"Generation failed: {e}")
+                raise
         
         # Decode and parse thinking content
         output_ids = outputs[0][len(inputs['input_ids'][0]):].tolist()

@@ -37,6 +37,7 @@ PORT=8000
 HOST="0.0.0.0"
 DTYPE="auto"
 DEVICE="auto"
+STREAM_MODE="false"
 EXTRA_ARGS=""
 
 while [[ $# -gt 0 ]]; do
@@ -61,6 +62,10 @@ while [[ $# -gt 0 ]]; do
             EXTRA_ARGS="$EXTRA_ARGS --load-lora $2"
             shift 2
             ;;
+        --stream)
+            STREAM_MODE="true"
+            shift
+            ;;
         *)
             EXTRA_ARGS="$EXTRA_ARGS $1"
             shift
@@ -82,11 +87,16 @@ echo "API will be available at: http://localhost:$PORT"
 
 # Start the API server
 echo "Starting API server..."
+if [ "$STREAM_MODE" = "true" ]; then
+    echo "Streaming mode enabled"
+fi
+
 python serve_api.py \
     --port "$PORT" \
     --host "$HOST" \
     --dtype "$DTYPE" \
     --device "$DEVICE" \
+    --stream-mode "$STREAM_MODE" \
     $EXTRA_ARGS &
 
 API_PID=$!

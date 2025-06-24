@@ -55,6 +55,7 @@ MODEL_INFO = None
 DEVICE = None
 DTYPE = None
 HANDLER = None
+STREAM_MODE = False
 
 
 # Request/Response models
@@ -120,12 +121,13 @@ class ModelInfoResponse(BaseModel):
     capabilities: Dict[str, Any]
     device: str
     dtype: str
+    stream_mode: bool = False
 
 
 @app.on_event("startup")
 async def startup_event():
     """Load model on startup."""
-    global MODEL, TOKENIZER, MODEL_INFO, DEVICE, DTYPE
+    global MODEL, TOKENIZER, MODEL_INFO, DEVICE, DTYPE, STREAM_MODE
 
     try:
         # Load model info
@@ -139,10 +141,12 @@ async def startup_event():
         parser.add_argument("--device", default="auto")
         parser.add_argument("--dtype", default="auto")
         parser.add_argument("--load-lora", type=str, default=None)
+        parser.add_argument("--stream-mode", type=str, default="false")
         args, _ = parser.parse_known_args()
 
         DEVICE = args.device
         DTYPE = args.dtype
+        STREAM_MODE = args.stream_mode.lower() == "true"
 
         # Load model
         logger.info(f"Loading model with info: model_type={MODEL_INFO.get('model_type')}, model_family={MODEL_INFO.get('model_family')}")
@@ -343,7 +347,8 @@ async def get_model_info():
         model_family=model_family,
         capabilities=capabilities,
         device=str(DEVICE),
-        dtype=str(DTYPE)
+        dtype=str(DTYPE),
+        stream_mode=STREAM_MODE
     )
 
 
@@ -451,7 +456,8 @@ async def generate(request: GenerateRequest):
                             max_tokens=request.max_tokens,
                             top_p=request.top_p,
                             top_k=request.top_k,
-                            stop_sequences=request.stop_sequences
+                            stop_sequences=request.stop_sequences,
+                            mode=request.mode
                         )
                         return GenerateResponse(**result)
                 
@@ -1775,7 +1781,7 @@ async def generate_multimodal_legacy(request: GenerateRequest) -> GenerateRespon
 
 @app.post("/generate/stream")
 async def generate_stream(request: GenerateRequest):
-    """Streaming generation endpoint."""
+    """Streaming generation endpoint using Server-Sent Events."""
     if not MODEL:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
@@ -1786,32 +1792,81 @@ async def generate_stream(request: GenerateRequest):
         )
 
     async def event_generator():
+        import torch
+        import asyncio
+        from transformers import TextIteratorStreamer
+        from threading import Thread
+        
         try:
-            # Prepare input
+            # Prepare messages with system prompt
+            messages = []
             if request.messages:
-                _ = TOKENIZER.apply_chat_template(
-                    request.messages,
-                    tokenize=False,
-                    add_generation_prompt=True
-                )
+                messages = request.messages.copy()
+            elif request.prompt:
+                messages = [{"role": "user", "content": request.prompt}]
+            
+            # Apply chat template
+            if hasattr(TOKENIZER, 'apply_chat_template'):
+                text = TOKENIZER.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
             else:
-                _ = request.prompt
-
-            # Token streaming would be implemented here
-            # For now, return a simple response
+                text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+            
+            # Tokenize
+            inputs = TOKENIZER(text, return_tensors="pt", truncation=True)
+            if hasattr(MODEL, 'device'):
+                inputs = {k: v.to(MODEL.device) for k, v in inputs.items()}
+            
+            # Create streamer
+            streamer = TextIteratorStreamer(TOKENIZER, skip_prompt=True, skip_special_tokens=True)
+            
+            # Generation kwargs
+            generation_kwargs = {
+                **inputs,
+                'streamer': streamer,
+                'max_new_tokens': request.max_tokens,
+                'temperature': request.temperature,
+                'top_p': request.top_p,
+                'top_k': request.top_k,
+                'do_sample': request.temperature > 0,
+                'pad_token_id': TOKENIZER.pad_token_id,
+                'eos_token_id': TOKENIZER.eos_token_id,
+            }
+            
+            # Start generation in separate thread
+            thread = Thread(target=MODEL.generate, kwargs=generation_kwargs)
+            thread.start()
+            
+            # Stream tokens
+            generated_text = ""
+            for new_text in streamer:
+                if new_text:
+                    generated_text += new_text
+                    yield {
+                        "data": json.dumps({
+                            "token": new_text,
+                            "text": generated_text,
+                            "finished": False
+                        })
+                    }
+                    await asyncio.sleep(0)  # Allow other tasks to run
+            
+            # Final message
             yield {
                 "data": json.dumps({
-                    "token": "Streaming not fully implemented yet. ",
-                    "finished": False
+                    "text": generated_text,
+                    "finished": True,
+                    "usage": {
+                        "prompt_tokens": len(inputs['input_ids'][0]),
+                        "completion_tokens": len(TOKENIZER.encode(generated_text)),
+                        "total_tokens": len(inputs['input_ids'][0]) + len(TOKENIZER.encode(generated_text))
+                    }
                 })
             }
-            yield {
-                "data": json.dumps({
-                    "finished": True
-                })
-            }
-
+            
+            thread.join()
+            
         except Exception as e:
+            logger.error(f"Streaming error: {e}")
             yield {
                 "data": json.dumps({
                     "error": str(e),
@@ -1984,6 +2039,7 @@ def main():
     parser.add_argument("--device", default="auto")
     parser.add_argument("--dtype", default="auto")
     parser.add_argument("--load-lora", type=str, default=None)
+    parser.add_argument("--stream-mode", type=str, default="false")
     args = parser.parse_args()
 
     # Run server
