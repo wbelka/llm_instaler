@@ -186,8 +186,8 @@ class Gemma3Handler(MultimodalHandler):
             )
             import torch
 
-            # Load processor
-            processor = AutoProcessor.from_pretrained(model_path)
+            # Load processor with use_fast=True to avoid warning
+            processor = AutoProcessor.from_pretrained(model_path, use_fast=True)
 
             # Determine torch dtype
             if dtype == 'auto':
@@ -219,12 +219,31 @@ class Gemma3Handler(MultimodalHandler):
                     bnb_4bit_use_double_quant=True if load_in_4bit else None
                 )
 
-            # Add device map for multi-GPU or auto device
+            # Add device map and memory optimization
             if device == 'auto':
                 model_kwargs['device_map'] = 'auto'
+                # Add offload settings for better memory management
+                model_kwargs['offload_folder'] = 'offload'
+                model_kwargs['offload_state_dict'] = True
 
-            # Load model
-            model = Gemma3ForConditionalGeneration.from_pretrained(**model_kwargs)
+                # For large models, use sequential device map
+                if self._estimate_model_size() > 20:  # 20GB+
+                    model_kwargs['device_map'] = 'sequential'
+                    model_kwargs['max_memory'] = {0: '20GiB', 'cpu': '100GiB'}
+
+            # Load model with low CPU memory usage
+            model_kwargs['low_cpu_mem_usage'] = True
+
+            # Try to use Flash Attention 2 if available
+            try:
+                model_kwargs['attn_implementation'] = 'flash_attention_2'
+                model = Gemma3ForConditionalGeneration.from_pretrained(**model_kwargs)
+                logger.info("Using Flash Attention 2 for better performance")
+            except Exception:
+                # Fallback to standard attention
+                model_kwargs.pop('attn_implementation', None)
+                model = Gemma3ForConditionalGeneration.from_pretrained(**model_kwargs)
+                logger.info("Using standard attention implementation")
 
             # Move to device if not using device_map='auto'
             if device != 'auto' and not (load_in_8bit or load_in_4bit):
@@ -379,6 +398,13 @@ class Gemma3Handler(MultimodalHandler):
             # Clear GPU cache for memory efficiency
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+
+            # Enable memory efficient attention if available
+            if hasattr(model, 'config'):
+                model.config.use_cache = True
+                if hasattr(model.config, 'use_memory_efficient_attention'):
+                    model.config.use_memory_efficient_attention = True
 
             # Process images if provided
             pil_images = []
@@ -471,6 +497,12 @@ class Gemma3Handler(MultimodalHandler):
                 'completion_tokens': len(generated_tokens),
                 'total_tokens': outputs.shape[1]
             }
+
+            # Clean up to free memory
+            del outputs
+            del text_input
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
             return {
                 'text': response.strip(),
