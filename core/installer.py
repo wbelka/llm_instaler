@@ -1421,6 +1421,7 @@ To install manually:
         scripts_to_copy = [
             ("start.sh", True),
             ("train.sh", True),
+            ("train_lora.py", True),
             ("serve_api.py", False),
             ("serve_terminal.html", False),
             ("model_loader.py", False)
@@ -1482,6 +1483,16 @@ To install manually:
             core_quant_src = installer_root / "core" / "quantization_config.py"
             if core_quant_src.exists():
                 shutil.copy2(core_quant_src, core_dst / "quantization_config.py")
+
+            # Copy training_config.py (needed for training)
+            core_train_src = installer_root / "core" / "training_config.py"
+            if core_train_src.exists():
+                shutil.copy2(core_train_src, core_dst / "training_config.py")
+
+            # Copy dataset_manager.py (needed for training)
+            core_dataset_src = installer_root / "core" / "dataset_manager.py"
+            if core_dataset_src.exists():
+                shutil.copy2(core_dataset_src, core_dst / "dataset_manager.py")
 
             # Create __init__.py
             (core_dst / "__init__.py").touch()

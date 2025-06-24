@@ -623,3 +623,59 @@ class BaseHandler(ABC):
             }
         }
         return configs.get(task, {})
+    
+    def get_training_parameters(self) -> Dict[str, Any]:
+        """Get model-specific training parameters.
+        
+        Returns:
+            Dictionary with training parameter overrides.
+        """
+        # Base parameters that can be overridden by specific handlers
+        params = {
+            'lora_target_modules': None,  # Auto-detect
+            'lora_modules_to_save': None,
+            'training_precision': 'auto',  # auto, fp16, bf16, fp32
+            'gradient_checkpointing': True,
+            'max_seq_length': None,  # Auto-detect
+            'supports_flash_attention': True,
+            'special_tokens': {},
+            'dataset_formats': ['alpaca', 'chat', 'completion', 'text'],
+            'recommended_batch_size': None,  # Auto-detect
+            'recommended_learning_rate': None,  # Auto-detect
+        }
+        
+        return params
+    
+    def prepare_model_for_training(self, model: Any, training_config: Dict[str, Any]) -> Any:
+        """Prepare model for training (e.g., enable gradient checkpointing).
+        
+        Args:
+            model: The loaded model.
+            training_config: Training configuration.
+            
+        Returns:
+            Prepared model.
+        """
+        # Enable gradient checkpointing if supported
+        if hasattr(model, 'gradient_checkpointing_enable') and training_config.get('gradient_checkpointing', True):
+            model.gradient_checkpointing_enable()
+        
+        # Set model to training mode
+        if hasattr(model, 'train'):
+            model.train()
+        
+        return model
+    
+    def get_tokenizer_config(self) -> Dict[str, Any]:
+        """Get tokenizer configuration for training.
+        
+        Returns:
+            Dictionary with tokenizer settings.
+        """
+        return {
+            'padding_side': 'right',
+            'truncation_side': 'right',
+            'add_eos_token': True,
+            'add_bos_token': True,
+            'pad_to_multiple_of': 8,
+        }

@@ -203,6 +203,27 @@ class ArchitectureDetector:
                 additional_info['is_gemma3_multimodal'] = True
                 additional_info['max_context_length'] = config.get(
                     'max_position_embeddings', 131072)
+
+            # Additional check for Llama 4 multimodal
+            if self._is_llama4_multimodal(config, model_type, architecture):
+                model_family = 'multimodal'
+                model_type = 'llama4'
+                additional_info['is_llama4_multimodal'] = True
+                additional_info['supports_moe'] = True
+                # Add MoE info if available
+                if 'num_experts' in config:
+                    additional_info['num_experts'] = config['num_experts']
+                if 'num_local_experts' in config:
+                    additional_info['num_local_experts'] = config['num_local_experts']
+                # Context length depends on variant
+                name_or_path = config.get('_name_or_path', '').lower()
+                if 'scout' in name_or_path:
+                    additional_info['max_context_length'] = 10000000  # 10M
+                elif 'maverick' in name_or_path:
+                    additional_info['max_context_length'] = 1000000  # 1M
+                else:
+                    additional_info['max_context_length'] = config.get(
+                        'max_position_embeddings', 128000)
                 additional_info['vision_config'] = config.get('vision_config', {})
                 additional_info['supports_multimodal'] = True
 
@@ -286,6 +307,47 @@ class ArchitectureDetector:
             if any(indicator in name_or_path for indicator in indicators):
                 # Additional check for multimodal capabilities
                 if any(key in config for key in ['vision_config', 'image_token_id', 'vocab_size']):
+                    return True
+
+        return False
+
+    def _is_llama4_multimodal(
+            self, config: Dict[str, Any], model_type: str, architecture: str
+    ) -> bool:
+        """Check if model is a Llama 4 multimodal variant.
+
+        Args:
+            config: Model configuration dictionary
+            model_type: Detected model type
+            architecture: Model architecture
+
+        Returns:
+            True if it's a Llama 4 multimodal model
+        """
+        # Check architecture first
+        if architecture and 'Llama4ForConditionalGeneration' in architecture:
+            return True
+
+        # Check model type
+        if model_type and ('llama4' in model_type.lower() or 'llama-4' in model_type.lower()):
+            # Llama 4 is multimodal by default (Scout and Maverick)
+            return True
+
+        # Check for specific Llama 4 model names in _name_or_path
+        name_or_path = config.get('_name_or_path', '').lower()
+        if 'llama-4' in name_or_path or 'llama4' in name_or_path:
+            # Check for Scout or Maverick variants
+            if 'scout' in name_or_path or 'maverick' in name_or_path:
+                return True
+            # Check for instruction-tuned variants
+            if 'instruct' in name_or_path or '-it' in name_or_path:
+                return True
+
+        # Check for MoE indicators (Llama 4 uses mixture of experts)
+        if 'num_experts' in config or 'num_local_experts' in config:
+            if 'llama' in str(config.get('_name_or_path', '')).lower():
+                # Additional check for version 4
+                if '4-' in name_or_path or '4_' in name_or_path:
                     return True
 
         return False

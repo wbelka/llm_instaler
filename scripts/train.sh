@@ -126,12 +126,46 @@ done
 if [ -z "$DATA_PATH" ]; then
     echo "Error: --data parameter is required"
     echo "Usage: $0 --data <path_to_training_data>"
+    echo "Examples:"
+    echo "  $0 --data dataset.json                  # Single file"
+    echo "  $0 --data 'data/*.json'                 # Multiple files (use quotes!)"
+    echo "  $0 --data datasets/                     # Directory"
+    echo "  $0 --data 'file1.json,file2.json'       # Comma-separated list"
     exit 1
 fi
 
-# Check if data file exists
-if [ ! -f "$DATA_PATH" ]; then
-    echo "Error: Training data file not found: $DATA_PATH"
+# Check if data exists (file, directory, or pattern)
+# Handle comma-separated list
+if [[ "$DATA_PATH" == *","* ]]; then
+    # Split comma-separated paths and check each
+    IFS=',' read -ra DATA_ARRAY <<< "$DATA_PATH"
+    for path in "${DATA_ARRAY[@]}"; do
+        path=$(echo "$path" | xargs)  # Trim whitespace
+        if [ ! -f "$path" ] && [ ! -d "$path" ]; then
+            echo "Error: Data file not found: $path"
+            exit 1
+        fi
+    done
+    echo "Using multiple data files: $DATA_PATH"
+elif [[ "$DATA_PATH" == *"*"* ]]; then
+    # Handle glob pattern
+    # Check if any files match the pattern
+    shopt -s nullglob
+    files=($DATA_PATH)
+    shopt -u nullglob
+    if [ ${#files[@]} -eq 0 ]; then
+        echo "Error: No files match pattern: $DATA_PATH"
+        exit 1
+    fi
+    echo "Found ${#files[@]} files matching pattern: $DATA_PATH"
+elif [ -d "$DATA_PATH" ]; then
+    # Directory
+    echo "Using directory: $DATA_PATH"
+elif [ -f "$DATA_PATH" ]; then
+    # Single file
+    echo "Using file: $DATA_PATH"
+else
+    echo "Error: Data path not found: $DATA_PATH"
     exit 1
 fi
 
@@ -155,21 +189,57 @@ if [ "$NO_TENSORBOARD" = false ]; then
     echo "TensorBoard: http://localhost:$TENSORBOARD_PORT"
 fi
 
-# For now, show a placeholder message
-echo ""
-echo "Note: Full training functionality will be implemented in Step 5"
-echo "This script currently serves as a placeholder for the training interface"
-echo ""
-echo "Expected features:"
-echo "- Automatic parameter detection"
-echo "- LoRA/QLoRA fine-tuning"
-echo "- Auto-learning algorithm to prevent overfitting"
-echo "- Support for various data formats (Alpaca, ShareGPT, etc.)"
-echo "- Progress monitoring with TensorBoard"
+# Build command for train_lora.py
+CMD="python train_lora.py --data \"$DATA_PATH\" --output \"$OUTPUT_PATH\""
+
+# Add optional parameters
+[ ! -z "$METHOD" ] && CMD="$CMD --method $METHOD"
+[ ! -z "$EPOCHS" ] && CMD="$CMD --epochs $EPOCHS"
+[ ! -z "$BATCH_SIZE" ] && CMD="$CMD --batch-size $BATCH_SIZE"
+[ ! -z "$LEARNING_RATE" ] && CMD="$CMD --learning-rate $LEARNING_RATE"
+[ ! -z "$LORA_R" ] && CMD="$CMD --lora-r $LORA_R"
+[ ! -z "$LORA_ALPHA" ] && CMD="$CMD --lora-alpha $LORA_ALPHA"
+[ "$CIRCULAR" = true ] && CMD="$CMD --circular"
+[ "$RESUME" = true ] && CMD="$CMD --resume"
+[ ! -z "$RESUME_FROM" ] && CMD="$CMD --resume-from \"$RESUME_FROM\""
+[ ! -z "$PATIENCE" ] && CMD="$CMD --patience $PATIENCE"
+[ ! -z "$OVERFITTING_THRESHOLD" ] && CMD="$CMD --overfitting-threshold $OVERFITTING_THRESHOLD"
+
+# Function to cleanup on exit
+cleanup() {
+    echo ""
+    echo "Cleaning up..."
+    if [ ! -z "$TB_PID" ] && kill -0 $TB_PID 2>/dev/null; then
+        kill $TB_PID 2>/dev/null || true
+    fi
+    exit 0
+}
+
+# Set trap for cleanup
+trap cleanup INT TERM EXIT
+
+# Run training
+echo "Starting training..."
+echo "Command: $CMD"
 echo ""
 
-# Clean up TensorBoard if started
-if [ ! -z "$TB_PID" ]; then
-    echo "Press Ctrl+C to stop..."
-    wait $TB_PID
+# Execute training
+eval $CMD
+TRAINING_EXIT_CODE=$?
+
+# Check if training completed successfully
+if [ $TRAINING_EXIT_CODE -eq 0 ]; then
+    echo ""
+    echo "✅ Training completed successfully!"
+    echo "LoRA adapter saved to: $OUTPUT_PATH"
+    echo ""
+    echo "To use the trained model:"
+    echo "  ./start.sh"
+    echo ""
+    echo "The model will automatically load the LoRA adapter if present."
+else
+    echo ""
+    echo "❌ Training failed with exit code: $TRAINING_EXIT_CODE"
 fi
+
+# Cleanup will be called automatically due to trap

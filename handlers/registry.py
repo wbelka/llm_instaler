@@ -123,6 +123,18 @@ class HandlerRegistry:
             logging.getLogger(__name__).warning(f"Failed to import Gemma3Handler: {e}")
             pass
 
+        try:
+            from handlers.llama4 import Llama4Handler
+            # Register Llama 4 multimodal handler
+            self._handlers['llama4'] = Llama4Handler
+            self._handlers['llama-4'] = Llama4Handler
+            self._handlers['llama4_scout'] = Llama4Handler
+            self._handlers['llama4_maverick'] = Llama4Handler
+        except ImportError as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to import Llama4Handler: {e}")
+            pass
+
     def register_handler(
         self,
         key: str,
@@ -172,6 +184,13 @@ class HandlerRegistry:
         if 'janus' in model_id:
             if 'janus' in self._handlers:
                 return self._handlers['janus']
+
+        # Check for Llama 4 models
+        if 'llama-4' in model_id or 'llama4' in model_id or model_type == 'llama4':
+            logger.info(f"Registry: Checking for llama4 handler")
+            if 'llama4' in self._handlers:
+                logger.info(f"Registry: Found Llama4Handler")
+                return self._handlers['llama4']
 
         # Check for Qwen3 models first (before Qwen VL)
         if 'qwen3' in model_id or 'qwen-3' in model_id or model_type in ['qwen3', 'qwen-3']:

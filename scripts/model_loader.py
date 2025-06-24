@@ -9,6 +9,7 @@ import os
 import json
 import logging
 from typing import Dict, Any, Optional, Tuple
+from pathlib import Path
 
 # Set CUDA memory allocation configuration to prevent fragmentation
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
@@ -211,6 +212,18 @@ def _load_transformers_model(
     # Move to device if needed
     if device == "mps" and not load_in_8bit and not load_in_4bit:
         model = model.to(device)
+
+    # Check for LoRA adapter and load if available
+    lora_path = kwargs.get('lora_path', Path(model_path).parent / "lora")
+    if lora_path and Path(lora_path).exists() and kwargs.get('load_lora', True):
+        try:
+            from peft import PeftModel
+            logger.info(f"Loading LoRA adapter from {lora_path}")
+            model = PeftModel.from_pretrained(model, lora_path)
+            model = model.merge_and_unload()  # Merge for inference
+            logger.info("LoRA adapter loaded and merged successfully")
+        except Exception as e:
+            logger.warning(f"Failed to load LoRA adapter: {e}")
 
     return model, tokenizer
 

@@ -150,11 +150,20 @@ async def startup_event():
 
         # Load model
         logger.info(f"Loading model with info: model_type={MODEL_INFO.get('model_type')}, model_family={MODEL_INFO.get('model_family')}")
+        
+        # Check if LoRA exists and auto-load if not specified
+        if args.load_lora is None:
+            lora_path = Path("./lora")
+            if lora_path.exists() and lora_path.is_dir():
+                logger.info(f"Found LoRA adapter at {lora_path}, auto-loading...")
+                args.load_lora = str(lora_path)
+        
         MODEL, TOKENIZER = load_model(
             MODEL_INFO,
             device=args.device,
             dtype=args.dtype,
-            lora_path=args.load_lora
+            lora_path=args.load_lora,
+            load_lora=True  # Enable LoRA loading
         )
         
         # Get handler instance

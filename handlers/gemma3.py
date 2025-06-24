@@ -1090,3 +1090,42 @@ class Gemma3Handler(MultimodalHandler):
             )
 
         return True, None
+    
+    def get_training_parameters(self) -> Dict[str, Any]:
+        """Get Gemma 3 specific training parameters.
+        
+        Returns:
+            Dictionary with training parameter overrides.
+        """
+        params = super().get_training_parameters()
+        
+        # Gemma 3 specific modules for LoRA
+        params['lora_target_modules'] = [
+            "q_proj", "v_proj", "k_proj", "o_proj",
+            "gate_proj", "up_proj", "down_proj"
+        ]
+        
+        # Gemma 3 prefers bfloat16
+        params['training_precision'] = 'bf16'
+        
+        # Context length based on model size
+        if '1b' in self.model_id.lower():
+            params['max_seq_length'] = 8192  # 1B model limit
+        else:
+            params['max_seq_length'] = 8192  # Safe limit for all
+        
+        # Dataset formats - multimodal support
+        params['dataset_formats'] = [
+            'alpaca', 'sharegpt', 'openai', 'chat',
+            'completion', 'qa', 'vision', 'vision_qa'
+        ]
+        
+        # Gemma 3 doesn't support flash attention with quantization
+        params['supports_flash_attention'] = False
+        
+        # Special tokens for Gemma
+        params['special_tokens'] = {
+            'image_token': '<image_soft_token>'
+        }
+        
+        return params

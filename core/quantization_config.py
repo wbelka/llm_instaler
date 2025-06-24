@@ -16,6 +16,7 @@ class QuantizationConfig:
     QUANTIZATION_SUPPORTED_FAMILIES = {
         "transformer": True,
         "llama": True,
+        "llama4": True,  # Llama 4 supports int4 and fp8
         "mistral": True,
         "mixtral": True,
         "qwen": True,
@@ -58,6 +59,12 @@ class QuantizationConfig:
         "llama": {
             "preferred_compute_dtype": "float16",
             "supports_flash_attention_with_quantization": True,
+        },
+        "llama4": {
+            "preferred_compute_dtype": "bfloat16",
+            "supports_flash_attention_with_quantization": False,  # Uses flex_attention instead
+            "supports_fp8": True,  # Llama 4 Maverick supports FP8
+            "supports_int4": True,  # Llama 4 Scout fits on single H100 with int4
         }
     }
     
