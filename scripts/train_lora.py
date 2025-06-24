@@ -348,7 +348,7 @@ class SmartTrainer:
             weight_decay=self.training_config['weight_decay'],
             logging_dir=str(self.output_dir / "logs"),
             logging_steps=self.training_config['logging_steps'],
-            evaluation_strategy=self.training_config['eval_strategy'],
+            eval_strategy=self.training_config['eval_strategy'],  # Changed from evaluation_strategy
             eval_steps=self.training_config['eval_steps'],
             save_strategy=self.training_config['save_strategy'],
             save_steps=self.training_config['save_steps'],
@@ -380,14 +380,15 @@ class SmartTrainer:
         )
         
         # Create trainer with custom callback
+        auto_stop_callback = AutoStopCallback(self)
         self.trainer = Trainer(
             model=self.model,
             args=training_args,
             train_dataset=self.train_dataset,
             eval_dataset=self.val_dataset,
             data_collator=data_collator,
-            tokenizer=self.tokenizer,
-            callbacks=[AutoStopCallback(self)],
+            processing_class=self.tokenizer,  # Changed from tokenizer to processing_class
+            callbacks=[auto_stop_callback._callback],
         )
     
     def train(self):
@@ -526,43 +527,53 @@ class AutoStopCallback:
     """Callback for auto-stop logic."""
     
     def __init__(self, smart_trainer):
+        from transformers import TrainerCallback
+        
         self.smart_trainer = smart_trainer
         self.last_eval_step = 0
-    
-    def on_evaluate(self, args, state, control, metrics=None, **kwargs):
-        """Called after evaluation."""
-        if metrics and state.global_step > self.last_eval_step:
-            self.last_eval_step = state.global_step
-            
-            # Update metrics
-            train_loss = state.log_history[-1].get('loss', 0) if state.log_history else 0
-            val_loss = metrics.get('eval_loss', 0)
-            
-            improved = self.smart_trainer.metrics.update(train_loss, val_loss)
-            
-            # Print status
-            print(f"\n{self.smart_trainer.metrics.get_status_string()}")
-            
-            # Check overfitting
-            is_overfitting, reason = self.smart_trainer.metrics.check_overfitting(
-                self.smart_trainer.training_config['overfitting_threshold']
-            )
-            
-            if is_overfitting:
-                print(f"⚠️  Detected {reason}! Stopping training...")
-                control.should_training_stop = True
-            
-            # Check patience
-            if self.smart_trainer.metrics.patience_counter >= self.smart_trainer.training_config['patience']:
-                print(f"⏹️  No improvement for {self.smart_trainer.training_config['patience']} evaluations. Stopping...")
-                control.should_training_stop = True
-            
-            # Save best model
-            if improved:
-                print("💾 New best model! Saving...")
-                self.smart_trainer.save_best_model()
         
-        return control
+        # Create the actual callback class
+        class _AutoStopCallback(TrainerCallback):
+            def __init__(self, parent):
+                self.parent = parent
+            
+            def on_evaluate(self, args, state, control, metrics=None, **kwargs):
+                """Called after evaluation."""
+                if metrics and state.global_step > self.parent.last_eval_step:
+                    self.parent.last_eval_step = state.global_step
+                    
+                    # Update metrics
+                    train_loss = state.log_history[-1].get('loss', 0) if state.log_history else 0
+                    val_loss = metrics.get('eval_loss', 0)
+                    
+                    improved = self.parent.smart_trainer.metrics.update(train_loss, val_loss)
+                    
+                    # Print status
+                    print(f"\n{self.parent.smart_trainer.metrics.get_status_string()}")
+                    
+                    # Check overfitting
+                    is_overfitting, reason = self.parent.smart_trainer.metrics.check_overfitting(
+                        self.parent.smart_trainer.training_config['overfitting_threshold']
+                    )
+                    
+                    if is_overfitting:
+                        print(f"⚠️  Detected {reason}! Stopping training...")
+                        control.should_training_stop = True
+                    
+                    # Check patience
+                    if self.parent.smart_trainer.metrics.patience_counter >= self.parent.smart_trainer.training_config['patience']:
+                        print(f"⏹️  No improvement for {self.parent.smart_trainer.training_config['patience']} evaluations. Stopping...")
+                        control.should_training_stop = True
+                    
+                    # Save best model
+                    if improved:
+                        print("💾 New best model! Saving...")
+                        self.parent.smart_trainer.save_best_model()
+                
+                return control
+        
+        # Create instance
+        self._callback = _AutoStopCallback(self)
 
 
 def test_model(model_path: str, lora_path: str, test_prompt: str, handler_params: Dict[str, Any]):
