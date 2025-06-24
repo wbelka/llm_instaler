@@ -429,7 +429,7 @@
             </div>
             <div class="setting-group">
                 <label class="setting-label">MAX TOKENS:</label>
-                <input type="number" class="setting-input" id="maxTokens" min="1" max="4096" value="512">
+                <input type="number" class="setting-input" id="maxTokens" min="1" max="131072" value="4096">
             </div>
             <div class="setting-group">
                 <label class="setting-label">TOP P [0.0-1.0]:</label>
@@ -466,7 +466,7 @@
         // Settings
         let settings = {
             temperature: 0.7,
-            maxTokens: 512,
+            maxTokens: 4096,
             topP: 0.9,
             systemPrompt: "You are a helpful AI assistant.",
             maxImageSize: 2048

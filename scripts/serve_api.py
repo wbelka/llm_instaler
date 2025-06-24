@@ -62,7 +62,7 @@ class GenerateRequest(BaseModel):
     prompt: Optional[str] = Field(None, description="Text prompt")
     messages: Optional[List[Dict[str, str]]] = Field(None, description="Chat messages")
     temperature: float = Field(0.7, ge=0.0, le=2.0)
-    max_tokens: int = Field(512, ge=1, le=4096)
+    max_tokens: int = Field(4096, ge=1, le=131072)
     top_p: float = Field(0.9, ge=0.0, le=1.0)
     top_k: int = Field(50, ge=0)
     stop_sequences: Optional[List[str]] = None

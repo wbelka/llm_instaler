@@ -63,7 +63,7 @@ class Qwen3Handler(TransformerHandler):
         
         # Qwen3 specific defaults
         base_config.update({
-            'max_new_tokens': 32768,  # Qwen3 supports long outputs
+            'max_new_tokens': 32768,  # Qwen3 supports 32K tokens natively, 131K with YaRN
             'do_sample': True,  # Always use sampling for Qwen3
             'top_k': 20,
             'min_p': 0
@@ -159,8 +159,15 @@ class Qwen3Handler(TransformerHandler):
         # Generate
         import torch
         with torch.no_grad():
+            # Get max tokens with proper default
+            max_tokens = kwargs.get('max_tokens', 32768)
+            # Ensure it's not artificially limited
+            if max_tokens < 1000:
+                logger.warning(f"Low max_tokens value: {max_tokens}, using 32768 instead")
+                max_tokens = 32768
+            
             generation_kwargs = {
-                'max_new_tokens': kwargs.get('max_tokens', 32768),
+                'max_new_tokens': max_tokens,
                 'temperature': kwargs.get('temperature', 0.6 if enable_thinking else 0.7),
                 'top_p': kwargs.get('top_p', 0.95 if enable_thinking else 0.8),
                 'top_k': kwargs.get('top_k', 20),
