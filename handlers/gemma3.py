@@ -403,6 +403,21 @@ class Gemma3Handler(MultimodalHandler):
                         pil_images.append(Image.open(BytesIO(img_data)))
                     elif isinstance(img, Image.Image):
                         pil_images.append(img)
+            
+            # Also check for images in message content
+            if not pil_images and kwargs.get('messages'):
+                for msg in kwargs.get('messages', []):
+                    content = msg.get('content', '')
+                    if isinstance(content, list):
+                        for item in content:
+                            if isinstance(item, dict) and item.get('type') == 'image':
+                                # Handle image in message content
+                                if 'image' in item and isinstance(item['image'], str):
+                                    try:
+                                        img_data = base64.b64decode(item['image'])
+                                        pil_images.append(Image.open(BytesIO(img_data)))
+                                    except Exception as e:
+                                        logger.warning(f"Failed to decode image from message: {e}")
 
             # Prepare messages in Gemma 3 format
             messages = kwargs.get('messages', [])
@@ -483,13 +498,49 @@ class Gemma3Handler(MultimodalHandler):
             # Handle multimodal input with images
             if pil_images:
                 # For multimodal input, we need to prepare it differently
-                # Gemma 3 expects images to be processed separately
-                inputs = processor(
-                    text=messages,
-                    images=pil_images,
-                    return_tensors="pt",
-                    padding=True
-                )
+                # Convert messages to a text prompt for the processor
+                if isinstance(messages, list):
+                    # Extract text from messages
+                    text_parts = []
+                    for msg in messages:
+                        role = msg.get('role', 'user')
+                        content = msg.get('content', '')
+                        if isinstance(content, str):
+                            if role != 'system' or content:  # Include system messages only if they have content
+                                text_parts.append(f"{role}: {content}")
+                        elif isinstance(content, list):
+                            # Extract text from structured content
+                            for item in content:
+                                if isinstance(item, dict) and item.get('type') == 'text':
+                                    text_parts.append(f"{role}: {item.get('text', '')}")
+                    
+                    # Join into a single prompt
+                    text_prompt = "\n".join(text_parts) if text_parts else "What is in this image?"
+                    if text_prompt and not text_prompt.endswith(":"):
+                        text_prompt += "\nAssistant:"
+                else:
+                    text_prompt = str(messages)
+                
+                # Process with images
+                logger.info(f"Processing multimodal input with {len(pil_images)} images")
+                logger.debug(f"Text prompt: {text_prompt}")
+                
+                try:
+                    inputs = processor(
+                        text=text_prompt,
+                        images=pil_images,
+                        return_tensors="pt",
+                        padding=True
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to process multimodal input: {e}")
+                    # Try alternative approach
+                    inputs = processor(
+                        text=[text_prompt],
+                        images=pil_images,
+                        return_tensors="pt",
+                        padding=True
+                    )
             else:
                 # Text-only input - apply chat template
                 try:
