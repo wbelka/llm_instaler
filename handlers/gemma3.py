@@ -542,15 +542,37 @@ class Gemma3Handler(MultimodalHandler):
                         padding=True
                     )
             else:
-                # Text-only input - apply chat template
+                # Text-only input - convert to simple text format for Gemma 3
+                # Gemma 3 seems to have issues with structured chat templates
+                text_parts = []
+                for msg in messages:
+                    role = msg.get('role', 'user')
+                    content = msg.get('content', '')
+                    if isinstance(content, str) and content:
+                        if role == 'system':
+                            text_parts.append(f"System: {content}")
+                        elif role == 'user':
+                            text_parts.append(f"User: {content}")
+                        elif role == 'assistant':
+                            text_parts.append(f"Assistant: {content}")
+                    elif isinstance(content, list):
+                        # Extract text from structured content
+                        for item in content:
+                            if isinstance(item, dict) and item.get('type') == 'text':
+                                text = item.get('text', '')
+                                if text:
+                                    text_parts.append(f"{role.title()}: {text}")
+                
+                # Join messages and add assistant prompt
+                prompt = "\n\n".join(text_parts) if text_parts else "Hello! How can I help you?"
+                if prompt and not prompt.endswith("Assistant:"):
+                    prompt += "\n\nAssistant:"
+                
+                logger.debug(f"Converted messages to prompt: {prompt}")
+                
+                # Process as simple text
                 try:
-                    inputs = processor.apply_chat_template(
-                        messages,
-                        add_generation_prompt=True,
-                        tokenize=True,
-                        return_dict=True,
-                        return_tensors="pt"
-                    )
+                    inputs = processor(prompt, return_tensors="pt", padding=True)
                 except Exception as e:
                     logger.warning(f"Failed to apply chat template: {e}")
                     # Fallback: concatenate messages into a single prompt
@@ -563,8 +585,18 @@ class Gemma3Handler(MultimodalHandler):
                         else:
                             prompt_parts.append(f"{role}: {str(content)}")
                     
-                    prompt = "\n".join(prompt_parts) + "\nAssistant:"
-                    inputs = processor(prompt, return_tensors="pt", padding=True)
+                    prompt = "\n".join(prompt_parts)
+                    if prompt:
+                        prompt += "\nAssistant:"
+                    else:
+                        prompt = "Assistant:"  # Fallback if no content
+                    
+                    # Use tokenizer directly if processor fails
+                    try:
+                        inputs = processor(prompt, return_tensors="pt", padding=True)
+                    except Exception as e2:
+                        logger.warning(f"Processor failed, using tokenizer: {e2}")
+                        inputs = processor.tokenizer(prompt, return_tensors="pt", padding=True)
 
             # Move to model device
             if hasattr(model, 'device'):
