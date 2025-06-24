@@ -412,12 +412,32 @@ class Gemma3Handler(MultimodalHandler):
                         for item in content:
                             if isinstance(item, dict) and item.get('type') == 'image':
                                 # Handle image in message content
-                                if 'image' in item and isinstance(item['image'], str):
+                                if 'image' in item:
+                                    img_data = item['image']
+                                    if isinstance(img_data, str):
+                                        try:
+                                            # Check if it's base64 or URL
+                                            if img_data.startswith('http'):
+                                                # It's a URL - download it
+                                                import requests
+                                                response = requests.get(img_data)
+                                                pil_images.append(Image.open(BytesIO(response.content)))
+                                            else:
+                                                # Assume base64
+                                                img_bytes = base64.b64decode(img_data)
+                                                pil_images.append(Image.open(BytesIO(img_bytes)))
+                                        except Exception as e:
+                                            logger.warning(f"Failed to process image: {e}")
+                                    elif isinstance(img_data, Image.Image):
+                                        pil_images.append(img_data)
+                                elif 'url' in item:
+                                    # Handle URL format
                                     try:
-                                        img_data = base64.b64decode(item['image'])
-                                        pil_images.append(Image.open(BytesIO(img_data)))
+                                        import requests
+                                        response = requests.get(item['url'])
+                                        pil_images.append(Image.open(BytesIO(response.content)))
                                     except Exception as e:
-                                        logger.warning(f"Failed to decode image from message: {e}")
+                                        logger.warning(f"Failed to download image from URL: {e}")
 
             # Prepare messages in Gemma 3 format
             messages = kwargs.get('messages', [])
@@ -444,21 +464,21 @@ class Gemma3Handler(MultimodalHandler):
                     })
             else:
                 # For text-only chat, ensure messages are in the correct format
-                # If messages contain structured content, we need to handle it
+                # Gemma 3 expects content to be a list of dicts with 'type' and 'text' keys
                 processed_messages = []
                 for msg in messages:
                     role = msg.get('role', 'user')
                     content = msg.get('content', '')
                     
-                    # If content is already a string, keep it simple
+                    # Convert content to expected format
                     if isinstance(content, str):
+                        # Convert string to structured format
                         processed_messages.append({
                             "role": role,
-                            "content": content
+                            "content": [{"type": "text", "text": content}]
                         })
                     elif isinstance(content, list):
-                        # For Gemma3, we need to keep the structured format for processor
-                        # but ensure it's valid
+                        # Ensure list items are in correct format
                         processed_content = []
                         for item in content:
                             if isinstance(item, dict) and 'type' in item:
@@ -467,31 +487,23 @@ class Gemma3Handler(MultimodalHandler):
                                         'type': 'text',
                                         'text': item.get('text', '')
                                     })
-                                elif item['type'] == 'image' and pil_images:
-                                    # Skip image entries if we're in text-only mode
-                                    continue
+                                # Skip non-text items in text-only mode
                             elif isinstance(item, str):
                                 processed_content.append({
                                     'type': 'text',
                                     'text': item
                                 })
                         
-                        # If we only have text content, simplify to string
-                        if all(item.get('type') == 'text' for item in processed_content):
-                            text_parts = [item.get('text', '') for item in processed_content]
-                            processed_messages.append({
-                                "role": role,
-                                "content": ' '.join(text_parts)
-                            })
-                        else:
+                        if processed_content:
                             processed_messages.append({
                                 "role": role,
                                 "content": processed_content
                             })
                     else:
+                        # Fallback - convert to text
                         processed_messages.append({
                             "role": role,
-                            "content": str(content)
+                            "content": [{"type": "text", "text": str(content)}]
                         })
                 messages = processed_messages
 
@@ -542,39 +554,18 @@ class Gemma3Handler(MultimodalHandler):
                         padding=True
                     )
             else:
-                # Text-only input - convert to simple text format for Gemma 3
-                # Gemma 3 seems to have issues with structured chat templates
-                text_parts = []
-                for msg in messages:
-                    role = msg.get('role', 'user')
-                    content = msg.get('content', '')
-                    if isinstance(content, str) and content:
-                        if role == 'system':
-                            text_parts.append(f"System: {content}")
-                        elif role == 'user':
-                            text_parts.append(f"User: {content}")
-                        elif role == 'assistant':
-                            text_parts.append(f"Assistant: {content}")
-                    elif isinstance(content, list):
-                        # Extract text from structured content
-                        for item in content:
-                            if isinstance(item, dict) and item.get('type') == 'text':
-                                text = item.get('text', '')
-                                if text:
-                                    text_parts.append(f"{role.title()}: {text}")
-                
-                # Join messages and add assistant prompt
-                prompt = "\n\n".join(text_parts) if text_parts else "Hello! How can I help you?"
-                if prompt and not prompt.endswith("Assistant:"):
-                    prompt += "\n\nAssistant:"
-                
-                logger.debug(f"Converted messages to prompt: {prompt}")
-                
-                # Process as simple text
+                # Text-only input - prepare for Gemma 3 format
+                # First try to use apply_chat_template as shown in the example
                 try:
-                    logger.debug(f"Processing text with processor: {type(processor)}")
-                    inputs = processor(prompt, return_tensors="pt", padding=True)
-                    logger.debug(f"Inputs shape: {inputs.get('input_ids', 'none').shape if 'input_ids' in inputs else 'no input_ids'}")
+                    logger.debug("Trying apply_chat_template for text-only input")
+                    inputs = processor.apply_chat_template(
+                        messages,
+                        add_generation_prompt=True,
+                        tokenize=True,
+                        return_dict=True,
+                        return_tensors="pt"
+                    )
+                    logger.debug(f"Success! Inputs shape: {inputs['input_ids'].shape}")
                 except Exception as e:
                     logger.warning(f"Failed to process with processor: {e}")
                     
@@ -606,7 +597,20 @@ class Gemma3Handler(MultimodalHandler):
                 logger.debug(f"Input IDs shape: {input_ids.shape}, min: {input_ids.min().item()}, max: {input_ids.max().item()}")
                 
                 # Check for invalid tokens
-                vocab_size = model.config.vocab_size if hasattr(model, 'config') else 256000  # Gemma default
+                # Try different attributes for vocab size
+                vocab_size = None
+                if hasattr(model, 'config'):
+                    if hasattr(model.config, 'vocab_size'):
+                        vocab_size = model.config.vocab_size
+                    elif hasattr(model.config, 'vocabulary_size'):
+                        vocab_size = model.config.vocabulary_size
+                    elif hasattr(model.config, 'text_config') and hasattr(model.config.text_config, 'vocab_size'):
+                        vocab_size = model.config.text_config.vocab_size
+                
+                if vocab_size is None:
+                    vocab_size = 256000  # Gemma 3 default
+                    logger.debug(f"Using default vocab size: {vocab_size}")
+                
                 if input_ids.max().item() >= vocab_size:
                     logger.error(f"Invalid token ID {input_ids.max().item()} >= vocab size {vocab_size}")
                     # Clamp tokens to valid range
