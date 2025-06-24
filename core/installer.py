@@ -670,13 +670,21 @@ class ModelInstaller:
 
             for dep in optional_deps:
                 try:
+                    # Use compatible version for flash-attn if no specific version
+                    if dep == "flash-attn":
+                        dep = "flash-attn==2.7.2.post1"
+                    
                     # Build install command
                     install_cmd = [str(pip_path), "install", dep]
 
                     # Add index URL for packages that are in PyTorch index
-                    pytorch_index_deps = ["xformers", "triton"]
-                    if dep in pytorch_index_deps and torch_info.get("index_url"):
+                    pytorch_index_deps = ["xformers", "triton", "flash-attn"]
+                    if any(pkg in dep for pkg in pytorch_index_deps) and torch_info.get("index_url"):
                         install_cmd.extend(["--index-url", torch_info["index_url"]])
+                    
+                    # Special build options for flash-attn
+                    if "flash-attn" in dep:
+                        install_cmd.extend(["--no-build-isolation"])
 
                     subprocess.run(
                         install_cmd,
@@ -706,11 +714,25 @@ class ModelInstaller:
             "aiofiles>=23.0.0",
             "psutil>=5.9.0",
             "rich>=13.0.0",
-            "python-dotenv>=1.0.0"
+            "python-dotenv>=1.0.0",
+            # Training dependencies
+            "matplotlib>=3.7.0",
+            "tqdm>=4.65.0",
+            "datasets>=2.14.0",
+            "peft>=0.7.0",
+            "tensorboard>=2.14.0"
         ]
+        
+        # Add compatible flash-attn for training if CUDA is available
+        # and flash-attn is not already in dependencies
+        if device_preference in ['cuda', 'auto']:
+            has_flash_attn = any('flash-attn' in dep for dep in base_deps + special_deps + optional_deps)
+            if not has_flash_attn:
+                # Use specific version known to work with PyTorch 2.6.0+cu124
+                server_deps.append("flash-attn==2.7.2.post1")
 
         try:
-            print_info("Installing server dependencies...")
+            print_info("Installing server and training dependencies...")
             subprocess.run(
                 [str(pip_path), "install"] + server_deps,
                 check=True,
@@ -954,20 +976,23 @@ To install manually:
                 # Git packages don't need index-url
                 pass
 
-                # For flash-attn, use specific build options
+            # Special handling for specific packages
+            if "flash-attn" in dep:
+                # If no specific version requested, use compatible version
                 if dep == "flash-attn":
-                    install_cmd.extend(["--no-build-isolation"])
+                    dep = "flash-attn==2.7.2.post1"
+                    install_cmd[2] = dep  # Update the package name in command
+                install_cmd.extend(["--no-build-isolation"])
 
-                # For mamba-ssm, ensure we don't upgrade torch
-                if dep == "mamba-ssm":
-                    install_cmd.extend(["--no-deps"])
-                    # Install dependencies separately
-                    subprocess.run(
-                        [str(pip_path), "install", "einops", "triton",
-                         "--index-url", torch_info.get("index_url", "")],
-                        capture_output=True,
-                        text=True
-                    )
+            elif dep == "mamba-ssm":
+                install_cmd.extend(["--no-deps"])
+                # Install dependencies separately
+                subprocess.run(
+                    [str(pip_path), "install", "einops", "triton",
+                     "--index-url", torch_info.get("index_url", "")],
+                    capture_output=True,
+                    text=True
+                )
 
             subprocess.run(
                 install_cmd,

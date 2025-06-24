@@ -7,6 +7,7 @@ including GPT, LLaMA, Mistral, and similar architectures.
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 import logging
+import os
 from handlers.base import BaseHandler
 from core.checker import ModelRequirements
 
@@ -101,7 +102,7 @@ class TransformerHandler(BaseHandler):
         special_reqs = self.model_info.get('special_requirements', [])
 
         if 'flash-attn' in special_reqs:
-            base_deps.append('flash-attn>=2.0.0')
+            base_deps.append('flash-attn==2.7.2.post1')
 
         if 'mamba-ssm' in special_reqs:
             base_deps.extend(['mamba-ssm>=1.0.0', 'causal-conv1d>=1.0.0'])
@@ -170,22 +171,37 @@ class TransformerHandler(BaseHandler):
         elif device != 'cpu':
             model_kwargs['device_map'] = {'': device}
 
-        # Try to use Flash Attention 2 if available
-        try:
-            model_kwargs['attn_implementation'] = 'flash_attention_2'
+        # Check if flash attention should be disabled
+        disable_flash_attn = (
+            os.environ.get('TRANSFORMERS_USE_FLASH_ATTENTION', '1') == '0' or
+            kwargs.get('use_flash_attention_2', True) is False
+        )
+        
+        # Try to use Flash Attention 2 if available and not disabled
+        if not disable_flash_attn:
+            try:
+                model_kwargs['attn_implementation'] = 'flash_attention_2'
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_path,
+                    **model_kwargs
+                )
+                logger.info("Using Flash Attention 2 for better performance")
+            except Exception:
+                # Fallback to standard attention
+                model_kwargs.pop('attn_implementation', None)
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_path,
+                    **model_kwargs
+                )
+                logger.info("Using standard attention implementation")
+        else:
+            # Explicitly use standard attention
+            model_kwargs['attn_implementation'] = 'eager'
             model = AutoModelForCausalLM.from_pretrained(
                 model_path,
                 **model_kwargs
             )
-            logger.info("Using Flash Attention 2 for better performance")
-        except Exception:
-            # Fallback to standard attention
-            model_kwargs.pop('attn_implementation', None)
-            model = AutoModelForCausalLM.from_pretrained(
-                model_path,
-                **model_kwargs
-            )
-            logger.info("Using standard attention implementation")
+            logger.info("Using standard attention implementation (flash attention disabled)")
 
         # Load tokenizer with use_fast=True
         tokenizer = AutoTokenizer.from_pretrained(

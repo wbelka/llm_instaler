@@ -101,7 +101,7 @@ class Gemma3Handler(MultimodalHandler):
         requirements.primary_library = "transformers"
         requirements.base_dependencies = self.get_dependencies()
         requirements.special_dependencies = []
-        requirements.optional_dependencies = ['flash-attn>=2.0.0']
+        requirements.optional_dependencies = ['flash-attn==2.7.2.post1']
         requirements.disk_space_gb = model_size_gb * 3
         requirements.memory_requirements = {
             "min": max(16, model_size_gb * 2),

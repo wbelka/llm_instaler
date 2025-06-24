@@ -26,6 +26,9 @@ from tqdm import tqdm
 warnings.filterwarnings("ignore", category=UserWarning, module="transformers")
 warnings.filterwarnings("ignore", category=UserWarning, module="torch")
 
+# Disable flash attention for training to avoid compatibility issues
+os.environ["TRANSFORMERS_USE_FLASH_ATTENTION"] = "0"
+
 # Add installer path to sys.path
 installer_path = Path(__file__).parent / "core"
 if installer_path.exists():
@@ -120,15 +123,10 @@ class TrainingMetrics:
         return " | ".join(filter(None, status_parts))
 
 
-def load_model_and_tokenizer(model_path: str, training_config: Dict[str, Any]):
+def load_model_and_tokenizer(model_path: str, training_config: Dict[str, Any], model_info: Dict[str, Any]):
     """Load model, tokenizer, and prepare for training using handlers."""
     # Import here to avoid circular imports
     from model_loader import load_model, get_handler
-    
-    # Load model info
-    model_info_path = Path(model_path) / "model_info.json"
-    with open(model_info_path, 'r') as f:
-        model_info = json.load(f)
     
     # Get handler
     handler = get_handler(model_info)
@@ -144,15 +142,61 @@ def load_model_and_tokenizer(model_path: str, training_config: Dict[str, Any]):
     logger.info(f"Handler training params: {training_params}")
     
     # Load model and tokenizer (without LoRA for training)
-    model, tokenizer = load_model(
-        model_info,
-        model_path=model_path,
-        device=training_config.get('device', 'auto'),
-        dtype=training_config.get('dtype', 'auto'),
-        load_in_8bit=training_config.get('use_8bit', False),
-        load_in_4bit=training_config.get('use_4bit', False),
-        load_lora=False  # Don't load existing LoRA for training
-    )
+    # Disable flash attention for training
+    os.environ["USE_FLASH_ATTENTION"] = "0"
+    os.environ["FLASH_ATTENTION_SKIP_RESHAPE"] = "1"
+    
+    try:
+        model, tokenizer = load_model(
+            model_info,
+            model_path=model_path,
+            device=training_config.get('device', 'auto'),
+            dtype=training_config.get('dtype', 'auto'),
+            load_in_8bit=training_config.get('use_8bit', False),
+            load_in_4bit=training_config.get('use_4bit', False),
+            load_lora=False,  # Don't load existing LoRA for training
+            use_flash_attention_2=False  # Explicitly disable flash attention
+        )
+    except (ImportError, Exception) as e:
+        if "flash_attn" in str(e) or "_ZN3c105ErrorC2ENS_14SourceLocationE" in str(e):
+            logger.warning("Flash attention import error, patching transformers to disable it")
+            
+            # Monkey patch transformers to prevent flash_attn import
+            import sys
+            import types
+            
+            # Create dummy flash_attn module
+            dummy_flash_attn = types.ModuleType('flash_attn')
+            sys.modules['flash_attn'] = dummy_flash_attn
+            sys.modules['flash_attn.bert_padding'] = types.ModuleType('flash_attn.bert_padding')
+            sys.modules['flash_attn.flash_attn_interface'] = types.ModuleType('flash_attn.flash_attn_interface')
+            
+            # Add dummy functions to prevent import errors
+            sys.modules['flash_attn.bert_padding'].index_first_axis = lambda x, y: x
+            sys.modules['flash_attn.bert_padding'].pad_input = lambda x, y, z: (x, y, z)
+            sys.modules['flash_attn.bert_padding'].unpad_input = lambda x, y: x
+            
+            # Force transformers to think flash_attn is not available
+            import transformers.utils.import_utils as import_utils
+            import_utils._flash_attn_2_available = False
+            
+            # Clear any cached imports
+            for module in list(sys.modules.keys()):
+                if 'qwen3' in module or 'modeling_flash_attention' in module:
+                    del sys.modules[module]
+            
+            model, tokenizer = load_model(
+                model_info,
+                model_path=model_path,
+                device=training_config.get('device', 'auto'),
+                dtype=training_config.get('dtype', 'auto'),
+                load_in_8bit=training_config.get('use_8bit', False),
+                load_in_4bit=training_config.get('use_4bit', False),
+                load_lora=False,  # Don't load existing LoRA for training
+                use_flash_attention_2=False
+            )
+        else:
+            raise
     
     # Prepare model for training using handler
     model = handler.prepare_model_for_training(model, training_config)
@@ -650,10 +694,13 @@ def main():
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     
-    # Load model info
-    model_info_path = Path(args.model_path) / "model_info.json"
+    # Load model info - check both locations
+    model_info_path = Path("model_info.json")
     if not model_info_path.exists():
-        raise FileNotFoundError(f"Model info not found at {model_info_path}")
+        # Try in model subdirectory
+        model_info_path = Path(args.model_path) / "model_info.json"
+        if not model_info_path.exists():
+            raise FileNotFoundError(f"Model info not found in current directory or {model_info_path}")
     
     with open(model_info_path, 'r') as f:
         model_info = json.load(f)
@@ -714,7 +761,7 @@ def main():
     # Load model and tokenizer
     print("📚 Loading model and tokenizer...")
     model, tokenizer, handler, training_params = load_model_and_tokenizer(
-        args.model_path, asdict(training_config)
+        args.model_path, asdict(training_config), model_info
     )
     
     # Setup LoRA
