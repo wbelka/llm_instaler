@@ -23,7 +23,12 @@ class DatasetManager:
         '.jsonl': 'jsonl',
         '.csv': 'csv',
         '.txt': 'text',
-        '.parquet': 'parquet'
+        '.parquet': 'parquet',
+        '.yaml': 'yaml',
+        '.yml': 'yaml',
+        '.toml': 'toml',
+        '.xml': 'xml',
+        '.tsv': 'tsv'
     }
     
     # Format detection patterns
@@ -37,7 +42,22 @@ class DatasetManager:
         'chat': ['user', 'assistant'],
         'multi_turn': ['turns'],
         'vision': ['image', 'caption'],
-        'vision_qa': ['image', 'question', 'answer']
+        'vision_qa': ['image', 'question', 'answer'],
+        # New formats
+        'dolly': ['instruction', 'context', 'response'],
+        'oasst': ['message_id', 'parent_id', 'text', 'role'],
+        'vicuna': ['id', 'conversations'],
+        'wizardlm': ['instruction', 'output'],
+        'orca': ['system_prompt', 'question', 'answer'],
+        'guanaco': ['text'],  # But with special formatting
+        'lima': ['conversations'],  # High quality format
+        'anthropic': ['human', 'assistant'],
+        'claude': ['Human', 'Assistant'],
+        'mistral': ['text'],  # With special tokens
+        'chatml': ['messages'],  # ChatML format
+        'llama_chat': ['system', 'user', 'assistant'],
+        'function_calling': ['functions', 'function_call'],
+        'code_alpaca': ['instruction', 'input', 'output', 'lang']
     }
     
     def __init__(self, model_type: str = "", model_family: str = ""):
@@ -198,6 +218,64 @@ class DatasetManager:
                 logger.warning("pandas not available, skipping parquet file")
                 return []
         
+        elif suffix in ['.yaml', '.yml']:
+            try:
+                import yaml
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = yaml.safe_load(f)
+                    if isinstance(data, dict):
+                        # Check for common keys
+                        for key in ['data', 'examples', 'items', 'samples', 'conversations']:
+                            if key in data:
+                                data = data[key]
+                                break
+                        else:
+                            data = [data]
+                    elif not isinstance(data, list):
+                        data = [data]
+            except ImportError:
+                logger.warning("PyYAML not available, skipping YAML file")
+                return []
+        
+        elif suffix == '.toml':
+            try:
+                import toml
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = toml.load(f)
+                    if isinstance(data, dict):
+                        # Check for data section
+                        for key in ['data', 'examples', 'dataset']:
+                            if key in data:
+                                data = data[key]
+                                break
+                        else:
+                            data = [data]
+                    elif not isinstance(data, list):
+                        data = [data]
+            except ImportError:
+                logger.warning("toml not available, skipping TOML file")
+                return []
+        
+        elif suffix == '.xml':
+            try:
+                import xml.etree.ElementTree as ET
+                tree = ET.parse(file_path)
+                root = tree.getroot()
+                data = []
+                # Simple XML parsing - can be extended
+                for child in root:
+                    item = {elem.tag: elem.text for elem in child}
+                    data.append(item)
+            except Exception as e:
+                logger.warning(f"Failed to parse XML: {e}")
+                return []
+        
+        elif suffix == '.tsv':
+            data = []
+            with open(file_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f, delimiter='\t')
+                data = list(reader)
+        
         else:
             logger.warning(f"Unsupported file format: {suffix}")
             return []
@@ -299,6 +377,27 @@ class DatasetManager:
                 return self._preprocess_vision(item)
             elif format == 'vision_qa':
                 return self._preprocess_vision_qa(item)
+            # New formats
+            elif format == 'dolly':
+                return self._preprocess_dolly(item)
+            elif format == 'oasst':
+                return self._preprocess_oasst(item)
+            elif format == 'vicuna':
+                return self._preprocess_vicuna(item)
+            elif format == 'wizardlm':
+                return self._preprocess_wizardlm(item)
+            elif format == 'orca':
+                return self._preprocess_orca(item)
+            elif format == 'anthropic':
+                return self._preprocess_anthropic(item)
+            elif format == 'claude':
+                return self._preprocess_claude(item)
+            elif format == 'chatml':
+                return self._preprocess_chatml(item)
+            elif format == 'llama_chat':
+                return self._preprocess_llama_chat(item)
+            elif format == 'code_alpaca':
+                return self._preprocess_code_alpaca(item)
             else:
                 # Try generic preprocessing
                 return self._preprocess_generic(item)
@@ -433,6 +532,160 @@ class DatasetManager:
             'question': item.get('question', ''),
             'answer': item.get('answer', ''),
             'format': 'vision_qa'
+        }
+    
+    def _preprocess_dolly(self, item: Dict) -> Dict:
+        """Preprocess Dolly format."""
+        instruction = item.get('instruction', '')
+        context = item.get('context', '')
+        response = item.get('response', '')
+        
+        if context:
+            prompt = f"{instruction}\n\nContext: {context}"
+        else:
+            prompt = instruction
+            
+        return {
+            'prompt': prompt,
+            'completion': response,
+            'format': 'dolly'
+        }
+    
+    def _preprocess_oasst(self, item: Dict) -> Dict:
+        """Preprocess OpenAssistant format."""
+        # OASST has tree structure, we'll flatten it
+        messages = []
+        role = item.get('role', 'user')
+        text = item.get('text', '')
+        
+        if role == 'prompter':
+            role = 'user'
+        
+        messages.append({
+            'role': role,
+            'content': text
+        })
+        
+        return {
+            'messages': messages,
+            'format': 'oasst'
+        }
+    
+    def _preprocess_vicuna(self, item: Dict) -> Dict:
+        """Preprocess Vicuna format."""
+        conversations = item.get('conversations', [])
+        messages = []
+        
+        for i, conv in enumerate(conversations):
+            role = 'user' if i % 2 == 0 else 'assistant'
+            messages.append({
+                'role': role,
+                'content': conv
+            })
+        
+        return {
+            'messages': messages,
+            'format': 'vicuna'
+        }
+    
+    def _preprocess_wizardlm(self, item: Dict) -> Dict:
+        """Preprocess WizardLM format."""
+        return {
+            'prompt': item.get('instruction', ''),
+            'completion': item.get('output', ''),
+            'format': 'wizardlm'
+        }
+    
+    def _preprocess_orca(self, item: Dict) -> Dict:
+        """Preprocess Orca format."""
+        system = item.get('system_prompt', '')
+        question = item.get('question', '')
+        answer = item.get('answer', '')
+        
+        messages = []
+        if system:
+            messages.append({'role': 'system', 'content': system})
+        messages.append({'role': 'user', 'content': question})
+        messages.append({'role': 'assistant', 'content': answer})
+        
+        return {
+            'messages': messages,
+            'format': 'orca'
+        }
+    
+    def _preprocess_anthropic(self, item: Dict) -> Dict:
+        """Preprocess Anthropic format."""
+        messages = []
+        
+        if 'human' in item and 'assistant' in item:
+            messages.append({'role': 'user', 'content': item['human']})
+            messages.append({'role': 'assistant', 'content': item['assistant']})
+        
+        return {
+            'messages': messages,
+            'format': 'anthropic'
+        }
+    
+    def _preprocess_claude(self, item: Dict) -> Dict:
+        """Preprocess Claude format."""
+        messages = []
+        
+        if 'Human' in item and 'Assistant' in item:
+            messages.append({'role': 'user', 'content': item['Human']})
+            messages.append({'role': 'assistant', 'content': item['Assistant']})
+        
+        return {
+            'messages': messages,
+            'format': 'claude'
+        }
+    
+    def _preprocess_chatml(self, item: Dict) -> Dict:
+        """Preprocess ChatML format."""
+        messages = item.get('messages', [])
+        
+        # ChatML format is already in the right structure
+        return {
+            'messages': messages,
+            'format': 'chatml'
+        }
+    
+    def _preprocess_llama_chat(self, item: Dict) -> Dict:
+        """Preprocess Llama Chat format."""
+        messages = []
+        
+        if 'system' in item:
+            messages.append({'role': 'system', 'content': item['system']})
+        if 'user' in item:
+            messages.append({'role': 'user', 'content': item['user']})
+        if 'assistant' in item:
+            messages.append({'role': 'assistant', 'content': item['assistant']})
+        
+        return {
+            'messages': messages,
+            'format': 'llama_chat'
+        }
+    
+    def _preprocess_code_alpaca(self, item: Dict) -> Dict:
+        """Preprocess Code Alpaca format."""
+        instruction = item.get('instruction', '')
+        input_text = item.get('input', '')
+        output = item.get('output', '')
+        lang = item.get('lang', 'python')
+        
+        if input_text:
+            prompt = f"{instruction}\n\nInput:\n```{lang}\n{input_text}\n```"
+        else:
+            prompt = instruction
+        
+        if lang and output:
+            completion = f"```{lang}\n{output}\n```"
+        else:
+            completion = output
+            
+        return {
+            'prompt': prompt,
+            'completion': completion,
+            'format': 'code_alpaca'
         }
     
     def _preprocess_generic(self, item: Dict) -> Dict:
