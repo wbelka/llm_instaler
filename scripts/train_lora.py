@@ -473,7 +473,14 @@ class SmartTrainer:
             
             # Train for one epoch
             self.trainer.args.num_train_epochs = 1
-            self.trainer.train(resume_from_checkpoint=cycle > 0)
+            
+            # Reset trainer state for new cycle
+            if cycle > 0:
+                # Clear the trainer state to start fresh
+                self.trainer.state.epoch = 0
+                self.trainer.state.global_step = 0
+                
+            self.trainer.train()
             
             # Check if should stop
             if hasattr(self.trainer.state, 'should_training_stop') and self.trainer.state.should_training_stop:
