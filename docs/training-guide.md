@@ -224,6 +224,20 @@ The training system monitors for overfitting by:
 1. Tracking validation loss trends
 2. Comparing train/validation loss gap
 3. Stopping when degradation detected
+4. **NEW**: Adaptive thresholds based on task type
+
+#### Task-Specific Behavior
+
+**QA/Instruction Tasks** (low loss expected):
+- Perfect loss threshold: 0.01
+- Overfitting threshold: 10% (default)
+- Patience: 3 evaluations
+
+**Text Generation Tasks** (higher loss normal):
+- Perfect loss threshold: 0.5
+- Overfitting threshold: 20% (auto-adjusted)
+- Patience: 5 evaluations (auto-adjusted)
+- Monitors perplexity explosion (>100)
 
 Configure thresholds:
 ```bash
@@ -231,6 +245,10 @@ Configure thresholds:
   --patience 5 \
   --overfitting-threshold 0.15
 ```
+
+The system automatically detects task type from:
+- Dataset format (`text`, `completion`)
+- Model type (`language-model`)
 
 ### LoRA Configuration
 
@@ -351,8 +369,15 @@ Metrics tracked:
 ### Console Output
 
 Real-time training status:
+
+**QA/Instruction Tasks:**
 ```
 📊 Evaluation #7 | ⏱️ Time: 00:15:32 | 📉 Train Loss: 0.5234 | 📈 Val Loss: 0.6123 | 🎯 Best Val: 0.5890 | ⏳ Patience: 1
+```
+
+**Text Generation Tasks** (shows perplexity):
+```
+📊 Evaluation #7 | ⏱️ Time: 00:15:32 | 📉 Train Loss: 1.8234 | 📈 Val Loss: 2.1123 | 📖 Perplexity: 8.3 | 🎯 Best Val: 2.0890 | ⏳ Patience: 1
 ```
 
 ### Training Artifacts
