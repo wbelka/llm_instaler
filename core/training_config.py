@@ -141,8 +141,9 @@ class TrainingConfig:
         if self.eval_steps is None:
             self.eval_steps = self._get_eval_steps()
         if self.save_steps is None:
-            # Save frequently to not lose progress
-            self.save_steps = 10  # Save every 10 steps
+            # When load_best_model_at_end is True, save_steps must be a divisor of eval_steps
+            # So we make them equal for simplicity
+            self.save_steps = self.eval_steps
         
         # Mixed precision based on hardware
         if self.mixed_precision == "auto":
