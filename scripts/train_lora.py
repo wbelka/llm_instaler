@@ -470,15 +470,18 @@ class SmartTrainer:
         
         for cycle in range(max_epochs):
             print(f"\n🔁 Circular training cycle {cycle + 1}/{max_epochs}")
+            if cycle > 0:
+                print(f"   Continuing from previous weights (not starting fresh)")
             
             # Train for one epoch
             self.trainer.args.num_train_epochs = 1
             
             # Reset trainer state for new cycle
             if cycle > 0:
-                # Clear the trainer state to start fresh
+                # Only reset epoch counter, keep global_step for continuous logging
                 self.trainer.state.epoch = 0
-                self.trainer.state.global_step = 0
+                # Keep global_step to maintain continuous statistics in TensorBoard
+                # self.trainer.state.global_step = 0
                 
                 # Clear GPU memory before starting new cycle with increased batch size
                 import torch
