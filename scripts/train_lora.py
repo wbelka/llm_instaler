@@ -383,6 +383,14 @@ class SmartTrainer:
         """Setup training components."""
         from transformers import TrainingArguments, Trainer, DataCollatorForLanguageModeling
         
+        # Log checkpoint settings
+        save_limit = self.training_config.get('save_total_limit')
+        print(f"💾 Checkpoint settings: save every {self.training_config.get('save_steps', 10)} steps")
+        if save_limit is None:
+            print("💾 Keeping ALL checkpoints (no limit)")
+        else:
+            print(f"💾 Keeping last {save_limit} checkpoints")
+        
         # Check if flash attention is supported
         use_flash_attention = (
             self.handler_params.get('supports_flash_attention', True) and 
@@ -490,6 +498,11 @@ class SmartTrainer:
                     torch.cuda.synchronize()
                 
             self.trainer.train()
+            
+            # Save checkpoint after each cycle
+            checkpoint_path = self.output_dir / "checkpoints" / f"checkpoint-cycle-{cycle + 1}"
+            self.trainer.save_model(str(checkpoint_path))
+            print(f"💾 Saved checkpoint for cycle {cycle + 1} at {checkpoint_path}")
             
             # Check if should stop
             if hasattr(self.trainer.state, 'should_training_stop') and self.trainer.state.should_training_stop:
