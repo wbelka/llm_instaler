@@ -329,11 +329,11 @@ class TrainingConfig:
     def _get_eval_steps(self) -> int:
         """Get evaluation steps based on training mode."""
         eval_steps = {
-            "slow": 100,
+            "slow": 50,      # Changed from 100 to be compatible with save_steps=10
             "medium": 50,
-            "fast": 25,
-            "circle": 10,  # Frequent eval for circular
-            "non-stop": 200,
+            "fast": 20,      # Changed from 25 to be compatible with save_steps=10
+            "circle": 10,    # Frequent eval for circular
+            "non-stop": 50,  # Changed from 200 to be compatible with save_steps=10
             "adaptive": 50
         }
         
