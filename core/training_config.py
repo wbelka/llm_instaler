@@ -58,7 +58,7 @@ class TrainingConfig:
     # Circular training
     circular_training: bool = False
     max_circular_epochs: int = 100
-    circular_batch_multiplier: int = 4  # Increase batch size each circle
+    circular_batch_multiplier: float = 1.0  # Batch size multiplier or increment (+1 if > 0 and < 2)
     
     # Auto-stop parameters
     early_stopping: bool = True

@@ -508,8 +508,12 @@ class SmartTrainer:
             
             # Increase batch size for next cycle
             if cycle < max_epochs - 1:
-                multiplier = self.training_config.get('circular_batch_multiplier', 2)
+                multiplier = self.training_config.get('circular_batch_multiplier', 1.0)
                 current_batch_size = self.trainer.args.per_device_train_batch_size
+                
+                # Skip if multiplier is 1.0 (no change)
+                if multiplier == 1.0:
+                    continue
                 
                 # Check available GPU memory before increasing
                 import torch
@@ -524,20 +528,29 @@ class SmartTrainer:
                     if free < 3.0:
                         print(f"⚠️  Low GPU memory ({free:.1f}GB free), keeping batch size at {current_batch_size}")
                     else:
-                        new_batch_size = min(
-                            current_batch_size * multiplier,
-                            32  # Max batch size
-                        )
+                        # If multiplier is between 0 and 2 (exclusive), treat as increment
+                        if 0 < multiplier < 2:
+                            new_batch_size = current_batch_size + int(multiplier)
+                        else:
+                            # Otherwise treat as multiplier
+                            new_batch_size = int(current_batch_size * multiplier)
+                        
+                        # Apply max batch size limit
+                        new_batch_size = min(new_batch_size, 32)
+                        
                         if new_batch_size != current_batch_size:
                             self.trainer.args.per_device_train_batch_size = new_batch_size
                             self.trainer.args.per_device_eval_batch_size = new_batch_size
                             print(f"📈 Increased batch size to {new_batch_size}")
                 else:
                     # CPU training - be more conservative
-                    new_batch_size = min(
-                        current_batch_size * multiplier,
-                        8  # Lower max for CPU
-                    )
+                    if 0 < multiplier < 2:
+                        new_batch_size = current_batch_size + int(multiplier)
+                    else:
+                        new_batch_size = int(current_batch_size * multiplier)
+                    
+                    new_batch_size = min(new_batch_size, 8)  # Lower max for CPU
+                    
                     if new_batch_size != current_batch_size:
                         self.trainer.args.per_device_train_batch_size = new_batch_size
                         self.trainer.args.per_device_eval_batch_size = new_batch_size
@@ -775,6 +788,8 @@ def main():
                        help="Enable circular training")
     parser.add_argument("--max-circular-epochs", type=int, default=100,
                        help="Maximum circular epochs")
+    parser.add_argument("--circular-batch-multiplier", type=float, default=1.0,
+                       help="Batch size multiplier per cycle (1.0=no change, 0<x<2=increment by x, >=2=multiply by x)")
     
     # Resume training
     parser.add_argument("--resume", action="store_true",
@@ -835,6 +850,7 @@ def main():
         'output_dir': args.output,
         'circular_training': args.circular,
         'max_circular_epochs': args.max_circular_epochs,
+        'circular_batch_multiplier': args.circular_batch_multiplier,
         'patience': args.patience,
         'overfitting_threshold': args.overfitting_threshold,
         'device': args.device,
