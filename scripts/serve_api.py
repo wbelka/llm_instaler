@@ -179,6 +179,19 @@ async def startup_event():
         MODEL_INFO['lora_loaded'] = lora_loaded
         MODEL_INFO['lora_path'] = args.load_lora if lora_loaded else None
         
+        # Log final LoRA status
+        if lora_loaded:
+            print("\n" + "="*60)
+            print("🎯 LoRA STATUS: ACTIVE")
+            print(f"   Path: {args.load_lora}")
+            print("   The model is using your fine-tuned weights!")
+            print("="*60 + "\n")
+        else:
+            print("\n" + "="*60)
+            print("ℹ️  LoRA STATUS: NOT LOADED")
+            print("   Running base model without fine-tuning")
+            print("="*60 + "\n")
+        
         # Get handler instance
         global HANDLER
         from model_loader import get_handler

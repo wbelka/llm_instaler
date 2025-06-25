@@ -215,6 +215,11 @@ def _load_transformers_model(
 
     # Check for LoRA adapter and load if available
     lora_path = kwargs.get('lora_path', Path(model_path).parent / "lora")
+    print(f"\n🔍 Checking for LoRA adapter...")
+    print(f"   lora_path: {lora_path}")
+    print(f"   Path exists: {Path(lora_path).exists() if lora_path else False}")
+    print(f"   load_lora flag: {kwargs.get('load_lora', True)}")
+    
     if lora_path and Path(lora_path).exists() and kwargs.get('load_lora', True):
         try:
             from peft import PeftModel
@@ -222,24 +227,59 @@ def _load_transformers_model(
             print("🎯 LOADING LoRA ADAPTER")
             print(f"Path: {lora_path}")
             print("="*50)
-            logger.info(f"Loading LoRA adapter from {lora_path}")
+            
+            # List contents of LoRA directory
+            adapter_path = Path(lora_path)
+            print("\n📁 LoRA directory contents:")
+            for file in adapter_path.iterdir():
+                if file.is_file():
+                    print(f"   - {file.name} ({file.stat().st_size / 1024 / 1024:.1f} MB)")
             
             # Check which adapter file exists
-            adapter_path = Path(lora_path)
             if (adapter_path / "adapter_model.safetensors").exists():
-                print("📄 Found adapter_model.safetensors")
+                print("\n📄 Found adapter_model.safetensors")
+                adapter_size = (adapter_path / "adapter_model.safetensors").stat().st_size / 1024 / 1024
+                print(f"   Size: {adapter_size:.1f} MB")
             elif (adapter_path / "adapter_model.bin").exists():
-                print("📄 Found adapter_model.bin")
+                print("\n📄 Found adapter_model.bin")
+                adapter_size = (adapter_path / "adapter_model.bin").stat().st_size / 1024 / 1024
+                print(f"   Size: {adapter_size:.1f} MB")
+            else:
+                print("\n⚠️  No adapter file found!")
+                print("   Expected: adapter_model.safetensors or adapter_model.bin")
+                return model, tokenizer
             
+            logger.info(f"Loading LoRA adapter from {lora_path}")
+            
+            # Load adapter
+            print("\n⏳ Loading adapter into model...")
             model = PeftModel.from_pretrained(model, lora_path)
-            model = model.merge_and_unload()  # Merge for inference
+            print("✅ Adapter loaded")
             
-            print("✅ LoRA adapter successfully loaded and merged!")
+            # Merge and unload
+            print("⏳ Merging adapter with base model...")
+            model = model.merge_and_unload()  # Merge for inference
+            print("✅ Adapter merged")
+            
+            # Verify LoRA was applied by checking model parameters
+            print("\n🔬 Verifying LoRA application...")
+            total_params = sum(p.numel() for p in model.parameters())
+            print(f"   Total model parameters: {total_params:,}")
+            
+            print("\n✅ LoRA adapter successfully loaded and merged!")
             print("="*50 + "\n")
             logger.info("LoRA adapter loaded and merged successfully")
         except Exception as e:
             print(f"\n❌ Failed to load LoRA adapter: {e}\n")
             logger.warning(f"Failed to load LoRA adapter: {e}")
+    else:
+        print("\n❌ LoRA adapter NOT loaded")
+        if not lora_path:
+            print("   Reason: No LoRA path specified")
+        elif not Path(lora_path).exists():
+            print(f"   Reason: Path does not exist: {lora_path}")
+        elif not kwargs.get('load_lora', True):
+            print("   Reason: load_lora flag is False")
 
     return model, tokenizer
 
