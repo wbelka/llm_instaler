@@ -384,6 +384,25 @@ Metrics tracked:
 - Gradient norms
 - Token processing speed
 
+### Viewing Previous Training Graphs
+
+You can view training graphs from previous runs without starting a new training:
+
+```bash
+# View training graphs on default port 6006
+./train.sh --tensorboard-only
+
+# View training graphs on custom port
+./train.sh --tensorboard-only 6007
+```
+
+This mode:
+- Starts only the TensorBoard server
+- Looks for logs in `./lora/logs` directory
+- Allows you to analyze past training runs
+- Useful for comparing different training configurations
+- Press Ctrl+C to stop the server
+
 ### Console Output
 
 Real-time training status:

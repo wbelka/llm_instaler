@@ -5,6 +5,31 @@
 
 set -e
 
+# Check if only tensorboard is requested
+if [ "$1" == "--tensorboard-only" ]; then
+    shift
+    PORT="${1:-6006}"
+    echo "Starting TensorBoard server..."
+    
+    # Check if logs directory exists
+    if [ -d "./lora/logs" ]; then
+        echo "Looking for logs in: ./lora/logs"
+    elif [ -d "./logs/training" ]; then
+        echo "Looking for logs in: ./logs/training"
+        LOG_DIR="./logs/training"
+    else
+        echo "No training logs found. Run training first to generate logs."
+        exit 1
+    fi
+    
+    LOG_DIR="${LOG_DIR:-./lora/logs}"
+    echo "TensorBoard: http://localhost:$PORT"
+    echo ""
+    echo "Press Ctrl+C to stop"
+    tensorboard --logdir "$LOG_DIR" --port "$PORT" --bind_all
+    exit 0
+fi
+
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
@@ -170,6 +195,10 @@ if [ -z "$DATA_PATH" ]; then
     echo "Force training:"
     echo "  $0 --data data.json --epochs 5 --force-epochs               # Exactly 5 epochs"
     echo "  $0 --data data.json --circular --max-circular-epochs 50 --force-epochs  # Exactly 50 cycles"
+    echo ""
+    echo "TensorBoard only mode:"
+    echo "  $0 --tensorboard-only                         # View training graphs on default port 6006"
+    echo "  $0 --tensorboard-only 6007                    # View training graphs on custom port"
     exit 1
 fi
 
