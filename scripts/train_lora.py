@@ -95,7 +95,11 @@ class TrainingMetrics:
         # Analyze gap
         recent_train = np.mean(self.train_losses[-5:])
         recent_val = np.mean(self.val_losses[-5:])
-        gap = (recent_val - recent_train) / recent_train
+        # Avoid division by zero
+        if recent_train == 0:
+            gap = 0 if recent_val == 0 else float('inf')
+        else:
+            gap = (recent_val - recent_train) / recent_train
         
         # Decision
         if val_trend > 0.001 and gap > threshold:
@@ -582,8 +586,12 @@ def test_model(model_path: str, lora_path: str, test_prompt: str, handler_params
     
     from model_loader import load_model
     
-    # Load model info
-    with open(Path(model_path) / "model_info.json", 'r') as f:
+    # Load model info - check both locations
+    model_info_path = Path("model_info.json")
+    if not model_info_path.exists():
+        model_info_path = Path(model_path) / "model_info.json"
+    
+    with open(model_info_path, 'r') as f:
         model_info = json.load(f)
     
     # Load model with LoRA
