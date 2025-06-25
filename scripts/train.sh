@@ -209,6 +209,7 @@ if [ "$HELP" = true ] || [ -z "$DATA_PATH" ]; then
     echo ""
     echo "TRAINING MODES:"
     echo "  --mode MODE                    Training mode: quick, balanced, quality (default: auto-detect)"
+    echo "                                 Also supports: fast, medium, slow (legacy names)"
     echo "  --method METHOD                Training method: lora, qlora (default: lora)"
     echo "  --circular                     Enable circular training (repeat dataset multiple times)"
     echo "  --force-epochs                 Force exact number of epochs (disable auto-stop)"

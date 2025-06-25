@@ -754,9 +754,10 @@ def main():
                        help="Path to base model")
     
     # Training mode
-    parser.add_argument("--mode", type=str, default="medium",
-                       choices=["slow", "medium", "fast", "circle", "non-stop", "adaptive"],
-                       help="Training mode")
+    parser.add_argument("--mode", type=str, default="balanced",
+                       choices=["slow", "medium", "fast", "circle", "non-stop", "adaptive",
+                                "quick", "balanced", "quality"],
+                       help="Training mode (quick/balanced/quality or legacy names)")
     parser.add_argument("--method", type=str, default="lora",
                        choices=["lora", "qlora"],
                        help="Training method")
@@ -840,6 +841,15 @@ def main():
     
     with open(model_info_path, 'r') as f:
         model_info = json.load(f)
+    
+    # Map new mode names to legacy names
+    mode_mapping = {
+        'quick': 'fast',
+        'balanced': 'medium',
+        'quality': 'slow'
+    }
+    if args.mode in mode_mapping:
+        args.mode = mode_mapping[args.mode]
     
     # Create training config
     from training_config import TrainingConfig
