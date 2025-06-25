@@ -115,6 +115,13 @@ class TrainingMetrics:
             else:
                 return True, "moderate_overfitting"
         
+        # Additional check for text generation - look at perplexity
+        if recent_val > 1.0:  # Likely a text generation task (higher loss)
+            # Check if validation perplexity is increasing significantly
+            val_perplexity = np.exp(recent_val)
+            if val_perplexity > 100 and val_trend > 0.01:
+                return True, "perplexity_explosion"
+        
         return False, "no_overfitting"
     
     def get_status_string(self) -> str:
@@ -130,6 +137,11 @@ class TrainingMetrics:
             f"🎯 Best Val: {self.best_val_loss:.4f}",
             f"⏳ Patience: {self.patience_counter}"
         ]
+        
+        # Add perplexity for text generation tasks (when loss > 1)
+        if self.val_losses and self.val_losses[-1] > 1.0:
+            perplexity = np.exp(self.val_losses[-1])
+            status_parts.insert(4, f"📖 Perplexity: {perplexity:.1f}")
         
         return " | ".join(filter(None, status_parts))
 
@@ -335,8 +347,28 @@ class SmartTrainer:
         self.metrics = TrainingMetrics()
         self.handler_params = handler_params
         
+        # Adjust overfitting threshold based on task type
+        self._adjust_thresholds_for_task()
+        
         # Setup training
         self._setup_training()
+    
+    def _adjust_thresholds_for_task(self):
+        """Adjust training thresholds based on task type."""
+        dataset_format = self.training_config.get('dataset_format', 'auto')
+        model_type = self.training_config.get('model_type', '')
+        
+        # Text generation tasks need more lenient thresholds
+        if dataset_format in ['text', 'completion'] or 'language-model' in model_type:
+            # Only adjust if using default values
+            if self.training_config.get('overfitting_threshold', 0.1) == 0.1:
+                self.training_config['overfitting_threshold'] = 0.2  # 20% gap is OK for text gen
+                logger.info("Adjusted overfitting threshold to 0.2 for text generation task")
+            
+            # Adjust patience as text generation converges slower
+            if self.training_config.get('patience', 3) == 3:
+                self.training_config['patience'] = 5
+                logger.info("Adjusted patience to 5 for text generation task")
     
     def _setup_training(self):
         """Setup training components."""
@@ -439,10 +471,17 @@ class SmartTrainer:
                 print("Training stopped by callback")
                 break
             
-            # Check for perfect loss
+            # Check for perfect loss - adjust threshold based on task type
             if self.training_config.get('early_stop_on_perfect', True):
-                if self.metrics.train_losses and self.metrics.train_losses[-1] < 0.01:
-                    print("✨ Near-perfect loss achieved! Stopping...")
+                # Different thresholds for different tasks
+                dataset_format = self.training_config.get('dataset_format', 'auto')
+                if dataset_format in ['text', 'completion'] or 'language-model' in self.training_config.get('model_type', ''):
+                    perfect_threshold = 0.5  # More realistic for text generation
+                else:
+                    perfect_threshold = 0.01  # Strict for QA/instruction tasks
+                
+                if self.metrics.train_losses and self.metrics.train_losses[-1] < perfect_threshold:
+                    print(f"✨ Excellent loss achieved ({self.metrics.train_losses[-1]:.4f})! Stopping...")
                     break
             
             # Increase batch size for next cycle
