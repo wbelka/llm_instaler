@@ -79,9 +79,20 @@ USE_4BIT=false
 MAX_SEQ_LENGTH=""
 MODE=""
 FORCE_EPOCHS=false
+CIRCULAR_BATCH_MULTIPLIER=""
+HELP=false
+
+# Show help if requested
+if [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]]; then
+    HELP=true
+fi
 
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --help|-h)
+            HELP=true
+            shift
+            ;;
         --data)
             DATA_PATH="$2"
             shift 2
@@ -120,6 +131,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --max-circular-epochs)
             MAX_CIRCULAR_EPOCHS="$2"
+            shift 2
+            ;;
+        --circular-batch-multiplier)
+            CIRCULAR_BATCH_MULTIPLIER="$2"
             shift 2
             ;;
         --resume)
@@ -177,28 +192,116 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Check if data path is provided
-if [ -z "$DATA_PATH" ]; then
-    echo "Error: --data parameter is required"
+# Show help if requested or no data provided
+if [ "$HELP" = true ] || [ -z "$DATA_PATH" ]; then
+    if [ -z "$DATA_PATH" ] && [ "$HELP" = false ]; then
+        echo "Error: --data parameter is required"
+        echo ""
+    fi
+    
+    echo "Universal LoRA Training Script"
+    echo "=============================="
+    echo ""
     echo "Usage: $0 --data <path_to_training_data> [options]"
     echo ""
-    echo "Examples:"
-    echo "  $0 --data dataset.json                        # Single file"
-    echo "  $0 --data 'data/*.json'                       # Multiple files (use quotes!)"
-    echo "  $0 --data datasets/                           # Directory"
-    echo "  $0 --data 'file1.json,file2.json'             # Comma-separated list"
+    echo "REQUIRED:"
+    echo "  --data PATH                    Training data (file, directory, pattern, or comma-separated list)"
     echo ""
-    echo "Circular training:"
-    echo "  $0 --data small_data.json --circular                        # Default 100 cycles"
-    echo "  $0 --data small_data.json --circular --max-circular-epochs 20  # Custom cycles"
+    echo "TRAINING MODES:"
+    echo "  --mode MODE                    Training mode: quick, balanced, quality (default: auto-detect)"
+    echo "  --method METHOD                Training method: lora, qlora (default: lora)"
+    echo "  --circular                     Enable circular training (repeat dataset multiple times)"
+    echo "  --force-epochs                 Force exact number of epochs (disable auto-stop)"
     echo ""
-    echo "Force training:"
-    echo "  $0 --data data.json --epochs 5 --force-epochs               # Exactly 5 epochs"
-    echo "  $0 --data data.json --circular --max-circular-epochs 50 --force-epochs  # Exactly 50 cycles"
+    echo "TRAINING PARAMETERS:"
+    echo "  --epochs N                     Number of epochs (overrides mode default)"
+    echo "  --batch-size N                 Batch size (auto-detected if not set)"
+    echo "  --learning-rate RATE           Learning rate (auto-detected if not set)"
+    echo "  --max-seq-length N             Maximum sequence length (model default if not set)"
     echo ""
-    echo "TensorBoard only mode:"
-    echo "  $0 --tensorboard-only                         # View training graphs on default port 6006"
-    echo "  $0 --tensorboard-only 6007                    # View training graphs on custom port"
+    echo "LORA PARAMETERS:"
+    echo "  --lora-r N                     LoRA rank (auto-detected: 8-64 based on model)"
+    echo "  --lora-alpha N                 LoRA alpha (default: 2*r)"
+    echo ""
+    echo "CIRCULAR TRAINING OPTIONS:"
+    echo "  --max-circular-epochs N        Maximum circular epochs (default: 100)"
+    echo "  --circular-batch-multiplier X  Batch size change per cycle:"
+    echo "                                 - 1.0 = no change (default)"
+    echo "                                 - 0<X<2 = increment by X each cycle"
+    echo "                                 - X>=2 = multiply by X each cycle"
+    echo ""
+    echo "AUTO-STOP PARAMETERS:"
+    echo "  --patience N                   Early stopping patience (default: 3)"
+    echo "  --overfitting-threshold N      Max train/val loss gap (default: 0.1)"
+    echo "  --min-evaluations N            Min evals before stopping (default: 5)"
+    echo ""
+    echo "MEMORY OPTIMIZATION:"
+    echo "  --use-8bit                     Use 8-bit quantization"
+    echo "  --use-4bit                     Use 4-bit quantization (implies qlora)"
+    echo ""
+    echo "RESUME TRAINING:"
+    echo "  --resume                       Resume from last checkpoint"
+    echo "  --resume-from PATH             Resume from specific checkpoint"
+    echo ""
+    echo "OTHER OPTIONS:"
+    echo "  --output PATH                  Output directory (default: ./lora)"
+    echo "  --no-tensorboard               Disable TensorBoard"
+    echo "  --tensorboard-port N           TensorBoard port (default: 6006)"
+    echo "  --tensorboard-only [PORT]      Only start TensorBoard server"
+    echo "  -h, --help                     Show this help"
+    echo ""
+    echo "EXAMPLES:"
+    echo ""
+    echo "Basic training:"
+    echo "  $0 --data dataset.json"
+    echo "  $0 --data 'data/*.json'                    # Multiple files (use quotes!)"
+    echo "  $0 --data datasets/                        # Directory"
+    echo ""
+    echo "Quality modes:"
+    echo "  $0 --data data.json --mode quick           # Fast training, lower quality"
+    echo "  $0 --data data.json --mode balanced        # Balanced speed/quality"
+    echo "  $0 --data data.json --mode quality         # Best quality, slower"
+    echo ""
+    echo "Custom parameters:"
+    echo "  $0 --data data.json --epochs 10 --batch-size 4 --learning-rate 2e-4"
+    echo "  $0 --data data.json --lora-r 32 --lora-alpha 64"
+    echo ""
+    echo "Circular training (for small datasets):"
+    echo "  $0 --data small_data.json --circular"
+    echo "  $0 --data small_data.json --circular --max-circular-epochs 20"
+    echo "  $0 --data small_data.json --circular --circular-batch-multiplier 1  # +1 batch each cycle"
+    echo "  $0 --data small_data.json --circular --circular-batch-multiplier 2  # 2x batch each cycle"
+    echo ""
+    echo "Memory optimization:"
+    echo "  $0 --data data.json --use-8bit             # 8-bit quantization"
+    echo "  $0 --data data.json --method qlora         # 4-bit quantization"
+    echo "  $0 --data data.json --use-4bit             # Also enables qlora"
+    echo ""
+    echo "Force exact epochs:"
+    echo "  $0 --data data.json --epochs 5 --force-epochs"
+    echo "  $0 --data data.json --circular --max-circular-epochs 50 --force-epochs"
+    echo ""
+    echo "Resume training:"
+    echo "  $0 --data data.json --resume               # From last checkpoint"
+    echo "  $0 --data data.json --resume-from checkpoints/checkpoint-500"
+    echo ""
+    echo "Multiple datasets:"
+    echo "  $0 --data 'train.json,valid.json,test.json'"
+    echo "  $0 --data 'dataset1.json,dataset2.json,dataset3.json'"
+    echo ""
+    echo "TensorBoard:"
+    echo "  $0 --data data.json --no-tensorboard       # Disable TensorBoard"
+    echo "  $0 --data data.json --tensorboard-port 6007"
+    echo "  $0 --tensorboard-only                      # View existing logs"
+    echo "  $0 --tensorboard-only 6008                 # Custom port"
+    echo ""
+    echo "NOTES:"
+    echo "- Auto-detection adapts parameters to your model and dataset"
+    echo "- Circular training is recommended for datasets < 1000 examples"
+    echo "- Use quotes around glob patterns like 'data/*.json'"
+    echo "- TensorBoard runs at http://localhost:6006 by default"
+    echo "- Training automatically stops when optimal (unless --force-epochs)"
+    echo ""
     exit 1
 fi
 
@@ -269,6 +372,7 @@ CMD="python train_lora.py --data \"$DATA_PATH\" --output \"$OUTPUT_PATH\""
 [ ! -z "$LORA_ALPHA" ] && CMD="$CMD --lora-alpha $LORA_ALPHA"
 [ "$CIRCULAR" = true ] && CMD="$CMD --circular"
 [ ! -z "$MAX_CIRCULAR_EPOCHS" ] && CMD="$CMD --max-circular-epochs $MAX_CIRCULAR_EPOCHS"
+[ ! -z "$CIRCULAR_BATCH_MULTIPLIER" ] && CMD="$CMD --circular-batch-multiplier $CIRCULAR_BATCH_MULTIPLIER"
 [ "$RESUME" = true ] && CMD="$CMD --resume"
 [ ! -z "$RESUME_FROM" ] && CMD="$CMD --resume-from \"$RESUME_FROM\""
 [ ! -z "$PATIENCE" ] && CMD="$CMD --patience $PATIENCE"
