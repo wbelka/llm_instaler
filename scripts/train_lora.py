@@ -626,6 +626,14 @@ class SmartTrainer:
             json.dump(adapter_config, f, indent=2)
         
         print(f"✅ Model saved to {lora_path}")
+        
+        # Check which format was saved
+        if (lora_path / "adapter_model.safetensors").exists():
+            print("📄 Format: adapter_model.safetensors (recommended)")
+        elif (lora_path / "adapter_model.bin").exists():
+            print("📄 Format: adapter_model.bin (legacy)")
+        else:
+            print("⚠️  Warning: No adapter file found!")
     
     def plot_training_history(self):
         """Plot and save training history."""
@@ -983,6 +991,17 @@ def main():
             test_model(args.model_path, args.output, args.test_prompt, training_params)
         
         print("\n✅ Training completed successfully!")
+        print("\n📁 Output structure:")
+        print(f"  {args.output}/")
+        print(f"    ├── adapter_model.safetensors  # ← This is loaded when using the model")
+        print(f"    ├── adapter_config.json")
+        print(f"    ├── training_history.png")
+        print(f"    └── checkpoints/               # ← Saved for safety, not used at inference")
+        print(f"        ├── checkpoint-10/")
+        print(f"        ├── checkpoint-20/")
+        print(f"        └── ...")
+        print("\nTo use a specific checkpoint instead of final:")
+        print(f"  cp {args.output}/checkpoints/checkpoint-XXX/adapter_model.* {args.output}/")
         
     finally:
         # Cleanup

@@ -224,6 +224,13 @@ def _load_transformers_model(
             print("="*50)
             logger.info(f"Loading LoRA adapter from {lora_path}")
             
+            # Check which adapter file exists
+            adapter_path = Path(lora_path)
+            if (adapter_path / "adapter_model.safetensors").exists():
+                print("📄 Found adapter_model.safetensors")
+            elif (adapter_path / "adapter_model.bin").exists():
+                print("📄 Found adapter_model.bin")
+            
             model = PeftModel.from_pretrained(model, lora_path)
             model = model.merge_and_unload()  # Merge for inference
             
