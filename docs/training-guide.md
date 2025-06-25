@@ -110,6 +110,18 @@ After training, the LoRA adapter is automatically loaded when you start the mode
 - Monitors performance trends
 - Experimental feature
 
+### 7. **Force Epochs Mode** (Override Auto-Stop)
+```bash
+./train.sh --data dataset.json --epochs 5 --force-epochs
+```
+- **NEW**: Trains for exact number of epochs specified
+- Ignores all auto-stop conditions:
+  - Overfitting detection disabled
+  - Early stopping disabled
+  - Perfect loss checks disabled
+- Useful when you want guaranteed training time
+- Can be combined with any mode
+
 ## Dataset Formats
 
 ### Supported Formats
@@ -429,6 +441,18 @@ training_history.png   # Loss curves plot
   --gradient-accumulation-steps 16
 ```
 
+### 5. **When to Use Force Epochs**
+```bash
+# Guaranteed training regardless of metrics
+./train.sh --data dataset.json --epochs 10 --force-epochs
+
+# Useful for:
+# - Benchmarking exact training times
+# - Comparing models with same training duration
+# - When you know the data requires full epochs
+# - Overcoming false-positive overfitting detection
+```
+
 ## Troubleshooting
 
 ### Out of Memory
@@ -472,7 +496,11 @@ The model automatically loads LoRA if present in `./lora/`
 
 This triggers auto-stop by default. To continue:
 ```bash
+# Option 1: Adjust thresholds
 ./train.sh --data dataset.json --patience 10 --overfitting-threshold 0.3
+
+# Option 2: Force training to continue
+./train.sh --data dataset.json --epochs 5 --force-epochs
 ```
 
 ## Advanced Usage

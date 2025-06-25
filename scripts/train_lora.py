@@ -355,6 +355,11 @@ class SmartTrainer:
     
     def _adjust_thresholds_for_task(self):
         """Adjust training thresholds based on task type."""
+        # Skip adjustments if force_epochs is enabled
+        if self.training_config.get('force_epochs', False):
+            logger.info("Force epochs enabled - auto-stop features disabled")
+            return
+            
         dataset_format = self.training_config.get('dataset_format', 'auto')
         model_type = self.training_config.get('model_type', '')
         
@@ -472,7 +477,7 @@ class SmartTrainer:
                 break
             
             # Check for perfect loss - adjust threshold based on task type
-            if self.training_config.get('early_stop_on_perfect', True):
+            if self.training_config.get('early_stop_on_perfect', True) and not self.training_config.get('force_epochs', False):
                 # Different thresholds for different tasks
                 dataset_format = self.training_config.get('dataset_format', 'auto')
                 if dataset_format in ['text', 'completion'] or 'language-model' in self.training_config.get('model_type', ''):
@@ -603,19 +608,23 @@ class AutoStopCallback:
                     # Print status
                     print(f"\n{self.parent.smart_trainer.metrics.get_status_string()}")
                     
-                    # Check overfitting
-                    is_overfitting, reason = self.parent.smart_trainer.metrics.check_overfitting(
-                        self.parent.smart_trainer.training_config['overfitting_threshold']
-                    )
-                    
-                    if is_overfitting:
-                        print(f"⚠️  Detected {reason}! Stopping training...")
-                        control.should_training_stop = True
-                    
-                    # Check patience
-                    if self.parent.smart_trainer.metrics.patience_counter >= self.parent.smart_trainer.training_config['patience']:
-                        print(f"⏹️  No improvement for {self.parent.smart_trainer.training_config['patience']} evaluations. Stopping...")
-                        control.should_training_stop = True
+                    # Skip auto-stop checks if force_epochs is enabled
+                    if self.parent.smart_trainer.training_config.get('force_epochs', False):
+                        print("🔒 Force epochs mode - ignoring auto-stop conditions")
+                    else:
+                        # Check overfitting
+                        is_overfitting, reason = self.parent.smart_trainer.metrics.check_overfitting(
+                            self.parent.smart_trainer.training_config['overfitting_threshold']
+                        )
+                        
+                        if is_overfitting:
+                            print(f"⚠️  Detected {reason}! Stopping training...")
+                            control.should_training_stop = True
+                        
+                        # Check patience
+                        if self.parent.smart_trainer.metrics.patience_counter >= self.parent.smart_trainer.training_config['patience']:
+                            print(f"⏹️  No improvement for {self.parent.smart_trainer.training_config['patience']} evaluations. Stopping...")
+                            control.should_training_stop = True
                     
                     # Save best model
                     if improved:
@@ -754,6 +763,8 @@ def main():
                        help="Skip testing after training")
     parser.add_argument("--seed", type=int, default=42,
                        help="Random seed")
+    parser.add_argument("--force-epochs", action="store_true",
+                       help="Force training for specified epochs, ignore auto-stop")
     
     args = parser.parse_args()
     
@@ -791,6 +802,7 @@ def main():
         'validation_split': args.validation_split,
         'dataset_format': args.dataset_format,
         'model_id': model_info.get('model_id', 'unknown'),
+        'force_epochs': args.force_epochs,
     }
     
     # Add explicit parameters if provided
@@ -823,6 +835,12 @@ def main():
     print("🎯 TRAINING CONFIGURATION")
     print("="*60)
     print(training_config.get_training_description())
+    if args.force_epochs:
+        print("\n🔒 FORCE EPOCHS MODE ENABLED")
+        print("   Training will continue for full epochs regardless of:")
+        print("   - Overfitting detection")
+        print("   - Early stopping")
+        print("   - Perfect loss")
     print("="*60 + "\n")
     
     # Load model and tokenizer

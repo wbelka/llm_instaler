@@ -52,6 +52,7 @@ USE_8BIT=false
 USE_4BIT=false
 MAX_SEQ_LENGTH=""
 MODE=""
+FORCE_EPOCHS=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -134,6 +135,10 @@ while [[ $# -gt 0 ]]; do
         --mode)
             MODE="$2"
             shift 2
+            ;;
+        --force-epochs)
+            FORCE_EPOCHS=true
+            shift
             ;;
         *)
             echo "Unknown option: $1"
@@ -228,6 +233,7 @@ CMD="python train_lora.py --data \"$DATA_PATH\" --output \"$OUTPUT_PATH\""
 [ "$USE_4BIT" = true ] && CMD="$CMD --use-4bit"
 [ ! -z "$MAX_SEQ_LENGTH" ] && CMD="$CMD --max-seq-length $MAX_SEQ_LENGTH"
 [ ! -z "$MODE" ] && CMD="$CMD --mode $MODE"
+[ "$FORCE_EPOCHS" = true ] && CMD="$CMD --force-epochs"
 
 # Function to cleanup on exit
 cleanup() {
