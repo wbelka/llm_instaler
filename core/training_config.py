@@ -300,15 +300,15 @@ class TrainingConfig:
     
     def _get_max_seq_length(self) -> int:
         """Get max sequence length based on model."""
-        # Common context lengths
+        # Training-appropriate context lengths (not full model capacity)
         context_lengths = {
-            "llama": 4096,
-            "llama4": 8192,  # Can go much higher but this is safe
-            "mistral": 8192,
-            "gemma": 8192,
-            "gemma3": 8192,
-            "qwen": 8192,
-            "qwen3": 32768,
+            "llama": 2048,
+            "llama4": 4096,  # Can go much higher but this is safe for training
+            "mistral": 4096,
+            "gemma": 4096,
+            "gemma3": 4096,
+            "qwen": 2048,
+            "qwen3": 2048,  # Much safer for training than 32k
             "phi": 2048,
             "gpt": 2048,
             "default": 2048

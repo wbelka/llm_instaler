@@ -241,6 +241,10 @@ def setup_lora(model, training_config: Dict[str, Any], training_params: Dict[str
     """Setup LoRA/QLoRA for the model."""
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, TaskType
     
+    # Disable cache for training to avoid warnings with gradient checkpointing
+    if hasattr(model.config, 'use_cache'):
+        model.config.use_cache = False
+    
     # Prepare model for k-bit training if using quantization
     if training_config.get('use_8bit') or training_config.get('use_4bit'):
         model = prepare_model_for_kbit_training(model)
