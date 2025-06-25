@@ -218,11 +218,20 @@ def _load_transformers_model(
     if lora_path and Path(lora_path).exists() and kwargs.get('load_lora', True):
         try:
             from peft import PeftModel
+            print("\n" + "="*50)
+            print("🎯 LOADING LoRA ADAPTER")
+            print(f"Path: {lora_path}")
+            print("="*50)
             logger.info(f"Loading LoRA adapter from {lora_path}")
+            
             model = PeftModel.from_pretrained(model, lora_path)
             model = model.merge_and_unload()  # Merge for inference
+            
+            print("✅ LoRA adapter successfully loaded and merged!")
+            print("="*50 + "\n")
             logger.info("LoRA adapter loaded and merged successfully")
         except Exception as e:
+            print(f"\n❌ Failed to load LoRA adapter: {e}\n")
             logger.warning(f"Failed to load LoRA adapter: {e}")
 
     return model, tokenizer

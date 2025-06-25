@@ -74,9 +74,22 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Check for LoRA adapter
-if [ -f "./lora/adapter_model.bin" ]; then
-    echo "Found LoRA adapter, loading with modifications..."
+LORA_LOADED=false
+if [ -f "./lora/adapter_model.bin" ] || [ -f "./lora/adapter_model.safetensors" ]; then
+    echo ""
+    echo "🎯 LoRA ADAPTER DETECTED!"
+    echo "======================================"
+    echo "Found fine-tuned LoRA adapter in ./lora/"
+    echo "The model will load with your custom training."
+    echo "======================================"
+    echo ""
     EXTRA_ARGS="$EXTRA_ARGS --load-lora ./lora"
+    LORA_LOADED=true
+elif [ -d "./lora" ] && [ "$(ls -A ./lora 2>/dev/null)" ]; then
+    echo ""
+    echo "⚠️  LoRA directory exists but adapter not found"
+    echo "Expected files: adapter_model.bin or adapter_model.safetensors"
+    echo ""
 fi
 
 # Get model name from model_info.json
@@ -116,6 +129,13 @@ echo ""
 echo "API is running at: http://localhost:$PORT"
 echo "Web UI available at: http://localhost:$PORT"
 echo "API docs at: http://localhost:$PORT/docs"
+if [ "$LORA_LOADED" = true ]; then
+    echo ""
+    echo "✅ Model is running WITH LoRA fine-tuning"
+else
+    echo ""
+    echo "ℹ️  Model is running WITHOUT LoRA (base model only)"
+fi
 echo ""
 echo "Press Ctrl+C to stop the server"
 

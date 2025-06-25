@@ -122,6 +122,8 @@ class ModelInfoResponse(BaseModel):
     device: str
     dtype: str
     stream_mode: bool = False
+    lora_loaded: bool = False
+    lora_path: Optional[str] = None
 
 
 @app.on_event("startup")
@@ -152,11 +154,18 @@ async def startup_event():
         logger.info(f"Loading model with info: model_type={MODEL_INFO.get('model_type')}, model_family={MODEL_INFO.get('model_family')}")
         
         # Check if LoRA exists and auto-load if not specified
+        lora_loaded = False
         if args.load_lora is None:
             lora_path = Path("./lora")
             if lora_path.exists() and lora_path.is_dir():
-                logger.info(f"Found LoRA adapter at {lora_path}, auto-loading...")
-                args.load_lora = str(lora_path)
+                # Check for adapter files
+                adapter_files = list(lora_path.glob("adapter_model.*"))
+                if adapter_files:
+                    logger.info(f"Found LoRA adapter at {lora_path}, auto-loading...")
+                    args.load_lora = str(lora_path)
+                    lora_loaded = True
+        else:
+            lora_loaded = True
         
         MODEL, TOKENIZER = load_model(
             MODEL_INFO,
@@ -165,6 +174,10 @@ async def startup_event():
             lora_path=args.load_lora,
             load_lora=True  # Enable LoRA loading
         )
+        
+        # Update MODEL_INFO with LoRA status
+        MODEL_INFO['lora_loaded'] = lora_loaded
+        MODEL_INFO['lora_path'] = args.load_lora if lora_loaded else None
         
         # Get handler instance
         global HANDLER
@@ -378,7 +391,9 @@ async def get_model_info():
         capabilities=capabilities,
         device=str(DEVICE),
         dtype=str(DTYPE),
-        stream_mode=STREAM_MODE
+        stream_mode=STREAM_MODE,
+        lora_loaded=MODEL_INFO.get('lora_loaded', False),
+        lora_path=MODEL_INFO.get('lora_path', None)
     )
 
 
