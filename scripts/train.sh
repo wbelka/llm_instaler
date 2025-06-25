@@ -333,6 +333,14 @@ if [ "$HELP" = true ] || [ -z "$DATA_PATH" ]; then
     echo "- TensorBoard runs at http://localhost:6006 by default"
     echo "- Training automatically stops when optimal (unless --force-epochs)"
     echo ""
+    echo "MEMORY ISSUES (CUDA OOM):"
+    echo "  If you get out of memory errors, try:"
+    echo "    --batch-size 1                # Reduce batch size"
+    echo "    --gradient-accumulation 16    # Maintain effective batch size"
+    echo "    --max-seq-length 512         # Reduce sequence length"
+    echo "    --use-8bit                   # Use 8-bit quantization"
+    echo "    --method qlora               # Use 4-bit quantization"
+    echo ""
     exit 1
 fi
 

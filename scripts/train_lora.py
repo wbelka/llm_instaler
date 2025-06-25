@@ -461,7 +461,13 @@ class SmartTrainer:
     def _standard_training(self):
         """Standard training."""
         print("🚀 Starting training...")
-        self.trainer.train(resume_from_checkpoint=self.training_config.get('resume_from_checkpoint'))
+        try:
+            self.trainer.train(resume_from_checkpoint=self.training_config.get('resume_from_checkpoint'))
+        except torch.cuda.OutOfMemoryError as e:
+            print(f"\n⚠️  CUDA Out of Memory Error during training!")
+            print(f"   Try running with smaller batch size: --batch-size 1")
+            print(f"   Or use quantization: --use-8bit or --method qlora")
+            raise e
         
         # Save final model
         self.save_final_model()
@@ -497,7 +503,39 @@ class SmartTrainer:
                     torch.cuda.empty_cache()
                     torch.cuda.synchronize()
                 
-            self.trainer.train()
+            try:
+                self.trainer.train()
+            except torch.cuda.OutOfMemoryError as e:
+                print(f"\n⚠️  CUDA Out of Memory Error!")
+                print(f"   Current batch size: {self.trainer.args.per_device_train_batch_size}")
+                
+                # Try to recover by reducing batch size
+                if self.trainer.args.per_device_train_batch_size > 1:
+                    new_batch_size = max(1, self.trainer.args.per_device_train_batch_size // 2)
+                    print(f"   Reducing batch size to {new_batch_size} and retrying...")
+                    
+                    # Clear GPU memory
+                    import torch
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                    
+                    # Update batch size
+                    self.trainer.args.per_device_train_batch_size = new_batch_size
+                    
+                    # Adjust gradient accumulation to maintain effective batch size
+                    old_effective = self.trainer.args.per_device_train_batch_size * self.trainer.args.gradient_accumulation_steps
+                    self.trainer.args.gradient_accumulation_steps = max(1, old_effective // new_batch_size)
+                    
+                    print(f"   New gradient accumulation steps: {self.trainer.args.gradient_accumulation_steps}")
+                    print(f"   Effective batch size: {new_batch_size * self.trainer.args.gradient_accumulation_steps}")
+                    
+                    # Retry training
+                    self.trainer.train()
+                else:
+                    print("   Batch size already at 1, cannot reduce further.")
+                    print("   Try: --batch-size 1 --max-seq-length 512 --use-8bit")
+                    raise e
             
             # Save checkpoint after each cycle
             checkpoint_path = self.output_dir / "checkpoints" / f"checkpoint-cycle-{cycle + 1}"

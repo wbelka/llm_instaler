@@ -242,29 +242,29 @@ class TrainingConfig:
     
     def _get_optimal_batch_size(self) -> int:
         """Get optimal batch size based on model size and quantization."""
-        # Base batch sizes for different model sizes (assuming 24GB GPU)
+        # Conservative batch sizes for 16GB GPU
         if self.use_4bit:
             # 4-bit quantization allows larger batches
-            if self.model_size_gb < 7:
-                return 8
-            elif self.model_size_gb < 13:
-                return 4
-            else:
-                return 2
-        elif self.use_8bit:
-            # 8-bit quantization
-            if self.model_size_gb < 7:
-                return 4
-            elif self.model_size_gb < 13:
-                return 2
-            else:
-                return 1
-        else:
-            # Full precision
-            if self.model_size_gb < 3:
+            if self.model_size_gb < 2:
                 return 4
             elif self.model_size_gb < 7:
                 return 2
+            else:
+                return 1
+        elif self.use_8bit:
+            # 8-bit quantization
+            if self.model_size_gb < 2:
+                return 2
+            elif self.model_size_gb < 7:
+                return 1
+            else:
+                return 1
+        else:
+            # Full precision - very conservative
+            if self.model_size_gb < 1:
+                return 2
+            elif self.model_size_gb < 3:
+                return 1
             else:
                 return 1
     
