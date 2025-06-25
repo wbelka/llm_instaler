@@ -480,6 +480,12 @@ class SmartTrainer:
                 self.trainer.state.epoch = 0
                 self.trainer.state.global_step = 0
                 
+                # Clear GPU memory before starting new cycle with increased batch size
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                
             self.trainer.train()
             
             # Check if should stop
@@ -503,13 +509,39 @@ class SmartTrainer:
             # Increase batch size for next cycle
             if cycle < max_epochs - 1:
                 multiplier = self.training_config.get('circular_batch_multiplier', 2)
-                new_batch_size = min(
-                    self.trainer.args.per_device_train_batch_size * multiplier,
-                    32  # Max batch size
-                )
-                if new_batch_size != self.trainer.args.per_device_train_batch_size:
-                    self.trainer.args.per_device_train_batch_size = new_batch_size
-                    print(f"📈 Increased batch size to {new_batch_size}")
+                current_batch_size = self.trainer.args.per_device_train_batch_size
+                
+                # Check available GPU memory before increasing
+                import torch
+                if torch.cuda.is_available():
+                    # Get memory stats
+                    allocated = torch.cuda.memory_allocated() / 1024**3  # GB
+                    reserved = torch.cuda.memory_reserved() / 1024**3  # GB
+                    total = torch.cuda.get_device_properties(0).total_memory / 1024**3  # GB
+                    free = total - allocated
+                    
+                    # Only increase if we have enough free memory (at least 3GB free)
+                    if free < 3.0:
+                        print(f"⚠️  Low GPU memory ({free:.1f}GB free), keeping batch size at {current_batch_size}")
+                    else:
+                        new_batch_size = min(
+                            current_batch_size * multiplier,
+                            32  # Max batch size
+                        )
+                        if new_batch_size != current_batch_size:
+                            self.trainer.args.per_device_train_batch_size = new_batch_size
+                            self.trainer.args.per_device_eval_batch_size = new_batch_size
+                            print(f"📈 Increased batch size to {new_batch_size}")
+                else:
+                    # CPU training - be more conservative
+                    new_batch_size = min(
+                        current_batch_size * multiplier,
+                        8  # Lower max for CPU
+                    )
+                    if new_batch_size != current_batch_size:
+                        self.trainer.args.per_device_train_batch_size = new_batch_size
+                        self.trainer.args.per_device_eval_batch_size = new_batch_size
+                        print(f"📈 Increased batch size to {new_batch_size}")
         
         # Save final model
         self.save_final_model()
