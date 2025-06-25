@@ -87,6 +87,9 @@ After training, the LoRA adapter is automatically loaded when you start the mode
 ### 4. **Circular Mode** (Small Datasets)
 ```bash
 ./train.sh --data small_dataset.json --circular
+
+# Custom number of cycles (default: 100)
+./train.sh --data small_dataset.json --circular --max-circular-epochs 20
 ```
 - Cycles through dataset multiple times
 - Gradually increases batch size
@@ -113,6 +116,9 @@ After training, the LoRA adapter is automatically loaded when you start the mode
 ### 7. **Force Epochs Mode** (Override Auto-Stop)
 ```bash
 ./train.sh --data dataset.json --epochs 5 --force-epochs
+
+# With circular training - guaranteed cycles
+./train.sh --data small_dataset.json --circular --max-circular-epochs 50 --force-epochs
 ```
 - **NEW**: Trains for exact number of epochs specified
 - Ignores all auto-stop conditions:
@@ -446,11 +452,15 @@ training_history.png   # Loss curves plot
 # Guaranteed training regardless of metrics
 ./train.sh --data dataset.json --epochs 10 --force-epochs
 
+# Exact number of circular training cycles
+./train.sh --data small_data.json --circular --max-circular-epochs 30 --force-epochs
+
 # Useful for:
 # - Benchmarking exact training times
 # - Comparing models with same training duration
 # - When you know the data requires full epochs
 # - Overcoming false-positive overfitting detection
+# - Small datasets that need multiple passes
 ```
 
 ## Troubleshooting

@@ -41,6 +41,7 @@ LEARNING_RATE=""
 LORA_R=""
 LORA_ALPHA=""
 CIRCULAR=false
+MAX_CIRCULAR_EPOCHS=""
 RESUME=false
 RESUME_FROM=""
 NO_TENSORBOARD=false
@@ -91,6 +92,10 @@ while [[ $# -gt 0 ]]; do
         --circular)
             CIRCULAR=true
             shift
+            ;;
+        --max-circular-epochs)
+            MAX_CIRCULAR_EPOCHS="$2"
+            shift 2
             ;;
         --resume)
             RESUME=true
@@ -150,12 +155,21 @@ done
 # Check if data path is provided
 if [ -z "$DATA_PATH" ]; then
     echo "Error: --data parameter is required"
-    echo "Usage: $0 --data <path_to_training_data>"
+    echo "Usage: $0 --data <path_to_training_data> [options]"
+    echo ""
     echo "Examples:"
-    echo "  $0 --data dataset.json                  # Single file"
-    echo "  $0 --data 'data/*.json'                 # Multiple files (use quotes!)"
-    echo "  $0 --data datasets/                     # Directory"
-    echo "  $0 --data 'file1.json,file2.json'       # Comma-separated list"
+    echo "  $0 --data dataset.json                        # Single file"
+    echo "  $0 --data 'data/*.json'                       # Multiple files (use quotes!)"
+    echo "  $0 --data datasets/                           # Directory"
+    echo "  $0 --data 'file1.json,file2.json'             # Comma-separated list"
+    echo ""
+    echo "Circular training:"
+    echo "  $0 --data small_data.json --circular                        # Default 100 cycles"
+    echo "  $0 --data small_data.json --circular --max-circular-epochs 20  # Custom cycles"
+    echo ""
+    echo "Force training:"
+    echo "  $0 --data data.json --epochs 5 --force-epochs               # Exactly 5 epochs"
+    echo "  $0 --data data.json --circular --max-circular-epochs 50 --force-epochs  # Exactly 50 cycles"
     exit 1
 fi
 
@@ -225,6 +239,7 @@ CMD="python train_lora.py --data \"$DATA_PATH\" --output \"$OUTPUT_PATH\""
 [ ! -z "$LORA_R" ] && CMD="$CMD --lora-r $LORA_R"
 [ ! -z "$LORA_ALPHA" ] && CMD="$CMD --lora-alpha $LORA_ALPHA"
 [ "$CIRCULAR" = true ] && CMD="$CMD --circular"
+[ ! -z "$MAX_CIRCULAR_EPOCHS" ] && CMD="$CMD --max-circular-epochs $MAX_CIRCULAR_EPOCHS"
 [ "$RESUME" = true ] && CMD="$CMD --resume"
 [ ! -z "$RESUME_FROM" ] && CMD="$CMD --resume-from \"$RESUME_FROM\""
 [ ! -z "$PATIENCE" ] && CMD="$CMD --patience $PATIENCE"
