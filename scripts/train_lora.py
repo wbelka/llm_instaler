@@ -717,9 +717,79 @@ class AutoStopCallback:
         self._callback = _AutoStopCallback(self)
 
 
-def test_model(model_path: str, lora_path: str, test_prompt: str, handler_params: Dict[str, Any]):
-    """Test the trained model."""
-    print("\n🧪 Testing trained model...")
+def extract_test_prompts_from_dataset(data_path: str, training_config: Dict, num_prompts: int = 5) -> List[Tuple[str, str]]:
+    """Extract test prompts and expected completions from dataset."""
+    try:
+        from core.dataset_manager import DatasetManager
+        manager = DatasetManager(
+            model_type=training_config.get('model_type', ''),
+            model_family=training_config.get('model_family', '')
+        )
+        
+        # Load examples from dataset
+        examples, _ = manager.load_dataset(
+            data_path,
+            format=training_config.get('dataset_format', 'auto'),
+            validation_split=0,
+            max_examples=num_prompts * 2,  # Load more to have variety
+            shuffle=True
+        )
+        
+        test_prompts = []
+        
+        for example in examples:
+            prompt = None
+            expected = None
+            
+            # Extract prompt and expected completion based on format
+            if 'prompt' in example and 'completion' in example:
+                prompt = example['prompt']
+                expected = example['completion']
+            elif 'instruction' in example:
+                prompt = example['instruction']
+                if 'input' in example and example['input']:
+                    prompt += "\n\nInput: " + example['input']
+                expected = example.get('output', example.get('response', ''))
+            elif 'messages' in example and isinstance(example['messages'], list):
+                # Extract last user message and assistant response
+                user_msgs = [m for m in example['messages'] if m.get('role') == 'user']
+                asst_msgs = [m for m in example['messages'] if m.get('role') == 'assistant']
+                if user_msgs and asst_msgs:
+                    prompt = user_msgs[-1].get('content', '')
+                    expected = asst_msgs[-1].get('content', '')
+            elif 'question' in example and 'answer' in example:
+                prompt = example['question']
+                expected = example['answer']
+            elif 'input' in example and 'output' in example:
+                prompt = example['input']
+                expected = example['output']
+            
+            if prompt and expected:
+                test_prompts.append((prompt, expected))
+                if len(test_prompts) >= num_prompts:
+                    break
+        
+        return test_prompts
+    except Exception as e:
+        logger.warning(f"Could not extract test prompts: {e}")
+        return []
+
+
+def test_model(model_path: str, lora_path: str, test_prompt: str, handler_params: Dict[str, Any], 
+               training_config: Optional[Dict] = None, data_path: Optional[str] = None):
+    """Test the trained model and compare with base model."""
+    print("\n" + "="*60)
+    print("🧪 TESTING FINE-TUNED MODEL")
+    print("="*60)
+    
+    # Check if LoRA files exist
+    lora_path_obj = Path(lora_path)
+    adapter_exists = (lora_path_obj / "adapter_model.safetensors").exists() or (lora_path_obj / "adapter_model.bin").exists()
+    if not adapter_exists:
+        print("\n❌ ERROR: No adapter files found!")
+        print(f"   Checked: {lora_path}")
+        print("   Training may have failed or files were not saved correctly.")
+        return
     
     from model_loader import load_model
     
@@ -731,36 +801,301 @@ def test_model(model_path: str, lora_path: str, test_prompt: str, handler_params
     with open(model_info_path, 'r') as f:
         model_info = json.load(f)
     
-    # Load model with LoRA
-    model, tokenizer = load_model(
+    # Extract test prompts from dataset
+    dataset_prompts = []
+    if data_path and training_config:
+        print("\n🔍 Extracting test prompts from your dataset...")
+        dataset_prompts = extract_test_prompts_from_dataset(data_path, training_config, num_prompts=5)
+        if dataset_prompts:
+            print(f"✅ Found {len(dataset_prompts)} test prompts from dataset")
+        else:
+            print("⚠️  Could not extract prompts from dataset, using default prompt")
+    
+    # Prepare all test prompts
+    all_test_prompts = []
+    if dataset_prompts:
+        # Use dataset prompts primarily
+        all_test_prompts.extend([(p, e) for p, e in dataset_prompts[:3]])  # First 3 from dataset
+    if test_prompt and test_prompt.strip():
+        # Add user-provided prompt
+        all_test_prompts.append((test_prompt, None))
+    
+    if not all_test_prompts:
+        all_test_prompts = [("Hello, how are you?", None)]  # Fallback
+    
+    # Test 1: Compare base model vs fine-tuned on multiple prompts
+    print("\n1️⃣ Comparing BASE vs FINE-TUNED model responses:")
+    print("-" * 50)
+    
+    # Load base model (without LoRA)
+    print("Loading base model...")
+    base_model, base_tokenizer = load_model(
+        model_info,
+        model_path=model_path,
+        load_lora=False  # Don't load LoRA
+    )
+    
+    max_new_tokens = handler_params.get('max_generation_length', 128)
+    comparison_results = []
+    
+    # Test each prompt with base model
+    print("\nTesting with BASE model:")
+    for i, (prompt, expected) in enumerate(all_test_prompts):
+        inputs = base_tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
+        if torch.cuda.is_available():
+            inputs = {k: v.cuda() for k, v in inputs.items()}
+        
+        with torch.no_grad():
+            outputs = base_model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                temperature=0.7,
+                do_sample=True,
+                top_p=0.9,
+                pad_token_id=base_tokenizer.pad_token_id,
+                eos_token_id=base_tokenizer.eos_token_id,
+            )
+        
+        response = base_tokenizer.decode(outputs[0], skip_special_tokens=True)
+        comparison_results.append({
+            'prompt': prompt,
+            'expected': expected,
+            'base_response': response,
+            'is_from_dataset': i < len(dataset_prompts)
+        })
+    
+    # Clear GPU memory
+    del base_model
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    
+    # Load fine-tuned model (with LoRA)
+    print("\nLoading fine-tuned model...")
+    ft_model, ft_tokenizer = load_model(
         model_info,
         model_path=model_path,
         lora_path=lora_path,
         load_lora=True
     )
     
-    # Generate
-    inputs = tokenizer(test_prompt, return_tensors="pt")
-    if torch.cuda.is_available():
-        inputs = {k: v.cuda() for k, v in inputs.items()}
+    # Test each prompt with fine-tuned model
+    print("Testing with FINE-TUNED model:")
+    for i, result in enumerate(comparison_results):
+        inputs = ft_tokenizer(result['prompt'], return_tensors="pt", truncation=True, max_length=512)
+        if torch.cuda.is_available():
+            inputs = {k: v.cuda() for k, v in inputs.items()}
+        
+        with torch.no_grad():
+            outputs = ft_model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                temperature=0.7,
+                do_sample=True,
+                top_p=0.9,
+                pad_token_id=ft_tokenizer.pad_token_id,
+                eos_token_id=ft_tokenizer.eos_token_id,
+            )
+        
+        response = ft_tokenizer.decode(outputs[0], skip_special_tokens=True)
+        result['ft_response'] = response
     
-    # Get generation params from handler if available
-    max_new_tokens = handler_params.get('max_generation_length', 128)
+    # Display comparison results
+    print("\n" + "="*60)
+    print("📊 COMPARISON RESULTS")
+    print("="*60)
     
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            temperature=0.7,
-            do_sample=True,
-            top_p=0.9,
-            pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id,
-        )
+    identical_count = 0
+    dataset_match_count = 0
     
-    response = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    print(f"\n📝 Prompt: {test_prompt}")
-    print(f"🤖 Response: {response}")
+    for i, result in enumerate(comparison_results):
+        print(f"\n{'='*50}")
+        if result['is_from_dataset']:
+            print(f"Test {i+1} (FROM YOUR DATASET):")
+        else:
+            print(f"Test {i+1} (User provided):")
+        print(f"{'='*50}")
+        
+        # Truncate long prompts for display
+        prompt_display = result['prompt'][:100] + "..." if len(result['prompt']) > 100 else result['prompt']
+        print(f"\n📝 Prompt: {prompt_display}")
+        
+        if result['expected']:
+            expected_display = result['expected'][:150] + "..." if len(result['expected']) > 150 else result['expected']
+            print(f"\n✅ Expected (from dataset): {expected_display}")
+        
+        # Extract just the generated part (remove prompt from response)
+        base_generated = result['base_response'][len(result['prompt']):].strip()
+        ft_generated = result['ft_response'][len(result['prompt']):].strip()
+        
+        # Truncate for display
+        base_display = base_generated[:150] + "..." if len(base_generated) > 150 else base_generated
+        ft_display = ft_generated[:150] + "..." if len(ft_generated) > 150 else ft_generated
+        
+        print(f"\n🤖 BASE model: {base_display}")
+        print(f"\n🎯 FINE-TUNED: {ft_display}")
+        
+        # Check if responses are identical
+        if base_generated.strip() == ft_generated.strip():
+            print("\n⚠️  IDENTICAL responses!")
+            identical_count += 1
+        else:
+            print("\n✅ DIFFERENT responses!")
+        
+        # Check if fine-tuned matches expected (for dataset prompts)
+        if result['expected'] and result['is_from_dataset']:
+            # Simple similarity check (you could use more sophisticated metrics)
+            if result['expected'].strip().lower() in ft_generated.lower():
+                print("✅ Fine-tuned response matches expected output!")
+                dataset_match_count += 1
+            elif ft_generated.lower() in result['expected'].strip().lower():
+                print("✅ Fine-tuned response is close to expected output!")
+                dataset_match_count += 1
+            else:
+                print("⚠️  Fine-tuned response differs from expected output")
+    
+    # Test 2: Summary of results
+    print("\n\n2️⃣ SUMMARY OF COMPARISONS:")
+    print("-" * 50)
+    
+    total_tests = len(comparison_results)
+    dataset_tests = sum(1 for r in comparison_results if r['is_from_dataset'])
+    
+    print(f"Total tests performed: {total_tests}")
+    print(f"Tests from your dataset: {dataset_tests}")
+    print(f"Identical responses: {identical_count}/{total_tests} ({identical_count/total_tests*100:.1f}%)")
+    
+    if dataset_tests > 0:
+        print(f"Dataset matches: {dataset_match_count}/{dataset_tests} ({dataset_match_count/dataset_tests*100:.1f}%)")
+    
+    if identical_count == total_tests:
+        print("\n❌ WARNING: All responses are identical!")
+        print("   The model likely did NOT learn from your dataset.")
+    elif identical_count > total_tests / 2:
+        print("\n⚠️  Most responses are identical.")
+        print("   The model may have learned very little.")
+    else:
+        print("\n✅ Model shows different behavior after training!")
+        if dataset_match_count > 0:
+            print(f"   And it matches {dataset_match_count} expected outputs from your dataset!")
+    
+    # Test 3: Check if model learned specific patterns
+    print("\n3️⃣ Checking if model learned from dataset:")
+    print("-" * 50)
+    
+    # Read adapter info to see training metrics
+    adapter_info_path = Path(lora_path) / "adapter_info.json"
+    if adapter_info_path.exists():
+        with open(adapter_info_path, 'r') as f:
+            adapter_info = json.load(f)
+        
+        final_metrics = adapter_info.get('final_metrics', {})
+        print(f"Final training loss: {final_metrics.get('final_train_loss', 'N/A')}")
+        print(f"Final validation loss: {final_metrics.get('final_val_loss', 'N/A')}")
+        print(f"Best validation loss: {final_metrics.get('best_val_loss', 'N/A')}")
+        print(f"Training time: {final_metrics.get('training_time', 0)/60:.1f} minutes")
+        
+        # Check if loss decreased
+        if isinstance(final_metrics.get('final_train_loss'), (int, float)):
+            if final_metrics['final_train_loss'] < 0.01:
+                print("\n⚠️  WARNING: Training loss is extremely low (< 0.01)")
+                print("   This might indicate overfitting on a small dataset.")
+            elif final_metrics['final_train_loss'] > 2.0:
+                print("\n⚠️  WARNING: Training loss is still high (> 2.0)")
+                print("   The model may need more training.")
+    
+    # Test 4: Perplexity comparison
+    print("\n4️⃣ Calculating perplexity on your dataset:")
+    print("-" * 50)
+    
+    if data_path and training_config:
+        try:
+            # Calculate perplexity on a sample of training data
+            from core.dataset_manager import DatasetManager
+            manager = DatasetManager(
+                model_type=training_config.get('model_type', ''),
+                model_family=training_config.get('model_family', '')
+            )
+            
+            # Load a few examples
+            test_data, _ = manager.load_dataset(
+                data_path,
+                format=training_config.get('dataset_format', 'auto'),
+                validation_split=0,
+                max_examples=10,
+                shuffle=True
+            )
+            
+            if test_data and len(test_data) > 0:
+                total_loss = 0
+                num_tokens = 0
+                
+                for example in test_data[:5]:  # Test on 5 examples
+                    # Extract text from example
+                    if 'text' in example:
+                        text = example['text']
+                    elif 'prompt' in example and 'completion' in example:
+                        text = example['prompt'] + ' ' + example['completion']
+                    elif 'messages' in example:
+                        text = ' '.join([m.get('content', '') for m in example['messages']])
+                    else:
+                        continue
+                    
+                    # Tokenize and get loss
+                    inputs = ft_tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
+                    if torch.cuda.is_available():
+                        inputs = {k: v.cuda() for k, v in inputs.items()}
+                    
+                    with torch.no_grad():
+                        outputs = ft_model(**inputs, labels=inputs['input_ids'])
+                        total_loss += outputs.loss.item() * inputs['input_ids'].size(1)
+                        num_tokens += inputs['input_ids'].size(1)
+                
+                if num_tokens > 0:
+                    avg_loss = total_loss / num_tokens
+                    perplexity = np.exp(avg_loss)
+                    print(f"Average loss on dataset samples: {avg_loss:.4f}")
+                    print(f"Perplexity on dataset samples: {perplexity:.2f}")
+                    
+                    if perplexity < 1.5:
+                        print("✅ Excellent! Model has learned the dataset very well.")
+                    elif perplexity < 3.0:
+                        print("✅ Good! Model has learned from the dataset.")
+                    elif perplexity < 10.0:
+                        print("⚠️  Moderate learning. Consider more training.")
+                    else:
+                        print("❌ High perplexity. Model may not have learned much.")
+        except Exception as e:
+            print(f"Could not calculate perplexity: {e}")
+    
+    print("\n✅ Testing complete!")
+    
+    # Diagnostic summary
+    print("\n" + "="*60)
+    print("📋 DIAGNOSTIC SUMMARY")
+    print("="*60)
+    
+    # Check if responses are different
+    if base_response.strip() == ft_response.strip():
+        print("❌ Fine-tuned model gives IDENTICAL response to base model")
+        print("   → Model likely did NOT learn from your dataset")
+    else:
+        print("✅ Fine-tuned model gives DIFFERENT response from base model")
+        print("   → Model has been modified by training")
+    
+    print("\n💡 Troubleshooting tips if model didn't learn:")
+    print("1. Check dataset format:")
+    print(f"   - Your format: {training_config.get('dataset_format', 'auto')}")
+    print("   - Run with --debug to see how data is being loaded")
+    print("\n2. Increase training intensity:")
+    print("   - Use more epochs: --epochs 5 or --mode slow")
+    print("   - Increase learning rate: --learning-rate 5e-4")
+    print("   - Increase LoRA rank: --lora-r 64")
+    print("\n3. Check training logs:")
+    print("   - Look for decreasing loss in training_history.png")
+    print("   - Check tensorboard: tensorboard --logdir ./lora/logs")
+    print("\n4. Verify dataset:")
+    print("   - Ensure your data has clear input-output patterns")
+    print("   - Check that prompts and completions are properly formatted")
 
 
 def main():
@@ -988,7 +1323,8 @@ def main():
         
         # Test model
         if not args.skip_test:
-            test_model(args.model_path, args.output, args.test_prompt, training_params)
+            test_model(args.model_path, args.output, args.test_prompt, training_params, 
+                      asdict(training_config), args.data)
         
         print("\n✅ Training completed successfully!")
         print("\n📁 Output structure:")
