@@ -95,13 +95,20 @@ class TrainingMetrics:
         # Analyze gap
         recent_train = np.mean(self.train_losses[-5:])
         recent_val = np.mean(self.val_losses[-5:])
-        # Avoid division by zero
-        if recent_train == 0:
-            gap = 0 if recent_val == 0 else float('inf')
-        else:
-            gap = (recent_val - recent_train) / recent_train
         
-        # Decision
+        # Handle edge cases
+        if recent_train < 1e-6:  # Practically zero
+            if recent_val < 1e-6:
+                # Both are near zero - perfect fit, no overfitting
+                return False, "perfect_fit"
+            else:
+                # Train is zero but val is not - likely overfitting
+                return True, "severe_overfitting"
+        
+        # Calculate relative gap
+        gap = (recent_val - recent_train) / recent_train
+        
+        # Decision based on trend and gap
         if val_trend > 0.001 and gap > threshold:
             if gap > 0.5:
                 return True, "severe_overfitting"
@@ -546,8 +553,10 @@ class AutoStopCallback:
                 if metrics and state.global_step > self.parent.last_eval_step:
                     self.parent.last_eval_step = state.global_step
                     
-                    # Update metrics
-                    train_loss = state.log_history[-1].get('loss', 0) if state.log_history else 0
+                    # Update metrics - get average train loss from recent history
+                    train_losses = [log.get('loss', 0) for log in state.log_history 
+                                   if 'loss' in log and log.get('loss') is not None]
+                    train_loss = np.mean(train_losses[-10:]) if train_losses else 0
                     val_loss = metrics.get('eval_loss', 0)
                     
                     improved = self.parent.smart_trainer.metrics.update(train_loss, val_loss)
