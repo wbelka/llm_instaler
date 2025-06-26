@@ -1390,6 +1390,11 @@ To install manually:
             if core_dataset_src.exists():
                 shutil.copy2(core_dataset_src, core_dst / "dataset_manager.py")
 
+            # Copy lora_utils.py (needed for LoRA training)
+            core_lora_src = installer_root / "core" / "lora_utils.py"
+            if core_lora_src.exists():
+                shutil.copy2(core_lora_src, core_dst / "lora_utils.py")
+
             # Create __init__.py
             (core_dst / "__init__.py").touch()
             self._log_install(log_path, "INFO", "Copied core modules")
