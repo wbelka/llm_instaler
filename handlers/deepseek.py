@@ -294,6 +294,103 @@ class DeepseekHandler(BaseHandler):
         
         return analysis
     
+    def get_inference_params(self) -> Dict[str, Any]:
+        """Get inference parameters for DeepSeek models."""
+        params = {
+            'temperature': 0.7,
+            'top_p': 0.95,
+            'max_new_tokens': 1024,
+            'do_sample': True
+        }
+        
+        # Adjust for R1 reasoning models
+        if self.is_r1_model:
+            params.update({
+                'temperature': 0.1,  # Lower temperature for reasoning
+                'max_new_tokens': 4096,  # Longer outputs for reasoning
+                'return_thinking': True,
+                'max_thinking_tokens': 32768
+            })
+        
+        return params
+    
+    def get_system_dependencies(self) -> List[str]:
+        """Get system dependencies for DeepSeek models."""
+        deps = []
+        
+        # CUDA for GPU acceleration
+        if self.model_info.get('requires_gpu', True):
+            deps.append('cuda>=11.7')
+        
+        return deps
+    
+    def get_training_params(self) -> Dict[str, Any]:
+        """Get training parameters for DeepSeek models."""
+        params = {
+            'learning_rate': 2e-5,
+            'per_device_train_batch_size': 4,
+            'per_device_eval_batch_size': 8,
+            'num_train_epochs': 3,
+            'warmup_steps': 500,
+            'logging_steps': 100,
+            'save_steps': 500,
+            'eval_steps': 500,
+            'gradient_accumulation_steps': 4,
+            'fp16': True,
+            'gradient_checkpointing': True,
+            'load_best_model_at_end': True,
+            'metric_for_best_model': 'eval_loss',
+            'greater_is_better': False,
+            'save_total_limit': 3,
+        }
+        
+        # Adjust for R1 models (more conservative training)
+        if self.is_r1_model:
+            params['learning_rate'] = 1e-5  # Lower LR for reasoning models
+            params['max_grad_norm'] = 0.5   # More conservative gradients
+        
+        return params
+    
+    def load_model(self, model_path: str, **kwargs):
+        """Load DeepSeek model with proper configuration."""
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        import torch
+        
+        # Prepare model kwargs
+        model_kwargs = {
+            'pretrained_model_name_or_path': model_path,
+            'torch_dtype': kwargs.get('torch_dtype', torch.float16),
+            'device_map': kwargs.get('device_map', 'auto'),
+            'trust_remote_code': True,  # DeepSeek models may need this
+            'low_cpu_mem_usage': True,
+        }
+        
+        # Add quantization if specified
+        if kwargs.get('load_in_8bit', False):
+            model_kwargs['load_in_8bit'] = True
+        elif kwargs.get('load_in_4bit', False):
+            model_kwargs['load_in_4bit'] = True
+            
+        # Remove any kwargs that might cause issues
+        model_kwargs = {k: v for k, v in model_kwargs.items() 
+                       if k not in ['load_lora', 'lora_path']}
+        
+        # Load model
+        model = AutoModelForCausalLM.from_pretrained(**model_kwargs)
+        
+        # Load tokenizer
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_path,
+            trust_remote_code=True,
+            use_fast=True
+        )
+        
+        # Set pad token if not set
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+            
+        return model, tokenizer
+    
     def get_installation_notes(self) -> List[str]:
         """Get installation notes for DeepSeek models."""
         notes = [
