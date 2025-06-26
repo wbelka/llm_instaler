@@ -68,6 +68,7 @@ def load_model(
     dtype: str = "auto",
     load_in_8bit: bool = False,
     load_in_4bit: bool = False,
+    use_flash_attention_2: bool = None,
     **kwargs
 ) -> Tuple[Any, Optional[Any]]:
     """Load a model with the appropriate handler.
@@ -79,6 +80,7 @@ def load_model(
         dtype: Data type for model (auto/float16/float32/bfloat16/int8/int4).
         load_in_8bit: Whether to load in 8-bit quantization.
         load_in_4bit: Whether to load in 4-bit quantization.
+        use_flash_attention_2: Whether to use Flash Attention 2 (None=auto, True/False=force).
         **kwargs: Additional arguments for model loading.
 
     Returns:
@@ -110,16 +112,25 @@ def load_model(
             dtype=dtype,
             load_in_8bit=load_in_8bit,
             load_in_4bit=load_in_4bit,
+            use_flash_attention_2=use_flash_attention_2,
             **kwargs
         )
 
+    # Special handling for multi_modality/Janus models without handler
+    model_type = model_info.get("model_type", "").lower()
+    if model_type == "multi_modality" or "janus" in model_info.get("model_id", "").lower():
+        return _load_janus_model(
+            model_info, model_path, device, dtype,
+            load_in_8bit, load_in_4bit, use_flash_attention_2, **kwargs
+        )
+    
     # Fallback: Direct loading based on library
     primary_lib = model_info.get("primary_library", "transformers")
 
     if primary_lib == "transformers":
         return _load_transformers_model(
             model_info, model_path, device, dtype,
-            load_in_8bit, load_in_4bit, **kwargs
+            load_in_8bit, load_in_4bit, use_flash_attention_2, **kwargs
         )
     elif primary_lib == "diffusers":
         # Remove lora_path from kwargs as diffusers doesn't expect it
@@ -139,6 +150,7 @@ def _load_transformers_model(
     dtype: str,
     load_in_8bit: bool,
     load_in_4bit: bool,
+    use_flash_attention_2: bool = None,
     **kwargs
 ) -> Tuple[Any, Any]:
     """Load a transformers model.
@@ -284,6 +296,105 @@ def _load_transformers_model(
     return model, tokenizer
 
 
+def _load_janus_model(
+    model_info: Dict[str, Any],
+    model_path: str,
+    device: str,
+    dtype: str,
+    load_in_8bit: bool,
+    load_in_4bit: bool,
+    use_flash_attention_2: bool = None,
+    **kwargs
+) -> Tuple[Any, Any]:
+    """Load a Janus multi-modal model.
+    
+    Args:
+        model_info: Model information.
+        model_path: Path to model files.
+        device: Device to use.
+        dtype: Data type.
+        load_in_8bit: 8-bit quantization.
+        load_in_4bit: 4-bit quantization.
+        use_flash_attention_2: Whether to use Flash Attention 2.
+        
+    Returns:
+        Tuple of (model, processor).
+    """
+    import torch
+    from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+    
+    logger.info("Loading Janus multi-modal model")
+    
+    # Determine device
+    if device == "auto":
+        if torch.cuda.is_available():
+            device = "cuda"
+        else:
+            device = "cpu"
+    
+    # Determine dtype
+    if dtype == "auto":
+        if device == "cuda" and torch.cuda.is_bf16_supported():
+            torch_dtype = torch.bfloat16
+        elif device == "cuda":
+            torch_dtype = torch.float16
+        else:
+            torch_dtype = torch.float32
+    else:
+        dtype_map = {
+            "float16": torch.float16,
+            "float32": torch.float32,
+            "bfloat16": torch.bfloat16,
+        }
+        torch_dtype = dtype_map.get(dtype, torch.float32)
+    
+    # Quantization config
+    quantization_config = None
+    if load_in_8bit or load_in_4bit:
+        quantization_config = BitsAndBytesConfig(
+            load_in_8bit=load_in_8bit,
+            load_in_4bit=load_in_4bit,
+            bnb_4bit_compute_dtype=torch_dtype if load_in_4bit else None,
+        )
+    
+    # Determine Flash Attention 2 usage
+    if use_flash_attention_2 is None:
+        use_flash_attention_2 = (
+            device == "cuda" and 
+            not load_in_8bit and 
+            not load_in_4bit and
+            torch_dtype in [torch.float16, torch.bfloat16]
+        )
+    
+    # Load model
+    model_kwargs = {
+        "pretrained_model_name_or_path": model_path,
+        "torch_dtype": torch_dtype,
+        "device_map": device if device != "cpu" else None,
+        "quantization_config": quantization_config,
+        "trust_remote_code": True,
+        "use_flash_attention_2": use_flash_attention_2,
+    }
+    
+    # Remove None values
+    model_kwargs = {k: v for k, v in model_kwargs.items() if v is not None}
+    
+    # Load the model
+    model = AutoModelForCausalLM.from_pretrained(**model_kwargs)
+    
+    # Load processor
+    try:
+        from janus.models import VLChatProcessor
+        processor = VLChatProcessor.from_pretrained(model_path)
+        logger.info("Loaded Janus VLChatProcessor")
+    except ImportError:
+        logger.warning("janus package not installed, trying AutoProcessor")
+        from transformers import AutoProcessor
+        processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
+    
+    return model, processor
+
+
 def _load_diffusers_model(
     model_info: Dict[str, Any],
     model_path: str,
@@ -413,6 +524,71 @@ def _load_diffusers_model(
         pipeline.enable_attention_slicing()
 
     return pipeline, None
+
+
+def find_all_linear_names(model, quantization_config=None):
+    """Find all linear layer names in the model for LoRA application.
+    
+    This function identifies all Linear layers that can be targeted for LoRA,
+    excluding certain layers like lm_head and embeddings.
+    
+    Args:
+        model: The model to analyze.
+        quantization_config: Quantization config (for 4-bit/8-bit models).
+        
+    Returns:
+        List of linear layer names suitable for LoRA.
+    """
+    import torch.nn as nn
+    from transformers.pytorch_utils import Conv1D
+    
+    # Get the base model if it's wrapped
+    if hasattr(model, 'model'):
+        base_model = model.model
+    else:
+        base_model = model
+    
+    # Linear layer classes to look for
+    linear_classes = [nn.Linear]
+    
+    # Add Conv1D for models like GPT2
+    try:
+        linear_classes.append(Conv1D)
+    except:
+        pass
+    
+    # Add quantized linear layers if using quantization
+    if quantization_config is not None:
+        try:
+            from bitsandbytes.nn import Linear8bitLt, Linear4bit
+            linear_classes.extend([Linear8bitLt, Linear4bit])
+        except:
+            pass
+    
+    # Find all linear layer names
+    linear_names = []
+    
+    for name, module in base_model.named_modules():
+        # Skip the base model name
+        if name == '':
+            continue
+            
+        # Check if this is a linear layer
+        if any(isinstance(module, linear_class) for linear_class in linear_classes):
+            # Skip output layers and embeddings
+            if any(excluded in name for excluded in ['lm_head', 'embed_tokens', 'wte', 'wpe']):
+                continue
+                
+            # Extract the projection name (e.g., 'q_proj' from 'model.layers.0.self_attn.q_proj')
+            names = name.split('.')
+            layer_name = names[-1]
+            
+            # Add to list if not already present
+            if layer_name not in linear_names:
+                linear_names.append(layer_name)
+    
+    logger.info(f"Found linear layers for LoRA: {linear_names}")
+    return linear_names
 
 
 def get_model_config(model_info_path: str = "model_info.json") -> Dict[str, Any]:
