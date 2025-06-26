@@ -116,14 +116,6 @@ def load_model(
             **kwargs
         )
 
-    # Special handling for multi_modality/Janus models without handler
-    model_type = model_info.get("model_type", "").lower()
-    if model_type == "multi_modality" or "janus" in model_info.get("model_id", "").lower():
-        return _load_janus_model(
-            model_info, model_path, device, dtype,
-            load_in_8bit, load_in_4bit, use_flash_attention_2, **kwargs
-        )
-    
     # Fallback: Direct loading based on library
     primary_lib = model_info.get("primary_library", "transformers")
 
@@ -294,105 +286,6 @@ def _load_transformers_model(
             print("   Reason: load_lora flag is False")
 
     return model, tokenizer
-
-
-def _load_janus_model(
-    model_info: Dict[str, Any],
-    model_path: str,
-    device: str,
-    dtype: str,
-    load_in_8bit: bool,
-    load_in_4bit: bool,
-    use_flash_attention_2: bool = None,
-    **kwargs
-) -> Tuple[Any, Any]:
-    """Load a Janus multi-modal model.
-    
-    Args:
-        model_info: Model information.
-        model_path: Path to model files.
-        device: Device to use.
-        dtype: Data type.
-        load_in_8bit: 8-bit quantization.
-        load_in_4bit: 4-bit quantization.
-        use_flash_attention_2: Whether to use Flash Attention 2.
-        
-    Returns:
-        Tuple of (model, processor).
-    """
-    import torch
-    from transformers import AutoModelForCausalLM, BitsAndBytesConfig
-    
-    logger.info("Loading Janus multi-modal model")
-    
-    # Determine device
-    if device == "auto":
-        if torch.cuda.is_available():
-            device = "cuda"
-        else:
-            device = "cpu"
-    
-    # Determine dtype
-    if dtype == "auto":
-        if device == "cuda" and torch.cuda.is_bf16_supported():
-            torch_dtype = torch.bfloat16
-        elif device == "cuda":
-            torch_dtype = torch.float16
-        else:
-            torch_dtype = torch.float32
-    else:
-        dtype_map = {
-            "float16": torch.float16,
-            "float32": torch.float32,
-            "bfloat16": torch.bfloat16,
-        }
-        torch_dtype = dtype_map.get(dtype, torch.float32)
-    
-    # Quantization config
-    quantization_config = None
-    if load_in_8bit or load_in_4bit:
-        quantization_config = BitsAndBytesConfig(
-            load_in_8bit=load_in_8bit,
-            load_in_4bit=load_in_4bit,
-            bnb_4bit_compute_dtype=torch_dtype if load_in_4bit else None,
-        )
-    
-    # Determine Flash Attention 2 usage
-    if use_flash_attention_2 is None:
-        use_flash_attention_2 = (
-            device == "cuda" and 
-            not load_in_8bit and 
-            not load_in_4bit and
-            torch_dtype in [torch.float16, torch.bfloat16]
-        )
-    
-    # Load model
-    model_kwargs = {
-        "pretrained_model_name_or_path": model_path,
-        "torch_dtype": torch_dtype,
-        "device_map": device if device != "cpu" else None,
-        "quantization_config": quantization_config,
-        "trust_remote_code": True,
-        "use_flash_attention_2": use_flash_attention_2,
-    }
-    
-    # Remove None values
-    model_kwargs = {k: v for k, v in model_kwargs.items() if v is not None}
-    
-    # Load the model
-    model = AutoModelForCausalLM.from_pretrained(**model_kwargs)
-    
-    # Load processor
-    try:
-        from janus.models import VLChatProcessor
-        processor = VLChatProcessor.from_pretrained(model_path)
-        logger.info("Loaded Janus VLChatProcessor")
-    except ImportError:
-        logger.warning("janus package not installed, trying AutoProcessor")
-        from transformers import AutoProcessor
-        processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
-    
-    return model, processor
 
 
 def _load_diffusers_model(
