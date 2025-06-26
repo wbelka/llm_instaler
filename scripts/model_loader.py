@@ -419,69 +419,6 @@ def _load_diffusers_model(
     return pipeline, None
 
 
-def find_all_linear_names(model, quantization_config=None):
-    """Find all linear layer names in the model for LoRA application.
-    
-    This function identifies all Linear layers that can be targeted for LoRA,
-    excluding certain layers like lm_head and embeddings.
-    
-    Args:
-        model: The model to analyze.
-        quantization_config: Quantization config (for 4-bit/8-bit models).
-        
-    Returns:
-        List of linear layer names suitable for LoRA.
-    """
-    import torch.nn as nn
-    from transformers.pytorch_utils import Conv1D
-    
-    # Get the base model if it's wrapped
-    if hasattr(model, 'model'):
-        base_model = model.model
-    else:
-        base_model = model
-    
-    # Linear layer classes to look for
-    linear_classes = [nn.Linear]
-    
-    # Add Conv1D for models like GPT2
-    try:
-        linear_classes.append(Conv1D)
-    except:
-        pass
-    
-    # Add quantized linear layers if using quantization
-    if quantization_config is not None:
-        try:
-            from bitsandbytes.nn import Linear8bitLt, Linear4bit
-            linear_classes.extend([Linear8bitLt, Linear4bit])
-        except:
-            pass
-    
-    # Find all linear layer names
-    linear_names = []
-    
-    for name, module in base_model.named_modules():
-        # Skip the base model name
-        if name == '':
-            continue
-            
-        # Check if this is a linear layer
-        if any(isinstance(module, linear_class) for linear_class in linear_classes):
-            # Skip output layers and embeddings
-            if any(excluded in name for excluded in ['lm_head', 'embed_tokens', 'wte', 'wpe']):
-                continue
-                
-            # Extract the projection name (e.g., 'q_proj' from 'model.layers.0.self_attn.q_proj')
-            names = name.split('.')
-            layer_name = names[-1]
-            
-            # Add to list if not already present
-            if layer_name not in linear_names:
-                linear_names.append(layer_name)
-    
-    logger.info(f"Found linear layers for LoRA: {linear_names}")
-    return linear_names
 
 
 def get_model_config(model_info_path: str = "model_info.json") -> Dict[str, Any]:

@@ -289,6 +289,16 @@ Note: This is a large package and may take some time to install.
 
             # Merge quantization config
             model_kwargs.update(quant_config)
+            
+            # Add Flash Attention 2 support
+            use_flash_attention_2 = kwargs.get('use_flash_attention_2', False)
+            if use_flash_attention_2 and not (load_in_8bit or load_in_4bit):
+                try:
+                    model_kwargs['attn_implementation'] = 'flash_attention_2'
+                    logger.info("Using Flash Attention 2 for Janus model")
+                except Exception as e:
+                    logger.warning(f"Flash Attention 2 not available: {e}")
+                    model_kwargs['attn_implementation'] = 'eager'
 
             # Load model - try to use the Janus-specific model class if available
             try:

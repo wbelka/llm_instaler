@@ -244,6 +244,7 @@ def load_model_and_tokenizer(model_path: str, training_config: Dict[str, Any], m
 def setup_lora(model, training_config: Dict[str, Any], training_params: Dict[str, Any]):
     """Setup LoRA/QLoRA for the model."""
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, TaskType
+    from core.lora_utils import find_all_linear_names
     
     # Disable cache for training to avoid warnings with gradient checkpointing
     if hasattr(model.config, 'use_cache'):
@@ -256,7 +257,16 @@ def setup_lora(model, training_config: Dict[str, Any], training_params: Dict[str
     # Get target modules from handler or use config
     target_modules = training_params.get('lora_target_modules')
     if not target_modules:
-        target_modules = training_config.get('lora_target_modules', ["q_proj", "v_proj"])
+        target_modules = training_config.get('lora_target_modules')
+        if not target_modules:
+            # Use auto-discovery as final fallback
+            logger.info("No target modules specified, auto-discovering linear layers...")
+            quantization_config = None
+            if training_config.get('use_8bit') or training_config.get('use_4bit'):
+                # Model is quantized, pass quantization config if available
+                quantization_config = getattr(model.config, 'quantization_config', None)
+            target_modules = find_all_linear_names(model, quantization_config)
+            logger.info(f"Auto-discovered target modules: {target_modules}")
     
     logger.info(f"LoRA target modules: {target_modules}")
     

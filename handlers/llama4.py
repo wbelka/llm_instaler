@@ -239,8 +239,19 @@ class Llama4Handler(MultimodalHandler):
                 'pretrained_model_name_or_path': model_path,
                 'torch_dtype': torch_dtype,
                 'trust_remote_code': True,
-                'attn_implementation': 'flex_attention'  # Llama 4 uses flex_attention
             }
+            
+            # Handle attention implementation
+            use_flash_attention_2 = kwargs.get('use_flash_attention_2', False)
+            if use_flash_attention_2 and not (load_in_8bit or load_in_4bit):
+                try:
+                    model_kwargs['attn_implementation'] = 'flash_attention_2'
+                    logger.info("Using Flash Attention 2 for Llama 4")
+                except Exception as e:
+                    logger.warning(f"Flash Attention 2 not available, using flex_attention: {e}")
+                    model_kwargs['attn_implementation'] = 'flex_attention'  # Llama 4 default
+            else:
+                model_kwargs['attn_implementation'] = 'flex_attention'  # Llama 4 uses flex_attention
 
             # Merge quantization config
             model_kwargs.update(quant_config)

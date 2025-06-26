@@ -8,6 +8,7 @@ import logging
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 import numpy as np
+import torch
 
 from handlers.base import BaseHandler
 
@@ -206,6 +207,16 @@ class EmbeddingHandler(BaseHandler):
         
         # Merge quantization config
         model_kwargs.update(quant_config)
+        
+        # Add Flash Attention 2 support
+        use_flash_attention_2 = kwargs.get('use_flash_attention_2', False)
+        if use_flash_attention_2 and not (load_in_8bit or load_in_4bit):
+            try:
+                model_kwargs['attn_implementation'] = 'flash_attention_2'
+                logger.info("Using Flash Attention 2 for embedding model")
+            except Exception as e:
+                logger.warning(f"Flash Attention 2 not available: {e}")
+                model_kwargs['attn_implementation'] = 'eager'
         
         # Handle device placement
         if device == 'auto':

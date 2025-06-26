@@ -129,6 +129,16 @@ class QwenVLHandler(MultimodalHandler):
         # Merge quantization config
         model_kwargs.update(quant_config)
         
+        # Add Flash Attention 2 support
+        use_flash_attention_2 = kwargs.get('use_flash_attention_2', False)
+        if use_flash_attention_2 and not (load_in_8bit or load_in_4bit):
+            try:
+                model_kwargs['attn_implementation'] = 'flash_attention_2'
+                logger.info("Using Flash Attention 2 for Qwen VL")
+            except Exception as e:
+                logger.warning(f"Flash Attention 2 not available: {e}")
+                model_kwargs['attn_implementation'] = 'eager'
+        
         # Use base handler's memory config
         memory_config = self.get_memory_config(device, memory_fraction=0.95)
         model_kwargs.update(memory_config)
