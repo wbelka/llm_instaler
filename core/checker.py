@@ -109,7 +109,7 @@ class ModelChecker:
             # Step 3: Determine model type
             print_info("Determining model type...")
             model_data = self._determine_model_type(
-                model_info, config_data, files_info)
+                model_id, model_info, config_data, files_info)
 
             # Step 4: Collect requirements
             print_info("Analyzing model requirements...")
@@ -476,6 +476,7 @@ class ModelChecker:
         return component_configs
 
     def _determine_model_type(self,
+                              model_id: str,
                               model_info: ModelInfo,
                               config_data: Dict[str,
                                                 Any],
@@ -484,6 +485,7 @@ class ModelChecker:
                                                                    Any]:
         """Determine model type using detectors."""
         model_data = {
+            "model_id": model_id,
             "model_info": model_info,
             "config_data": config_data,
             "files_info": files_info,

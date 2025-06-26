@@ -46,6 +46,10 @@ def get_handler_class(model_info: Dict[str, Any]) -> Type[BaseHandler]:
 
     # Check for specific models
     model_id = model_info.get('model_id', '').lower()
+    
+    # Check for DeepSeek models (especially R1)
+    if 'deepseek' in model_id:
+        handler_module = 'deepseek'
 
     # Check for Gemma 3 multimodal models
     if (('gemma-3' in model_id or 'gemma3' in model_id) and

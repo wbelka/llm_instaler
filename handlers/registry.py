@@ -124,6 +124,14 @@ class HandlerRegistry:
             pass
 
         try:
+            from handlers.deepseek import DeepseekHandler
+            # Register DeepSeek handler for R1 reasoning models
+            self._handlers['deepseek'] = DeepseekHandler
+            self._handlers['deepseek_r1'] = DeepseekHandler
+        except ImportError:
+            pass
+        
+        try:
             from handlers.llama4 import Llama4Handler
             # Register Llama 4 multimodal handler
             self._handlers['llama4'] = Llama4Handler
@@ -181,6 +189,18 @@ class HandlerRegistry:
         logger.info(f"Registry: Looking for handler - model_id={model_id}, model_type={model_type}, model_family={model_family}")
 
         # Check for model-specific handlers
+        # Check for DeepSeek models first (especially R1)
+        if 'deepseek' in model_id:
+            # Check if it's an R1 model
+            if any(pattern in model_id for pattern in ['deepseek-r1', 'deepseek_r1', '-r1-', '_r1_']):
+                if 'deepseek_r1' in self._handlers:
+                    logger.info("Registry: Found DeepSeekHandler for R1 model")
+                    return self._handlers['deepseek_r1']
+            # General DeepSeek models
+            if 'deepseek' in self._handlers:
+                logger.info("Registry: Found DeepSeekHandler")
+                return self._handlers['deepseek']
+        
         if 'janus' in model_id:
             if 'janus' in self._handlers:
                 return self._handlers['janus']

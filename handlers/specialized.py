@@ -265,37 +265,158 @@ class SpecializedHandler(BaseHandler):
     
     def _generate_reasoning(self, prompt: str = None, messages: List[Dict] = None,
                            model=None, tokenizer=None, **kwargs) -> Dict[str, Any]:
-        """Generate text with reasoning (o1-style)."""
+        """Generate text with reasoning (o1-style).
+        
+        Special handling for DeepSeek-R1 models:
+        - These models tend to bypass thinking by outputting empty tags like "<think>\n\n</think>"
+        - To fix this, we prepend "<think>\n" to the model's generation
+        - This forces the model to engage in reasoning before providing answers
+        - Special tokens are preserved (not skipped) during decoding
+        """
         if not model or not tokenizer:
             raise ValueError("Model and tokenizer required for generation")
         
-        # Prepare input with reasoning prompt
-        reasoning_prompt = "Let me think step by step about this problem.\n\n"
+        # Check if this is a DeepSeek-R1 model
+        is_deepseek_r1 = any(marker in self.model_id.lower() for marker in ['deepseek-r1', 'deepseek_r1', '-r1-'])
         
-        if messages:
-            # Add reasoning instruction to the last user message
-            messages = messages.copy()
-            if messages and messages[-1]['role'] == 'user':
-                messages[-1]['content'] = reasoning_prompt + messages[-1]['content']
+        if is_deepseek_r1:
+            logger.info("DeepSeek-R1 model detected - applying thinking tag fix")
+        
+        # Prepare input
+        if is_deepseek_r1:
+            # For DeepSeek-R1, we'll prepend the thinking tag after generation
+            # Don't add reasoning prompt to input
+            pass
         else:
-            prompt = reasoning_prompt + (prompt or "")
+            # For other reasoning models, add reasoning prompt
+            reasoning_prompt = "Let me think step by step about this problem.\n\n"
+            
+            if messages:
+                # Add reasoning instruction to the last user message
+                messages = messages.copy()
+                if messages and messages[-1]['role'] == 'user':
+                    messages[-1]['content'] = reasoning_prompt + messages[-1]['content']
+            else:
+                prompt = reasoning_prompt + (prompt or "")
         
         # Generate with thinking tokens
         max_thinking = kwargs.pop('max_thinking_tokens', 32768)
         kwargs['max_new_tokens'] = max_thinking + kwargs.get('max_new_tokens', 1024)
         
+        # For DeepSeek-R1, ensure special tokens are not skipped
+        if is_deepseek_r1:
+            kwargs['skip_special_tokens'] = False
+        
         # Use transformer generation
         transformer_handler = TransformerHandler(self.model_info)
-        result = transformer_handler.generate_text(prompt, messages, model, tokenizer, **kwargs)
+        
+        # For DeepSeek-R1, we need to handle the generation differently
+        if is_deepseek_r1:
+            # First, tokenize the input to get the input IDs
+            if messages:
+                if hasattr(tokenizer, 'apply_chat_template'):
+                    text = tokenizer.apply_chat_template(messages, tokenize=False)
+                else:
+                    text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+            else:
+                text = prompt or ""
+            
+            # Tokenize input
+            inputs = tokenizer(text, return_tensors="pt", truncation=True,
+                             max_length=kwargs.get('max_length', 2048))
+            
+            if hasattr(model, "device"):
+                inputs = {k: v.to(model.device) for k, v in inputs.items()}
+            
+            # Prepare the starting tokens for "<think>\n"
+            think_tokens = tokenizer.encode("<think>\n", add_special_tokens=False, return_tensors="pt")
+            if hasattr(model, "device"):
+                think_tokens = think_tokens.to(model.device)
+            
+            # Generate with forced prefix
+            import torch
+            
+            # Clear GPU cache before generation
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            
+            with torch.no_grad():
+                # Concatenate input with think prefix
+                input_ids = torch.cat([inputs['input_ids'], think_tokens], dim=1)
+                attention_mask = torch.ones_like(input_ids)
+                
+                outputs = model.generate(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    max_new_tokens=kwargs.get('max_tokens', 512),
+                    temperature=kwargs.get('temperature', 0.7),
+                    top_p=kwargs.get('top_p', 0.9),
+                    top_k=kwargs.get('top_k', 50),
+                    do_sample=kwargs.get('temperature', 0.7) > 0,
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.eos_token_id,
+                    **{k: v for k, v in kwargs.items() if k in ['repetition_penalty', 'length_penalty']}
+                )
+            
+            # Decode the full output (including special tokens)
+            generated_ids = outputs[0][inputs['input_ids'].shape[1]:]
+            generated_text = tokenizer.decode(generated_ids, skip_special_tokens=False)
+            
+            # Calculate usage
+            usage = {
+                'prompt_tokens': inputs['input_ids'].shape[1],
+                'completion_tokens': generated_ids.shape[0],
+                'total_tokens': outputs[0].shape[0]
+            }
+            
+            # Clean up to free memory
+            del outputs
+            del inputs
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+            result = {
+                'text': generated_text,
+                'usage': usage
+            }
+        else:
+            # For non-DeepSeek-R1 models, use normal generation
+            result = transformer_handler.generate_text(prompt, messages, model, tokenizer, **kwargs)
         
         # Parse thinking and answer
         generated_text = result['text']
         
-        # Simple parsing - in real implementation, use model-specific markers
-        if '\n\nAnswer:' in generated_text:
-            thinking, answer = generated_text.split('\n\nAnswer:', 1)
-            result['thinking'] = thinking.strip()
-            result['text'] = answer.strip()
+        # For DeepSeek-R1, parse the thinking tags
+        if is_deepseek_r1:
+            # Look for think/end think pattern
+            import re
+            think_pattern = r'<think>(.*?)</think>'
+            matches = re.findall(think_pattern, generated_text, re.DOTALL)
+            
+            if matches:
+                # Extract thinking content
+                result['thinking'] = matches[0].strip()
+                # Remove thinking tags from main text
+                result['text'] = re.sub(think_pattern, '', generated_text, flags=re.DOTALL).strip()
+            else:
+                # If no proper tags found, check for other patterns
+                if generated_text.startswith('<think>'):
+                    # The model might not have closed the tag properly
+                    parts = generated_text.split('</think>', 1)
+                    if len(parts) == 2:
+                        result['thinking'] = parts[0].replace('<think>', '').strip()
+                        result['text'] = parts[1].strip()
+                    else:
+                        # Tag not closed, everything after <think> is thinking
+                        result['thinking'] = generated_text.replace('<think>', '').strip()
+                        result['text'] = ""
+        else:
+            # Simple parsing for other models
+            if '\n\nAnswer:' in generated_text:
+                thinking, answer = generated_text.split('\n\nAnswer:', 1)
+                result['thinking'] = thinking.strip()
+                result['text'] = answer.strip()
         
         return result
     

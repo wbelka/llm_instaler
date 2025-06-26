@@ -446,7 +446,8 @@ class TransformerHandler(BaseHandler):
 
         # Decode
         generated_ids = outputs[0][inputs['input_ids'].shape[1]:]
-        generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
+        skip_special_tokens = kwargs.get('skip_special_tokens', True)
+        generated_text = tokenizer.decode(generated_ids, skip_special_tokens=skip_special_tokens)
 
         # Calculate usage
         usage = {
