@@ -105,6 +105,8 @@ class DeepseekHandler(BaseHandler):
                 tokenize=False,
                 add_generation_prompt=True
             )
+            logger.info(f"Applied chat template. Text length: {len(text)}")
+            logger.debug(f"Chat template output: {text[-200:]}")  # Log last 200 chars
         else:
             text = prompt or ""
         
@@ -125,29 +127,43 @@ class DeepseekHandler(BaseHandler):
         
         # Generate
         with torch.no_grad():
+            # Ensure tokenizer has pad_token_id
+            if tokenizer.pad_token_id is None:
+                tokenizer.pad_token_id = tokenizer.eos_token_id
+            
             generation_kwargs = {
                 "max_new_tokens": max_tokens,
                 "temperature": temperature,
                 "top_p": top_p,
                 "top_k": top_k,
                 "do_sample": temperature > 0,
-                "pad_token_id": tokenizer.eos_token_id,
+                "pad_token_id": tokenizer.pad_token_id,
                 "eos_token_id": tokenizer.eos_token_id,
             }
             
             if stop_sequences:
                 generation_kwargs["stop_strings"] = stop_sequences
             
+            logger.info(f"Generating with kwargs: {generation_kwargs}")
+            logger.info(f"Input shape: {inputs['input_ids'].shape}")
+            
             # Generate
             outputs = model.generate(**inputs, **generation_kwargs)
+            
+            logger.info(f"Generated output shape: {outputs.shape}")
         
         # Decode
         input_length = inputs["input_ids"].shape[1]
         generated_tokens = outputs[0][input_length:]
+        
+        logger.info(f"Generated {len(generated_tokens)} new tokens")
+        
         generated_text = tokenizer.decode(
             generated_tokens,
             skip_special_tokens=False  # Keep thinking tags
         )
+        
+        logger.debug(f"Raw generated text: {generated_text[:200]}")
         
         # Remove special tokens from the output
         eos_token = tokenizer.eos_token
