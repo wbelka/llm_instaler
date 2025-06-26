@@ -89,15 +89,17 @@ class DeepseekHandler(BaseHandler):
         mode: str = "auto",
         **kwargs
     ) -> Dict[str, Any]:
-        """Generate text with R1 thinking enforcement.
+        """Generate text with R1 thinking support.
         
-        For R1 models, we enforce thinking by prepending <think>\n to responses.
+        For R1 models, the chat template automatically adds thinking tags.
+        The response is parsed to separate thinking from the actual answer.
         """
         import torch
         
         # Prepare input
         if messages:
-            # Apply chat template
+            # Apply chat template with add_generation_prompt=True
+            # This will automatically add <｜Assistant｜><think>\n for R1 models
             text = tokenizer.apply_chat_template(
                 messages,
                 tokenize=False,
@@ -109,20 +111,12 @@ class DeepseekHandler(BaseHandler):
         if not text:
             raise ValueError("No input provided")
         
-        # For R1 models in non-no-thinking modes, enforce thinking
+        # For R1 models, the chat template already handles thinking tags
+        # We just need to track if we're in thinking mode
         force_thinking = (
             self.is_r1_model and 
-            mode != "no-thinking" and
-            "<think>" not in text  # Don't add if already present
+            mode != "no-thinking"
         )
-        
-        # For R1 models, prepend thinking tag to the prompt
-        if force_thinking:
-            # Add assistant prefix with thinking tag
-            if messages and messages[-1]["role"] == "user":
-                text = text + "Assistant: <think>\n"
-            else:
-                text = text + "<think>\n"
         
         # Tokenize
         inputs = tokenizer(text, return_tensors="pt")
@@ -155,19 +149,22 @@ class DeepseekHandler(BaseHandler):
             skip_special_tokens=False  # Keep thinking tags
         )
         
-        # Remove EOS tokens from the output
+        # Remove special tokens from the output
         eos_token = tokenizer.eos_token
         if eos_token and eos_token in generated_text:
             generated_text = generated_text.replace(eos_token, "")
         
-        # Clean up any empty thinking blocks
-        if self.is_r1_model:
-            import re
-            # Replace empty thinking blocks with proper thinking
-            empty_pattern = r'<think>\s*</think>'
-            if re.search(empty_pattern, generated_text):
-                logger.warning("Model generated empty thinking block, regenerating...")
-                # You might want to retry generation here
+        # Remove other special tokens specific to DeepSeek
+        special_tokens_to_remove = [
+            "<｜Assistant｜>",
+            "<｜User｜>",
+            "<｜end▁of▁sentence｜>",
+            "<｜begin▁of▁sentence｜>"
+        ]
+        for token in special_tokens_to_remove:
+            if token in generated_text:
+                generated_text = generated_text.replace(token, "")
+        
         
         # Calculate usage
         usage = {
@@ -177,7 +174,7 @@ class DeepseekHandler(BaseHandler):
         }
         
         # Parse thinking if present
-        response = {"text": generated_text, "usage": usage}
+        response = {"usage": usage}
         
         if "<think>" in generated_text and "</think>" in generated_text:
             # Extract thinking and answer
@@ -187,7 +184,23 @@ class DeepseekHandler(BaseHandler):
                 thinking = match.group(1).strip()
                 answer = match.group(2).strip()
                 response["thinking"] = thinking
-                response["answer"] = answer
+                response["text"] = answer  # Only the answer part goes to text
+                response["full_text"] = generated_text  # Keep full text for debugging
+            else:
+                response["text"] = generated_text
+        elif "</think>" in generated_text:
+            # Model might have started with thinking without opening tag
+            parts = generated_text.split("</think>", 1)
+            if len(parts) == 2:
+                thinking = parts[0].strip()
+                answer = parts[1].strip()
+                response["thinking"] = thinking
+                response["text"] = answer
+                response["full_text"] = generated_text
+            else:
+                response["text"] = generated_text
+        else:
+            response["text"] = generated_text
         
         return response
     
