@@ -234,6 +234,10 @@ def load_model_and_tokenizer(model_path: str, training_config: Dict[str, Any], m
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     
+    # Set padding_side to 'left' for autoregressive models
+    tokenizer.padding_side = 'left'
+    logger.info(f"Set tokenizer padding_side to 'left' for autoregressive generation")
+    
     return model, tokenizer, handler, training_params
 
 
@@ -323,8 +327,10 @@ def load_dataset(data_path: str, training_config: Dict[str, Any], tokenizer, han
     
     # Tokenize
     def tokenize_function(examples):
+        # Add EOS token to each text
+        texts_with_eos = [text + tokenizer.eos_token for text in examples['text']]
         return tokenizer(
-            examples['text'],
+            texts_with_eos,
             truncation=True,
             padding='max_length',
             max_length=training_config.get('max_seq_length', 2048)
@@ -391,6 +397,14 @@ class SmartTrainer:
         else:
             print(f"💾 Keeping last {save_limit} checkpoints")
         
+        # Check if we have validation dataset for evaluation
+        has_eval_dataset = self.val_dataset is not None
+        
+        # Adjust evaluation strategy based on dataset availability
+        eval_strategy = self.training_config['eval_strategy'] if has_eval_dataset else "no"
+        if not has_eval_dataset and self.training_config['eval_strategy'] != "no":
+            logger.warning("No validation dataset provided, disabling evaluation")
+        
         # Check if flash attention is supported
         use_flash_attention = (
             self.handler_params.get('supports_flash_attention', True) and 
@@ -408,8 +422,8 @@ class SmartTrainer:
             weight_decay=self.training_config['weight_decay'],
             logging_dir=str(self.output_dir / "logs"),
             logging_steps=self.training_config['logging_steps'],
-            eval_strategy=self.training_config['eval_strategy'],  # Changed from evaluation_strategy
-            eval_steps=self.training_config['eval_steps'],
+            eval_strategy=eval_strategy,  # Use adjusted strategy
+            eval_steps=self.training_config['eval_steps'] if has_eval_dataset else None,
             save_strategy=self.training_config['save_strategy'],
             save_steps=self.training_config['save_steps'],
             save_total_limit=self.training_config['save_total_limit'],
