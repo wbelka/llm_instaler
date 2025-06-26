@@ -116,6 +116,14 @@ class DeepseekHandler(BaseHandler):
             "<think>" not in text  # Don't add if already present
         )
         
+        # For R1 models, prepend thinking tag to the prompt
+        if force_thinking:
+            # Add assistant prefix with thinking tag
+            if messages and messages[-1]["role"] == "user":
+                text = text + "Assistant: <think>\n"
+            else:
+                text = text + "<think>\n"
+        
         # Tokenize
         inputs = tokenizer(text, return_tensors="pt")
         if hasattr(model, "device"):
@@ -136,22 +144,8 @@ class DeepseekHandler(BaseHandler):
             if stop_sequences:
                 generation_kwargs["stop_strings"] = stop_sequences
             
-            # For R1 models, we need to handle thinking enforcement
-            if force_thinking:
-                # Generate with forced prefix
-                # First, encode the thinking tag
-                think_tokens = tokenizer.encode("<think>\n", add_special_tokens=False, return_tensors="pt")
-                if hasattr(model, "device"):
-                    think_tokens = think_tokens.to(model.device)
-                
-                # Generate the rest
-                outputs = model.generate(
-                    **inputs,
-                    forced_decoder_ids=[[i, token] for i, token in enumerate(think_tokens[0])],
-                    **generation_kwargs
-                )
-            else:
-                outputs = model.generate(**inputs, **generation_kwargs)
+            # Generate
+            outputs = model.generate(**inputs, **generation_kwargs)
         
         # Decode
         input_length = inputs["input_ids"].shape[1]
@@ -161,10 +155,10 @@ class DeepseekHandler(BaseHandler):
             skip_special_tokens=False  # Keep thinking tags
         )
         
-        # For R1 models, ensure thinking tags are present
-        if force_thinking and not generated_text.startswith("<think>"):
-            # Prepend thinking tag if model didn't generate it
-            generated_text = "<think>\n" + generated_text
+        # Remove EOS tokens from the output
+        eos_token = tokenizer.eos_token
+        if eos_token and eos_token in generated_text:
+            generated_text = generated_text.replace(eos_token, "")
         
         # Clean up any empty thinking blocks
         if self.is_r1_model:
