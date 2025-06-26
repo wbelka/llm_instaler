@@ -28,8 +28,12 @@ class SpecializedHandler(BaseHandler):
         tags = [t.lower() for t in self.model_info.get('tags', [])]
         config = self.model_info.get('config', {})
         
-        # Check for reasoning models
-        if 'o1' in model_id or 'reasoning' in tags:
+        # Check for reasoning models (including DeepSeek-R1)
+        if ('o1' in model_id or 
+            'reasoning' in tags or
+            'deepseek-r1' in model_id or
+            'deepseek_r1' in model_id or
+            '-r1-' in model_id):
             return 'reasoning'
         
         # Check for code models

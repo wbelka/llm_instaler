@@ -4,6 +4,7 @@ This package contains handlers for various model architectures and provides
 a unified interface for loading and working with different model types.
 """
 
+import importlib
 from typing import Dict, Any, Type
 from handlers.base import BaseHandler
 
@@ -76,13 +77,26 @@ def get_handler_class(model_info: Dict[str, Any]) -> Type[BaseHandler]:
             f"type: {model_type}"
         )
 
-    # Import handler class
+    # Import handler class using importlib for better security
     try:
-        module = __import__(f'handlers.{handler_module}', fromlist=[
-                            f'{handler_module.title()}Handler'])
-        handler_class = getattr(module, f'{handler_module.title()}Handler')
+        # Import the module securely
+        module = importlib.import_module(f'handlers.{handler_module}')
+        
+        # Get the handler class name (capitalize first letter)
+        handler_class_name = f'{handler_module.title()}Handler'
+        
+        # Get the handler class from the module
+        if not hasattr(module, handler_class_name):
+            raise AttributeError(f"Module {handler_module} does not have {handler_class_name}")
+            
+        handler_class = getattr(module, handler_class_name)
+        
+        # Validate it's actually a handler class
+        if not issubclass(handler_class, BaseHandler):
+            raise TypeError(f"{handler_class_name} is not a subclass of BaseHandler")
+            
         return handler_class
-    except (ImportError, AttributeError) as e:
+    except (ImportError, AttributeError, TypeError) as e:
         raise ValueError(f"Failed to load handler for {handler_module}: {e}")
 
 

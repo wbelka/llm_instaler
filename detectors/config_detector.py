@@ -75,12 +75,7 @@ class ConfigDetector(BaseDetector):
                 'architecture_type': 'unknown'
             }
         
-        # Use architecture detector to analyze config
-        model_type, model_family, additional_info = self.architecture_detector.detect_from_config(
-            Path("dummy_config.json")  # We pass config directly
-        )
-        
-        # Since we can't pass the config directly, we need to work with what we have
+        # Extract model type and architecture from config
         model_type = config.get('model_type', 'unknown').lower()
         architectures = config.get('architectures', [])
         architecture = architectures[0] if architectures else 'unknown'
@@ -92,6 +87,14 @@ class ConfigDetector(BaseDetector):
             model_family = self.architecture_detector.MODEL_TYPE_MAPPING[model_type]
         else:
             model_family = self._infer_family_from_config(config, model_type)
+        
+        # Check for special model types (Gemma3 multimodal, Llama4 multimodal)
+        if self.architecture_detector._is_gemma3_multimodal(config, model_type, architecture):
+            model_family = 'multimodal'
+            
+        if self.architecture_detector._is_llama4_multimodal(config, model_type, architecture):
+            model_family = 'multimodal'
+            model_type = 'llama4'
         
         # Build analysis results
         analysis = {
@@ -124,7 +127,7 @@ class ConfigDetector(BaseDetector):
                     analysis['config'][key] = config[key]
         
         # Extract capabilities
-        analysis['capabilities'] = self._extract_capabilities(config, model_type, model_family)
+        analysis['capabilities'] = self._extract_capabilities(config, model_type, model_family, model_info)
         
         # Extract special requirements
         analysis['special_requirements'] = self.extract_special_requirements(model_info)
@@ -189,21 +192,35 @@ class ConfigDetector(BaseDetector):
                any(t in architecture.lower() for t in trust_required) or \
                config.get('auto_map', {}) != {}
     
-    def _extract_capabilities(self, config: Dict[str, Any], model_type: str, model_family: str) -> Dict[str, Any]:
+    def _extract_capabilities(self, config: Dict[str, Any], model_type: str, model_family: str, model_info: Dict[str, Any] = None) -> Dict[str, Any]:
         """Extract model capabilities from configuration.
         
         Args:
             config: Model configuration
             model_type: Model type
             model_family: Model family
+            model_info: Full model info (optional)
             
         Returns:
             Capabilities dictionary
         """
+        # Check if this is a reasoning model (including DeepSeek-R1)
+        model_id = ''
+        if model_info:
+            model_id = model_info.get('model_id', '').lower()
+        
+        is_reasoning_model = (
+            'reasoning' in model_type or 
+            'o1' in model_type or
+            'deepseek-r1' in model_id or
+            'deepseek_r1' in model_id or
+            '-r1-' in model_id  # Catches patterns like DeepSeek-R1-Distill
+        )
+        
         capabilities = {
             'supports_streaming': model_family == 'language-model',
             'supports_system_prompt': model_family == 'language-model',
-            'supports_reasoning': 'reasoning' in model_type or 'o1' in model_type,
+            'supports_reasoning': is_reasoning_model,
             'max_context_length': config.get('max_position_embeddings', 
                                            config.get('max_sequence_length', 
                                                     config.get('n_positions', 2048))),

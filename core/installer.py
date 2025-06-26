@@ -26,6 +26,24 @@ from core.utils import (
     console, safe_model_name
 )
 from core.checker import ModelChecker
+from core.secure_subprocess import (
+    secure_run, secure_pip_install, secure_python_run,
+    SecureSubprocessError, validate_path
+)
+from core.exceptions import (
+    ModelNotFoundError, ModelAccessError, CompatibilityError,
+    InstallationError, DependencyError, VirtualEnvironmentError,
+    DownloadError, DiskSpaceError, HandlerNotFoundError
+)
+from core.context_managers import (
+    temporary_directory, atomic_write, safe_model_download,
+    file_lock, environment_variables
+)
+from core.constants import (
+    DISK_SPACE, TIMEOUTS, MEMORY_OVERHEAD_MULTIPLIERS,
+    PYTORCH_INDEX_URLS
+)
+from core.dependency_installer import DependencyInstaller
 from handlers.registry import get_handler_registry
 from rich.progress import (
     Progress, BarColumn, DownloadColumn,
@@ -191,16 +209,26 @@ class ModelInstaller:
 
             return True
 
-        except Exception as e:
+        except (ModelNotFoundError, ModelAccessError, CompatibilityError,
+                DownloadError, DiskSpaceError, DependencyError,
+                VirtualEnvironmentError, InstallationError) as e:
             self._log_install(install_log_path, "ERROR", f"Installation failed: {e}")
             print_error(f"Installation failed: {e}")
-
-            # Clean up on failure
+            raise
+        except KeyboardInterrupt:
+            self._log_install(install_log_path, "ERROR", "Installation interrupted by user")
+            print_error("Installation interrupted by user")
+            raise
+        except Exception as e:
+            self._log_install(install_log_path, "ERROR", f"Unexpected error: {e}")
+            print_error(f"Unexpected installation error: {e}")
+            raise InstallationError(f"Unexpected error during installation: {e}") from e
+        except:
+            # Clean up on any failure
             if model_dir.exists():
                 print_info("Cleaning up failed installation...")
                 shutil.rmtree(model_dir)
-
-            return False
+            raise
 
     def _get_or_run_check(
         self, model_id: str
@@ -340,7 +368,7 @@ class ModelInstaller:
             log_path: Path to log file.
             model_id: Model identifier.
         """
-        with open(log_path, 'w') as f:
+        with atomic_write(log_path) as f:
             f.write(f"Installation Log for {model_id}\n")
             f.write(f"Started at: {datetime.now().isoformat()}\n")
             f.write(f"Installer version: {self.config.version}\n")
@@ -369,8 +397,8 @@ class ModelInstaller:
         """
         import psutil
 
-        # Get required space
-        required_gb = requirements.disk_space_gb + 3  # Add 3GB for venv
+        # Get required space using constants
+        required_gb = requirements.disk_space_gb + DISK_SPACE['venv_overhead']
 
         # Get available space
         disk_usage = psutil.disk_usage(str(self.config.models_dir))
@@ -381,7 +409,10 @@ class ModelInstaller:
                 f"Insufficient disk space. Required: {required_gb:.1f} GB, "
                 f"Available: {available_gb:.1f} GB"
             )
-            return False
+            raise DiskSpaceError(
+                f"Insufficient disk space: need {required_gb:.1f} GB, "
+                f"have {available_gb:.1f} GB"
+            )
 
         return True
 
@@ -478,12 +509,11 @@ class ModelInstaller:
         self._log_install(log_path, "INFO", f"Creating virtual environment at {venv_path}")
 
         try:
-            # Create venv
-            subprocess.run(
+            # Create venv securely
+            secure_run(
                 [sys.executable, "-m", "venv", str(venv_path)],
                 check=True,
-                capture_output=True,
-                text=True
+                capture_output=True
             )
 
             # Upgrade pip, setuptools, wheel
@@ -491,25 +521,24 @@ class ModelInstaller:
             if not pip_path.exists():  # Windows
                 pip_path = venv_path / "Scripts" / "pip.exe"
 
-            subprocess.run(
-                [str(pip_path), "install", "--upgrade", "pip", "setuptools", "wheel"],
-                check=True,
-                capture_output=True,
-                text=True
+            secure_pip_install(
+                pip_path,
+                ["pip", "setuptools", "wheel"],
+                upgrade=True
             )
 
             self._log_install(log_path, "INFO", "Virtual environment created successfully")
             return True
 
-        except subprocess.CalledProcessError as e:
+        except SecureSubprocessError as e:
             self._log_install(log_path, "ERROR", f"Failed to create venv: {e}")
             print_error(f"Failed to create virtual environment: {e}")
-            return False
+            raise VirtualEnvironmentError(f"Failed to create virtual environment: {e}") from e
 
         except Exception as e:
             self._log_install(log_path, "ERROR", f"Venv creation error: {e}")
             print_error(f"Virtual environment creation failed: {e}")
-            return False
+            raise VirtualEnvironmentError(f"Unexpected error creating virtual environment: {e}") from e
 
     def _install_dependencies(
         self,
@@ -541,210 +570,60 @@ class ModelInstaller:
         pip_path = venv_path / "bin" / "pip"
         if not pip_path.exists():  # Windows
             pip_path = venv_path / "Scripts" / "pip.exe"
-
-        # Get dependencies from requirements
-        base_deps = requirements.base_dependencies.copy()  # Make a copy
-        special_deps = requirements.special_dependencies
-        optional_deps = getattr(requirements, 'optional_dependencies', [])
-
-        # Check if quantization is requested and add bitsandbytes
-        needs_quantization = (
-            dtype_preference in ['int8', 'int4'] or
-            quantization in ['8bit', '4bit']
-        )
-
-        if needs_quantization:
-            # Check if bitsandbytes is already in base_deps
-            bitsandbytes_in_base = any('bitsandbytes' in dep for dep in base_deps)
-            
-            if not bitsandbytes_in_base:
-                # Check if bitsandbytes is in optional deps
-                bitsandbytes_found = False
-                for dep in optional_deps:
-                    if 'bitsandbytes' in dep:
-                        # Move from optional to required
-                        base_deps.append(dep)
-                        optional_deps.remove(dep)
-                        bitsandbytes_found = True
-                        self._log_install(log_path, "INFO",
-                                          f"Moved {dep} from optional to required dependencies for quantization")
-                        break
-
-                # If not found anywhere, add it
-                if not bitsandbytes_found:
-                    from core.quantization_config import QuantizationConfig
-                    bitsandbytes_version = QuantizationConfig.get_bitsandbytes_version()
-                    base_deps.append(bitsandbytes_version)
-                    self._log_install(log_path, "INFO",
-                                      f"Added {bitsandbytes_version} for quantization support")
-            else:
-                self._log_install(log_path, "INFO",
-                                  "bitsandbytes already in base dependencies for quantization")
-
-        self._log_install(log_path, "INFO", f"Installing dependencies: {base_deps}")
-
-        # Install PyTorch first if needed
-        if any('torch' in dep for dep in base_deps):
-            if not self._install_pytorch(
-                pip_path, log_path,
-                preserve_config=preserve_torch_config,
-                device_preference=device_preference
-            ):
-                return False
-            # Remove only torch-related packages from base_deps to avoid reinstalling
-            # Keep transformers and other non-torch packages
-            torch_packages = ['torch', 'torchvision', 'torchaudio']
-            base_deps = [dep for dep in base_deps if not any(
-                dep.startswith(torch_pkg) for torch_pkg in torch_packages
-            )]
-
-        # Install base dependencies
-        if base_deps:
-            try:
-                # Ensure transformers is always installed for diffusion models
-                if (hasattr(requirements, 'primary_library') and
-                    requirements.primary_library == 'diffusers' and
-                        'transformers' not in base_deps):
-                    base_deps.append('transformers')
-
-                print_info(f"Installing base dependencies: {', '.join(base_deps)}")
-
-                # Separate CUDA-dependent packages from regular PyPI packages
-                # Only packages that are actually in PyTorch index
-                cuda_deps = ["xformers", "triton"]
-                
-                # Split dependencies
-                cuda_packages = []
-                pypi_packages = []
-                
-                for dep in base_deps:
-                    # Check if this is a CUDA-dependent package
-                    is_cuda_dep = any(cuda_dep in dep.lower() for cuda_dep in cuda_deps)
-                    if is_cuda_dep:
-                        cuda_packages.append(dep)
-                    else:
-                        pypi_packages.append(dep)
-                
-                # Install regular PyPI packages first (without CUDA index URL)
-                if pypi_packages:
-                    print_info(f"Installing PyPI packages: {', '.join(pypi_packages)}")
-                    subprocess.run(
-                        [str(pip_path), "install"] + pypi_packages,
-                        check=True,
-                        capture_output=True,
-                        text=True
-                    )
-                
-                # Install CUDA packages separately with CUDA index URL
-                if cuda_packages:
-                    print_info(f"Installing CUDA packages: {', '.join(cuda_packages)}")
-                    torch_info = self._get_torch_info(pip_path)
-                    install_cmd = [str(pip_path), "install"]
-                    if torch_info.get("index_url"):
-                        install_cmd.extend(["--index-url", torch_info["index_url"]])
-                    install_cmd.extend(cuda_packages)
-                    
-                    subprocess.run(
-                        install_cmd,
-                        check=True,
-                        capture_output=True,
-                        text=True
-                    )
-            except subprocess.CalledProcessError as e:
-                self._log_install(log_path, "ERROR", f"Failed to install base deps: {e}")
-                print_error(f"Failed to install dependencies: {e}")
-                return False
-
-        # Install special dependencies with error handling
-        for dep in special_deps:
-            if not self._install_special_dependency(dep, pip_path, model_dir, log_path, handler):
-                # Special dependencies might fail but shouldn't block installation
-                print_warning(f"Failed to install {dep}, continuing...")
-
-        # Install remaining optional dependencies (after quantization deps were moved)
-        if optional_deps:
-            print_info(f"Installing optional dependencies: {', '.join(optional_deps)}")
-
-            # Get torch info once for all dependencies
-            torch_info = self._get_torch_info(pip_path)
-
-            for dep in optional_deps:
-                try:
-                    # Use compatible version for flash-attn if no specific version
-                    if dep == "flash-attn":
-                        dep = "flash-attn==2.7.2.post1"
-                    
-                    # Build install command
-                    install_cmd = [str(pip_path), "install", dep]
-
-                    # Add index URL for packages that are in PyTorch index
-                    pytorch_index_deps = ["xformers", "triton", "flash-attn"]
-                    if any(pkg in dep for pkg in pytorch_index_deps) and torch_info.get("index_url"):
-                        install_cmd.extend(["--index-url", torch_info["index_url"]])
-                    
-                    # Special build options for flash-attn
-                    if "flash-attn" in dep:
-                        install_cmd.extend(["--no-build-isolation"])
-
-                    subprocess.run(
-                        install_cmd,
-                        check=True,
-                        capture_output=True,
-                        text=True
-                    )
-                    self._log_install(log_path, "INFO", f"Installed optional dependency: {dep}")
-                except subprocess.CalledProcessError:
-                    # Optional dependencies can fail silently
-                    self._log_install(log_path, "INFO", f"Skipped optional dependency: {dep}")
-
-                    # Try special handling for xformers
-                    if dep == "xformers":
-                        self._install_xformers_with_cuda(pip_path, log_path)
-
-        # Install server dependencies for universal scripts
-        server_deps = [
-            "fastapi>=0.109.0",
-            "uvicorn>=0.27.0",
-            "websockets>=12.0",
-            "sse-starlette>=2.0.0",
-            "pydantic>=2.5.0",
-            "python-multipart>=0.0.6",
-            "pillow>=10.0.0",
-            "numpy>=1.24.0",
-            "aiofiles>=23.0.0",
-            "psutil>=5.9.0",
-            "rich>=13.0.0",
-            "python-dotenv>=1.0.0",
-            # Training dependencies
-            "matplotlib>=3.7.0",
-            "tqdm>=4.65.0",
-            "datasets>=2.14.0",
-            "peft>=0.7.0",
-            "tensorboard>=2.14.0"
-        ]
         
-        # Add compatible flash-attn for training if CUDA is available
-        # and flash-attn is not already in dependencies
-        if device_preference in ['cuda', 'auto']:
-            has_flash_attn = any('flash-attn' in dep for dep in base_deps + special_deps + optional_deps)
-            if not has_flash_attn:
-                # Use specific version known to work with PyTorch 2.6.0+cu124
-                server_deps.append("flash-attn==2.7.2.post1")
+        # Create dependency installer
+        dep_installer = DependencyInstaller(pip_path, lambda level, msg: self._log_install(log_path, level, msg))
 
         try:
-            print_info("Installing server and training dependencies...")
-            subprocess.run(
-                [str(pip_path), "install"] + server_deps,
-                check=True,
-                capture_output=True,
-                text=True
+            # Get dependencies from requirements
+            base_deps = requirements.base_dependencies.copy()
+            special_deps = requirements.special_dependencies
+            optional_deps = getattr(requirements, 'optional_dependencies', [])
+            
+            # Handle quantization dependencies
+            base_deps, optional_deps = dep_installer.handle_quantization_dependencies(
+                base_deps, optional_deps, dtype_preference, quantization
             )
-        except subprocess.CalledProcessError as e:
-            self._log_install(log_path, "WARNING", f"Some server deps failed: {e}")
-            # Continue anyway, core functionality might still work
+            
+            self._log_install(log_path, "INFO", f"Installing dependencies: {base_deps}")
 
-        self._log_install(log_path, "INFO", "Dependencies installation completed")
-        return True
+            # Install PyTorch first if needed
+            if any('torch' in dep for dep in base_deps):
+                if not self._install_pytorch(
+                    pip_path, log_path,
+                    preserve_config=preserve_torch_config,
+                    device_preference=device_preference
+                ):
+                    return False
+                # Remove torch packages from base_deps
+                torch_packages = ['torch', 'torchvision', 'torchaudio']
+                base_deps = [dep for dep in base_deps if not any(
+                    dep.startswith(torch_pkg) for torch_pkg in torch_packages
+                )]
+            
+            # Install base dependencies
+            if not dep_installer.install_base_dependencies(base_deps, special_deps, device_preference):
+                return False
+
+            # Install special dependencies
+            for dep in special_deps:
+                if not self._install_special_dependency(dep, pip_path, model_dir, log_path, handler):
+                    print_warning(f"Failed to install {dep}, continuing...")
+            
+            # Install optional dependencies
+            dep_installer.install_optional_dependencies(optional_deps, device_preference)
+            
+            # Install server dependencies
+            if not dep_installer.install_server_dependencies(device_preference):
+                print_warning("Some server dependencies failed to install")
+            
+            self._log_install(log_path, "INFO", "Dependencies installation completed")
+            return True
+            
+        except (SecureSubprocessError, DependencyError) as e:
+            self._log_install(log_path, "ERROR", f"Failed to install dependencies: {e}")
+            print_error(f"Failed to install dependencies: {e}")
+            return False
 
     def _install_pytorch(
         self,
@@ -795,7 +674,7 @@ class ModelInstaller:
                         f"configuration"
                     )
                     return True
-                except subprocess.CalledProcessError as e:
+                except SecureSubprocessError as e:
                     self._log_install(
                         log_path, "ERROR", f"Failed to reinstall PyTorch: {e}"
                     )
@@ -819,18 +698,18 @@ class ModelInstaller:
 
             if device_preference != "mps":  # Don't check CUDA for MPS
                 try:
-                    result = subprocess.run(
+                    result = secure_run(
                         ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
                         capture_output=True,
-                        text=True
+                        check=False
                     )
                     if result.returncode == 0:
                         cuda_available = True
                         # Try to get CUDA version
-                        result = subprocess.run(
+                        result = secure_run(
                             ["nvcc", "--version"],
                             capture_output=True,
-                            text=True
+                            check=False
                         )
                         if result.returncode == 0 and "release" in result.stdout:
                             # Extract version (e.g., "release 11.8")
@@ -838,7 +717,7 @@ class ModelInstaller:
                             match = re.search(r"release (\d+\.\d+)", result.stdout)
                             if match:
                                 cuda_version = match.group(1)
-                except Exception:
+                except (SecureSubprocessError, FileNotFoundError):
                     pass
 
             # Determine PyTorch index URL
@@ -867,16 +746,18 @@ class ModelInstaller:
             print_info(f"Installing PyTorch for {system} "
                        f"{'with CUDA ' + cuda_version if cuda_available else 'CPU only'}")
 
-            cmd = [str(pip_path), "install"] + torch_cmd
-            if index_url:
-                cmd.extend(["--index-url", index_url])
-
-            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            # Install PyTorch with the appropriate index URL
+            secure_pip_install(
+                pip_path,
+                torch_cmd,  # Just the packages, not the full command
+                index_url=index_url if index_url else None,
+                timeout=1200  # Longer timeout for PyTorch
+            )
 
             self._log_install(log_path, "INFO", "PyTorch installed successfully")
             return True
 
-        except subprocess.CalledProcessError as e:
+        except SecureSubprocessError as e:
             self._log_install(log_path, "ERROR", f"Failed to install PyTorch: {e}")
             print_error(f"Failed to install PyTorch: {e}")
             return False
@@ -1003,7 +884,7 @@ To install manually:
             self._log_install(log_path, "INFO", f"Installed {dep} successfully")
             return True
 
-        except subprocess.CalledProcessError as e:
+        except SecureSubprocessError as e:
             self._log_install(log_path, "WARNING", f"Failed to install {dep}: {e}")
 
             # Show special instructions if available
@@ -1412,7 +1293,7 @@ To install manually:
                 try:
                     subprocess.run(install_cmd, check=True, capture_output=True, text=True)
                     print_success(f"Fixed {dep}")
-                except subprocess.CalledProcessError as e:
+                except SecureSubprocessError as e:
                     print_warning(f"Could not install/reinstall {dep}: {e.stderr if e.stderr else 'Unknown error'}")
 
     def _copy_scripts(self, model_dir: Path, log_path: Path) -> bool:

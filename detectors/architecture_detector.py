@@ -99,6 +99,7 @@ class ArchitectureDetector:
         # Reasoning models
         'o1': 'reasoning',
         'reasoning': 'reasoning',
+        'deepseek_r1': 'reasoning',  # DeepSeek R1 models
     }
 
     # Architecture to handler mapping

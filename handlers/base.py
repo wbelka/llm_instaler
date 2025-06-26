@@ -256,6 +256,30 @@ class BaseHandler(ABC):
         Returns:
             Dictionary describing what this model can do.
         """
+        # Check if capabilities were already determined during detection
+        if 'capabilities' in self.model_info:
+            # Use detected capabilities as base
+            detected_caps = self.model_info['capabilities'].copy()
+            
+            # Fill in any missing fields with defaults
+            default_caps = {
+                'supports_streaming': False,
+                'supports_reasoning': False,
+                'supports_system_prompt': False,
+                'supports_multimodal': False,
+                'supports_batch_inference': True,
+                'max_context_length': None,
+                'input_modalities': ['text'],
+                'output_modalities': ['text']
+            }
+            
+            # Merge with defaults (detected values take precedence)
+            for key, default_value in default_caps.items():
+                if key not in detected_caps:
+                    detected_caps[key] = default_value
+                    
+            return detected_caps
+        
         # Base implementation - subclasses can override
         return {
             'supports_streaming': False,

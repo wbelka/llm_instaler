@@ -227,8 +227,12 @@ class HandlerRegistry:
             if 'qwen_vl' in self._handlers:
                 return self._handlers['qwen_vl']
 
-        # Check for reasoning models (o1-style)
-        if 'o1' in model_id or 'reasoning' in model_info.get('tags', []):
+        # Check for reasoning models (o1-style and DeepSeek-R1)
+        if ('o1' in model_id or 
+            'reasoning' in model_info.get('tags', []) or
+            'deepseek-r1' in model_id or
+            'deepseek_r1' in model_id or
+            '-r1-' in model_id):
             if 'reasoning' in self._handlers:
                 return self._handlers['reasoning']
 

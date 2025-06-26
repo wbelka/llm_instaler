@@ -15,11 +15,13 @@ class QuantizationConfig:
     # Models that support quantization by default
     QUANTIZATION_SUPPORTED_FAMILIES = {
         "transformer": True,
+        "language-model": True,  # Generic language model family
         "llama": True,
         "llama4": True,  # Llama 4 supports int4 and fp8
         "mistral": True,
         "mixtral": True,
         "qwen": True,
+        "qwen2": True,  # Qwen2 models support quantization
         "qwen3": True,
         "qwen_vl": True,
         "gemma": True,
@@ -51,6 +53,10 @@ class QuantizationConfig:
         "gemma3": {
             "preferred_compute_dtype": "bfloat16",
             "supports_flash_attention_with_quantization": False,
+        },
+        "qwen2": {
+            "preferred_compute_dtype": "float16",
+            "supports_flash_attention_with_quantization": True,
         },
         "qwen3": {
             "preferred_compute_dtype": "float16",
