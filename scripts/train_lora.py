@@ -561,6 +561,43 @@ class SmartTrainer:
                     print("   Try: --batch-size 1 --max-seq-length 512 --use-8bit")
                     raise e
             
+            # Evaluate after each cycle
+            print(f"\n📊 Evaluating cycle {cycle + 1}...")
+            eval_results = self.trainer.evaluate()
+            
+            # Extract validation loss
+            val_loss = eval_results.get('eval_loss', float('inf'))
+            print(f"   Validation loss: {val_loss:.4f}")
+            
+            # Track best model across all cycles
+            if not hasattr(self, '_best_val_loss_global'):
+                self._best_val_loss_global = float('inf')
+                self._best_cycle = -1
+            
+            if val_loss < self._best_val_loss_global:
+                self._best_val_loss_global = val_loss
+                self._best_cycle = cycle + 1
+                print(f"   🎯 New best validation loss! Saving best model...")
+                
+                # Save best model
+                best_path = self.output_dir / "best"
+                best_path.mkdir(parents=True, exist_ok=True)
+                self.model.save_pretrained(best_path)
+                self.tokenizer.save_pretrained(best_path)
+                
+                # Save training state
+                state = {
+                    'best_val_loss': val_loss,
+                    'best_cycle': cycle + 1,
+                    'current_cycle': cycle + 1,
+                    'global_step': self.trainer.state.global_step,
+                    'train_loss': self.trainer.state.log_history[-1].get('loss', 'N/A') if self.trainer.state.log_history else 'N/A'
+                }
+                with open(best_path / "training_state.json", 'w') as f:
+                    json.dump(state, f, indent=2)
+            else:
+                print(f"   Current best: {self._best_val_loss_global:.4f} (cycle {self._best_cycle})")
+            
             # Save checkpoint after each cycle
             checkpoint_path = self.output_dir / "checkpoints" / f"checkpoint-cycle-{cycle + 1}"
             self.trainer.save_model(str(checkpoint_path))
@@ -570,6 +607,33 @@ class SmartTrainer:
             if hasattr(self.trainer.state, 'should_training_stop') and self.trainer.state.should_training_stop:
                 print("Training stopped by callback")
                 break
+            
+            # Early stopping based on validation loss
+            if self.training_config.get('early_stopping', True) and cycle >= self.training_config.get('min_evaluations', 5) - 1:
+                # Track validation losses for patience
+                if not hasattr(self, '_val_losses_history'):
+                    self._val_losses_history = []
+                self._val_losses_history.append(val_loss)
+                
+                # Check if we should stop
+                patience = self.training_config.get('patience', 3)
+                if len(self._val_losses_history) > patience:
+                    # Check if validation loss hasn't improved in 'patience' cycles
+                    recent_losses = self._val_losses_history[-patience:]
+                    best_recent = min(recent_losses)
+                    
+                    # Also check for overfitting
+                    train_loss = self.trainer.state.log_history[-1].get('loss', 0) if self.trainer.state.log_history else 0
+                    overfitting_threshold = self.training_config.get('overfitting_threshold', 0.1)
+                    is_overfitting = (val_loss - train_loss) > overfitting_threshold
+                    
+                    if best_recent >= self._best_val_loss_global and not is_overfitting:
+                        print(f"\n⏹️  Early stopping: validation loss hasn't improved in {patience} cycles")
+                        print(f"   Best validation loss: {self._best_val_loss_global:.4f} (cycle {self._best_cycle})")
+                        break
+                    elif is_overfitting:
+                        print(f"\n⚠️  Potential overfitting detected (val_loss - train_loss = {val_loss - train_loss:.4f})")
+                        # Don't stop immediately on overfitting, just warn
             
             # Check for perfect loss - adjust threshold based on task type
             if self.training_config.get('early_stop_on_perfect', True) and not self.training_config.get('force_epochs', False):
@@ -636,6 +700,11 @@ class SmartTrainer:
         
         # Save final model
         self.save_final_model()
+        
+        # Print summary for circular training
+        if hasattr(self, '_best_val_loss_global'):
+            print(f"\n🏆 Best model from cycle {self._best_cycle} with validation loss: {self._best_val_loss_global:.4f}")
+            print(f"   Best model saved in: {self.output_dir}/best/")
         
         # Plot training history
         self.plot_training_history()
