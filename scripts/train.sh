@@ -65,6 +65,7 @@ BATCH_SIZE=""
 LEARNING_RATE=""
 LORA_R=""
 LORA_ALPHA=""
+TARGET_MODULES=""
 CIRCULAR=false
 MAX_CIRCULAR_EPOCHS=""
 RESUME=false
@@ -123,6 +124,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --lora-alpha)
             LORA_ALPHA="$2"
+            shift 2
+            ;;
+        --target-modules)
+            TARGET_MODULES="$2"
             shift 2
             ;;
         --circular)
@@ -224,6 +229,7 @@ if [ "$HELP" = true ] || [ -z "$DATA_PATH" ]; then
     echo "LORA PARAMETERS:"
     echo "  --lora-r N                     LoRA rank (auto-detected: 8-64 based on model)"
     echo "  --lora-alpha N                 LoRA alpha (default: 2*r)"
+    echo "  --target-modules MODULES       Comma-separated target modules (e.g., 'q_proj,v_proj')"
     echo ""
     echo "CIRCULAR TRAINING OPTIONS:"
     echo "  --max-circular-epochs N        Maximum circular epochs (default: 100)"
@@ -409,6 +415,7 @@ CMD="python train_lora.py --data \"$DATA_PATH\" --output \"$OUTPUT_PATH\""
 [ ! -z "$LEARNING_RATE" ] && CMD="$CMD --learning-rate $LEARNING_RATE"
 [ ! -z "$LORA_R" ] && CMD="$CMD --lora-r $LORA_R"
 [ ! -z "$LORA_ALPHA" ] && CMD="$CMD --lora-alpha $LORA_ALPHA"
+[ ! -z "$TARGET_MODULES" ] && CMD="$CMD --target-modules \"$TARGET_MODULES\""
 [ "$CIRCULAR" = true ] && CMD="$CMD --circular"
 [ ! -z "$MAX_CIRCULAR_EPOCHS" ] && CMD="$CMD --max-circular-epochs $MAX_CIRCULAR_EPOCHS"
 [ ! -z "$CIRCULAR_BATCH_MULTIPLIER" ] && CMD="$CMD --circular-batch-multiplier $CIRCULAR_BATCH_MULTIPLIER"

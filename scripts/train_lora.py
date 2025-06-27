@@ -1194,6 +1194,8 @@ def main():
                        help="LoRA rank (auto-detected if not set)")
     parser.add_argument("--lora-alpha", type=int, default=None,
                        help="LoRA alpha (default: 2*r)")
+    parser.add_argument("--target-modules", type=str, default=None,
+                       help="Comma-separated list of target modules (auto-detected if not set)")
     
     # Data parameters
     parser.add_argument("--max-examples", type=int, default=0,
@@ -1306,6 +1308,9 @@ def main():
         config_kwargs['lora_r'] = args.lora_r
     if args.lora_alpha is not None:
         config_kwargs['lora_alpha'] = args.lora_alpha
+    if args.target_modules is not None:
+        # Convert comma-separated string to list
+        config_kwargs['target_modules'] = [m.strip() for m in args.target_modules.split(',')]
     if args.max_seq_length is not None:
         config_kwargs['max_seq_length'] = args.max_seq_length
     if args.resume_from:
