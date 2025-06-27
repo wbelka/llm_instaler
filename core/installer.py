@@ -1434,6 +1434,7 @@ To install manually:
                 "installer_version": self.config.version,
                 "model_path": "./model",
                 "device_preference": device_preference,
+                "model_size_gb": requirements.disk_space_gb - 3.0,  # Subtract venv size
                 "requirements": {
                     "base_dependencies": requirements.base_dependencies,
                     "special_dependencies": requirements.special_dependencies,
