@@ -807,16 +807,22 @@
                             if (line.startsWith('data: ')) {
                                 try {
                                     const data = JSON.parse(line.slice(6));
+                                    
+                                    // Handle thinking content
+                                    if (data.thinking && !data.finished) {
+                                        // Display thinking content
+                                        if (!thinkingLine) {
+                                            thinkingLine = addTerminalLine('THINKING', data.thinking, 'thinking');
+                                        } else {
+                                            thinkingLine.textContent = `[THINKING] ${data.thinking}`;
+                                        }
+                                        inThinking = true;
+                                    }
+                                    
+                                    // Handle regular text tokens
                                     if (data.token && !data.finished) {
-                                        // Check if we're switching between thinking and normal
-                                        if (data.is_thinking && !inThinking) {
-                                            // Starting thinking block
-                                            inThinking = true;
-                                            if (!thinkingLine) {
-                                                thinkingLine = addTerminalLine('THINKING', '', 'thinking');
-                                            }
-                                        } else if (!data.is_thinking && inThinking) {
-                                            // Ending thinking block
+                                        // If we were in thinking mode and now getting regular text
+                                        if (inThinking && !responseLine) {
                                             inThinking = false;
                                             // Create separator
                                             const separator = document.createElement('div');
@@ -824,32 +830,41 @@
                                             separator.style.color = 'var(--thinking-color)';
                                             separator.textContent = '─'.repeat(60);
                                             document.getElementById('terminalOutput').appendChild(separator);
-                                            // Continue with normal response
+                                            // Create response line
                                             responseLine = addTerminalLine('', '[MODEL] ', 'output');
                                         }
                                         
                                         fullText += data.token;
+                                        displayText = fullText;
                                         
-                                        // Update display based on whether we're in thinking mode
-                                        if (inThinking && thinkingLine) {
-                                            // Extract only the thinking content
-                                            const thinkStart = fullText.indexOf('<think>');
-                                            const thinkEnd = fullText.indexOf('</think>');
-                                            if (thinkStart >= 0) {
-                                                let thinkContent = fullText.substring(thinkStart + 7);
-                                                if (thinkEnd > thinkStart) {
-                                                    thinkContent = fullText.substring(thinkStart + 7, thinkEnd);
-                                                }
-                                                thinkingLine.textContent = `[THINKING] ${thinkContent}`;
-                                            }
-                                        } else {
-                                            // Normal response - remove thinking blocks
-                                            displayText = fullText.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+                                        // Update the response line
+                                        if (responseLine) {
                                             responseLine.textContent = `[MODEL] ${displayText}`;
+                                        } else {
+                                            // If no response line yet, create it
+                                            responseLine = addTerminalLine('', `[MODEL] ${displayText}`, 'output');
                                         }
                                     } else if (data.finished) {
-                                        // Clean final text
-                                        displayText = fullText.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+                                        // Use the text from the response
+                                        displayText = data.text || fullText;
+                                        
+                                        // If thinking was provided in the final message, display it
+                                        if (data.thinking && !thinkingLine) {
+                                            thinkingLine = addTerminalLine('THINKING', data.thinking, 'thinking');
+                                            // Create separator
+                                            const separator = document.createElement('div');
+                                            separator.className = 'terminal-line';
+                                            separator.style.color = 'var(--thinking-color)';
+                                            separator.textContent = '─'.repeat(60);
+                                            document.getElementById('terminalOutput').appendChild(separator);
+                                        }
+                                        
+                                        // Create final response line if not already created
+                                        if (!responseLine && displayText) {
+                                            responseLine = addTerminalLine('', `[MODEL] ${displayText}`, 'output');
+                                        } else if (responseLine && displayText) {
+                                            responseLine.textContent = `[MODEL] ${displayText}`;
+                                        }
                                         
                                         // Save to message history (but not in vision mode to keep context clean)
                                         if (currentMode !== 'vision') {

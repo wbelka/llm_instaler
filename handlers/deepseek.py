@@ -35,6 +35,9 @@ class DeepseekHandler(BaseHandler):
         """Get model capabilities with R1 reasoning support."""
         capabilities = super().get_model_capabilities()
         
+        # All DeepSeek models support streaming
+        capabilities['supports_streaming'] = True
+        
         if self.is_r1_model:
             capabilities.update({
                 'reasoning': True,
@@ -219,6 +222,152 @@ class DeepseekHandler(BaseHandler):
             response["text"] = generated_text
         
         return response
+    
+    def generate_stream(
+        self,
+        prompt: Optional[str] = None,
+        messages: Optional[List[Dict[str, str]]] = None,
+        model: Any = None,
+        tokenizer: Any = None,
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+        top_p: float = 0.9,
+        top_k: int = 50,
+        stop_sequences: Optional[List[str]] = None,
+        mode: str = "auto",
+        **kwargs
+    ):
+        """Stream text generation with R1 thinking support.
+        
+        Yields tokens as they are generated, handling thinking tags appropriately.
+        """
+        import torch
+        from transformers import TextIteratorStreamer
+        from threading import Thread
+        
+        # Prepare input (same as generate_text)
+        if messages:
+            text = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True
+            )
+            logger.info(f"Applied chat template for streaming. Text length: {len(text)}")
+        else:
+            text = prompt or ""
+        
+        if not text:
+            raise ValueError("No input provided")
+        
+        # Tokenize
+        inputs = tokenizer(text, return_tensors="pt")
+        if hasattr(model, "device"):
+            inputs = {k: v.to(model.device) for k, v in inputs.items()}
+        
+        # Create streamer
+        streamer = TextIteratorStreamer(
+            tokenizer, 
+            skip_prompt=True,
+            skip_special_tokens=False  # Keep special tokens for thinking tag parsing
+        )
+        
+        # Ensure tokenizer has pad_token_id
+        if tokenizer.pad_token_id is None:
+            tokenizer.pad_token_id = tokenizer.eos_token_id
+        
+        # Generation kwargs
+        generation_kwargs = {
+            **inputs,
+            "streamer": streamer,
+            "max_new_tokens": max_tokens,
+            "temperature": temperature,
+            "top_p": top_p,
+            "top_k": top_k,
+            "do_sample": temperature > 0,
+            "pad_token_id": tokenizer.pad_token_id,
+            "eos_token_id": tokenizer.eos_token_id,
+        }
+        
+        if stop_sequences:
+            generation_kwargs["stop_strings"] = stop_sequences
+        
+        # Start generation in separate thread
+        thread = Thread(target=model.generate, kwargs=generation_kwargs)
+        thread.start()
+        
+        # Stream tokens with thinking tag handling
+        generated_text = ""
+        thinking_buffer = ""
+        in_thinking = False
+        thinking_complete = False
+        
+        # Special tokens to remove from output
+        special_tokens_to_remove = [
+            "<｜Assistant｜>",
+            "<｜User｜>",
+            "<｜end▁of▁sentence｜>",
+            "<｜begin▁of▁sentence｜>",
+            tokenizer.eos_token if tokenizer.eos_token else ""
+        ]
+        
+        for new_text in streamer:
+            if not new_text:
+                continue
+            
+            # Clean special tokens from the chunk
+            clean_chunk = new_text
+            for token in special_tokens_to_remove:
+                if token and token in clean_chunk:
+                    clean_chunk = clean_chunk.replace(token, "")
+            
+            generated_text += clean_chunk
+            
+            # Handle thinking tags for R1 models
+            if self.is_r1_model and mode != "no-thinking":
+                # Check if we're entering thinking mode
+                if "<think>" in clean_chunk and not in_thinking:
+                    in_thinking = True
+                    thinking_buffer = ""
+                    # Don't yield the thinking tag itself
+                    before_think = clean_chunk.split("<think>")[0]
+                    if before_think:
+                        yield {"token": before_think, "type": "text"}
+                    continue
+                
+                # Buffer thinking content
+                if in_thinking and not thinking_complete:
+                    if "</think>" in clean_chunk:
+                        # End of thinking
+                        parts = clean_chunk.split("</think>", 1)
+                        thinking_buffer += parts[0]
+                        in_thinking = False
+                        thinking_complete = True
+                        
+                        # Yield the complete thinking
+                        if thinking_buffer.strip():
+                            yield {"thinking": thinking_buffer.strip(), "type": "thinking"}
+                        
+                        # Yield any content after thinking
+                        if len(parts) > 1 and parts[1]:
+                            yield {"token": parts[1], "type": "text"}
+                    else:
+                        # Still in thinking mode, buffer it
+                        thinking_buffer += clean_chunk
+                    continue
+            
+            # Regular text streaming (not in thinking mode)
+            if not in_thinking and clean_chunk:
+                yield {"token": clean_chunk, "type": "text"}
+        
+        # Wait for generation to complete
+        thread.join()
+        
+        # Final yield with completion info
+        yield {
+            "type": "done",
+            "full_text": generated_text,
+            "thinking": thinking_buffer if thinking_buffer else None
+        }
     
     def get_dependencies(self) -> List[str]:
         """Get required dependencies for DeepSeek models."""
