@@ -78,6 +78,13 @@ class HandlerRegistry:
             pass
 
         try:
+            from handlers.trocr import TrOCRHandler
+            self._handlers['ocr'] = TrOCRHandler
+            self._handlers['trocr'] = TrOCRHandler # Also register by name
+        except ImportError:
+            pass
+
+        try:
             from handlers.janus import JanusHandler
             # Register Janus handler for specific model IDs
             self._handlers['janus'] = JanusHandler
