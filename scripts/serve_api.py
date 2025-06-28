@@ -603,14 +603,15 @@ async def generate(request: SecureGenerateRequest):
 async def generate_stream(request: SecureGenerateRequest):
     """Streaming generation endpoint using Server-Sent Events."""
     if not MODEL:
-        raise HTTPException(status_code=503, detail="Model not loaded")
+        raise HTTPException(status_code=503, detail="Model not loaded yet. Please try again shortly.")
     
-    if MODEL_INFO.get("model_family") != "language-model":
-        raise HTTPException(
+    # Check if the handler supports streaming before proceeding
+    if HANDLER and not HANDLER.get_model_capabilities().get("stream", False):
+         raise HTTPException(
             status_code=400,
-            detail="Streaming only supported for language models"
+            detail="Streaming is not supported for this model type."
         )
-    
+
     async def event_generator():
         import torch
         import asyncio
@@ -618,30 +619,24 @@ async def generate_stream(request: SecureGenerateRequest):
         from threading import Thread
         
         try:
-            # Check if handler supports streaming
+            # Apply mode-specific settings and prepare messages in one step
+            if request.mode and request.mode != "auto":
+                request = apply_mode_settings(request, request.mode)
+            
+            messages = []
+            if request.messages:
+                messages = request.messages.copy()
+            elif request.prompt:
+                messages = [{"role": "user", "content": request.prompt}]
+
+            # Use handler's streaming method if available (preferred)
             if HANDLER and hasattr(HANDLER, 'generate_stream'):
-                # Use handler's streaming method
-                logger.info("Using handler's generate_stream method")
+                logger.info("Using handler's unified generate_stream method")
                 
-                # Prepare messages
-                messages = []
-                if request.messages:
-                    messages = request.messages.copy()
-                elif request.prompt:
-                    messages = [{"role": "user", "content": request.prompt}]
-                
-                # Apply mode-specific settings
-                if request.mode and request.mode != "auto":
-                    request = apply_mode_settings(request, request.mode)
-                
-                # Stream from handler
-                generated_text = ""
-                thinking_text = ""
-                prompt_tokens = 0
-                
-                for chunk in HANDLER.generate_stream(
+                # The handler is now expected to be an async generator yielding dicts
+                async for chunk in HANDLER.generate_stream(
                     prompt=request.prompt,
-                    messages=messages if request.messages else None,
+                    messages=messages,
                     model=MODEL,
                     tokenizer=TOKENIZER,
                     temperature=request.temperature,
@@ -651,85 +646,27 @@ async def generate_stream(request: SecureGenerateRequest):
                     stop_sequences=request.stop_sequences,
                     mode=request.mode
                 ):
-                    if chunk.get("type") == "text":
-                        # Regular text token
-                        token = chunk.get("token", "")
-                        generated_text += token
-                        
-                        yield {
-                            "data": json.dumps({
-                                "token": token,
-                                "text": generated_text,
-                                "finished": False
-                            })
-                        }
-                    elif chunk.get("type") == "thinking":
-                        # Thinking content (for R1 models)
-                        thinking_text = chunk.get("thinking", "")
-                        yield {
-                            "data": json.dumps({
-                                "thinking": thinking_text,
-                                "finished": False
-                            })
-                        }
-                    elif chunk.get("type") == "done":
-                        # Final message
-                        full_text = chunk.get("full_text", generated_text)
-                        
-                        # Calculate tokens
-                        if messages:
-                            prompt_text = TOKENIZER.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-                            prompt_tokens = len(TOKENIZER.encode(prompt_text))
-                        else:
-                            prompt_tokens = len(TOKENIZER.encode(request.prompt or ""))
-                        
-                        completion_tokens = len(TOKENIZER.encode(generated_text))
-                        
-                        response_data = {
-                            "text": generated_text,
-                            "finished": True,
-                            "usage": {
-                                "prompt_tokens": prompt_tokens,
-                                "completion_tokens": completion_tokens,
-                                "total_tokens": prompt_tokens + completion_tokens
-                            }
-                        }
-                        
-                        if thinking_text:
-                            response_data["thinking"] = thinking_text
-                        
-                        yield {
-                            "data": json.dumps(response_data)
-                        }
-                    
-                    await asyncio.sleep(0)
-                    
+                    yield {"data": json.dumps(chunk)}
+                    await asyncio.sleep(0.001) # Yield control to the event loop
+            
+            # Fallback to direct model streaming with a unified output format
             else:
-                # Fallback to direct model streaming
-                logger.info("Using direct model streaming (no handler support)")
+                logger.info("Using direct model streaming with unified output format")
                 
-                # Prepare messages
-                messages = []
-                if request.messages:
-                    messages = request.messages.copy()
-                elif request.prompt:
-                    messages = [{"role": "user", "content": request.prompt}]
-                
-                # Apply chat template
+                if not messages:
+                    raise ValueError("Prompt or messages are required for streaming.")
+
                 if hasattr(TOKENIZER, 'apply_chat_template'):
                     text = TOKENIZER.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
                 else:
                     text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
                 
-                # Tokenize
                 inputs = TOKENIZER(text, return_tensors="pt", truncation=True, max_length=4096)
                 if hasattr(MODEL, 'device'):
                     inputs = {k: v.to(MODEL.device) for k, v in inputs.items()}
                 
-                # Create streamer
                 streamer = TextIteratorStreamer(TOKENIZER, skip_prompt=True, skip_special_tokens=True)
                 
-                # Generation kwargs
                 generation_kwargs = {
                     **inputs,
                     'streamer': streamer,
@@ -742,19 +679,16 @@ async def generate_stream(request: SecureGenerateRequest):
                     'eos_token_id': TOKENIZER.eos_token_id,
                 }
                 
-                # Start generation in separate thread
                 thread = Thread(target=MODEL.generate, kwargs=generation_kwargs)
                 thread.start()
                 
-                # Stream tokens
                 generated_text = ""
-                
                 for new_text in streamer:
                     if new_text:
                         generated_text += new_text
-                        
                         yield {
                             "data": json.dumps({
+                                "type": "text",
                                 "token": new_text,
                                 "text": generated_text,
                                 "finished": False
@@ -762,25 +696,29 @@ async def generate_stream(request: SecureGenerateRequest):
                         }
                         await asyncio.sleep(0)
                 
-                # Final message
+                thread.join()
+
+                prompt_tokens = len(inputs['input_ids'][0])
+                completion_tokens = len(TOKENIZER.encode(generated_text))
+                
                 yield {
                     "data": json.dumps({
-                        "text": generated_text,
+                        "type": "done",
+                        "full_text": generated_text,
                         "finished": True,
                         "usage": {
-                            "prompt_tokens": len(inputs['input_ids'][0]),
-                            "completion_tokens": len(TOKENIZER.encode(generated_text)),
-                            "total_tokens": len(inputs['input_ids'][0]) + len(TOKENIZER.encode(generated_text))
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": completion_tokens,
+                            "total_tokens": prompt_tokens + completion_tokens
                         }
                     })
                 }
-                
-                thread.join()
-            
+        
         except Exception as e:
             logger.error(f"Streaming error: {e}", exc_info=True)
             yield {
                 "data": json.dumps({
+                    "type": "error",
                     "error": str(e),
                     "finished": True
                 })
@@ -791,51 +729,53 @@ async def generate_stream(request: SecureGenerateRequest):
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint with connection management."""
+    """WebSocket endpoint with connection management and timeouts."""
     await websocket.accept()
     
-    # Track connection for cleanup
     connection_id = hashlib.md5(f"{websocket.client.host}:{time.time()}".encode()).hexdigest()
     logger.info(f"WebSocket connected: {connection_id}")
     
     try:
         while True:
-            # Set timeout for receive
-            data = await websocket.receive_json()
-            
-            # Validate request
+            try:
+                # Wait for a message with a timeout
+                import asyncio
+                data = await asyncio.wait_for(websocket.receive_json(), timeout=60.0)
+                
+            except asyncio.TimeoutError:
+                logger.warning(f"WebSocket timeout for {connection_id}. Closing connection.")
+                await websocket.close(code=1008, reason="Connection timed out")
+                break
+            except WebSocketDisconnect:
+                # Handle client-side disconnect gracefully
+                break
+
+            # Validate request payload
             try:
                 request = SecureGenerateRequest(**data)
             except Exception as e:
-                await websocket.send_json({
-                    "error": f"Invalid request: {str(e)}",
-                    "status": "error"
-                })
+                await websocket.send_json({"error": f"Invalid request: {str(e)}", "status": "error"})
                 continue
             
-            # Process request
+            # Process the request (non-streaming)
             try:
+                # Note: Streaming is better handled via HTTP SSE. This is for single responses.
                 response = await generate(request)
                 await websocket.send_json(response.dict())
             except HTTPException as e:
-                await websocket.send_json({
-                    "error": e.detail,
-                    "status": "error",
-                    "code": e.status_code
-                })
+                await websocket.send_json({"error": e.detail, "status": "error", "code": e.status_code})
             except Exception as e:
-                logger.error(f"WebSocket processing error: {e}")
-                await websocket.send_json({
-                    "error": "Internal server error",
-                    "status": "error",
-                    "code": 500
-                })
+                logger.error(f"WebSocket processing error for {connection_id}: {e}", exc_info=True)
+                await websocket.send_json({"error": "Internal server error", "status": "error", "code": 500})
     
-    except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected: {connection_id}")
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        await websocket.close(code=1011, reason="Internal server error")
+        # Catch unexpected errors during the connection lifecycle
+        logger.error(f"Unexpected WebSocket error for {connection_id}: {e}", exc_info=True)
+        # Ensure connection is closed if not already
+        if websocket.client_state != WebSocketState.DISCONNECTED:
+             await websocket.close(code=1011, reason="Internal server error")
+    finally:
+        logger.info(f"WebSocket disconnected: {connection_id}")
 
 
 @app.post("/upload")

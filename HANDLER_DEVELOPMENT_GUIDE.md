@@ -147,6 +147,33 @@ def generate_text(self, prompt: str = None, messages: List[Dict] = None,
     }
 ```
 
+#### For Streaming Text Generation:
+```python
+async def generate_stream(self, prompt: str = None, messages: List[Dict] = None,
+                         model=None, tokenizer=None, **kwargs) -> Dict[str, Any]:
+    """Generate text response as a stream of events."""
+    # Must be an async generator
+    # Yields dictionaries with a specific format
+    
+    # 1. YIELD 'text' chunks for each token
+    # for token in streaming_logic:
+    #     yield {
+    #         "type": "text",
+    #         "token": token
+    #     }
+    
+    # 2. YIELD 'done' message at the end with usage stats
+    # yield {
+    #     "type": "done",
+    #     "full_text": final_text,
+    #     "usage": {
+    #         "prompt_tokens": ...,
+    #         "completion_tokens": ...,
+    #         "total_tokens": ...
+    #     }
+    # }
+```
+
 #### For Image Generation:
 ```python
 def generate_image(self, prompt: str, negative_prompt: str = None,
