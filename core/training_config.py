@@ -42,6 +42,7 @@ class TrainingConfig:
     max_seq_length: Optional[int] = None  # Auto-detect if None
     dataset_format: str = "auto"  # auto, alpaca, chat, completion, qa, vision
     validation_split: float = 0.1
+    dataset_size: Optional[int] = None  # Number of training examples
     
     # Optimization
     warmup_ratio: float = 0.1
@@ -301,17 +302,60 @@ class TrainingConfig:
         return context_lengths["default"]
     
     def _get_eval_steps(self) -> int:
-        """Get evaluation steps based on training mode."""
+        """Get evaluation steps based on training mode and dataset size."""
+        # If dataset size is known, calculate based on percentage
+        if self.dataset_size and self.batch_size:
+            steps_per_epoch = self.dataset_size // self.batch_size
+            
+            # Evaluation frequency as percentage of epoch
+            eval_percentages = {
+                "slow": 0.10,      # 10 evaluations per epoch
+                "medium": 0.05,    # 20 evaluations per epoch
+                "fast": 0.02,      # 50 evaluations per epoch
+                "circle": 0.01,    # 100 evaluations per epoch (for small datasets)
+                "non-stop": 0.20,  # 5 evaluations per epoch
+                "adaptive": 0.05   # 20 evaluations per epoch
+            }
+            
+            percentage = eval_percentages.get(self.training_mode, 0.05)
+            eval_steps = max(10, int(steps_per_epoch * percentage))
+            
+            # For very large datasets, cap the frequency
+            if self.dataset_size > 100000:
+                # At least every 5000 steps for large datasets
+                eval_steps = max(eval_steps, 5000)
+            elif self.dataset_size < 1000:
+                # For tiny datasets, evaluate more frequently
+                eval_steps = min(eval_steps, 50)
+            
+            return eval_steps
+        
+        # Fallback to fixed values if dataset size unknown
         eval_steps = {
-            "slow": 50,      # Changed from 100 to be compatible with save_steps=10
-            "medium": 50,
-            "fast": 20,      # Changed from 25 to be compatible with save_steps=10
-            "circle": 10,    # Frequent eval for circular
-            "non-stop": 50,  # Changed from 200 to be compatible with save_steps=10
-            "adaptive": 50
+            "slow": 1000,
+            "medium": 500,
+            "fast": 200,
+            "circle": 50,
+            "non-stop": 2000,
+            "adaptive": 500
         }
         
-        return eval_steps.get(self.training_mode, 50)
+        return eval_steps.get(self.training_mode, 500)
+    
+    def update_with_dataset_size(self, dataset_size: int):
+        """Update configuration after dataset is loaded."""
+        self.dataset_size = dataset_size
+        
+        # Recalculate eval_steps with actual dataset size
+        if self.eval_steps is not None:
+            old_eval_steps = self.eval_steps
+            self.eval_steps = self._get_eval_steps()
+            
+            # Update save_steps to match if they were equal
+            if self.save_steps == old_eval_steps:
+                self.save_steps = self.eval_steps
+            
+            logger.info(f"Updated eval_steps from {old_eval_steps} to {self.eval_steps} based on dataset size {dataset_size}")
     
     def _get_mixed_precision(self) -> str:
         """Determine mixed precision based on hardware and model."""

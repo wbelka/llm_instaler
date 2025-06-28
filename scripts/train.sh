@@ -81,6 +81,7 @@ MAX_SEQ_LENGTH=""
 MODE=""
 FORCE_EPOCHS=false
 CIRCULAR_BATCH_MULTIPLIER=""
+VALIDATION_SPLIT=""
 HELP=false
 
 # Show help if requested
@@ -190,6 +191,10 @@ while [[ $# -gt 0 ]]; do
             FORCE_EPOCHS=true
             shift
             ;;
+        --validation-split)
+            VALIDATION_SPLIT="$2"
+            shift 2
+            ;;
         *)
             echo "Unknown option: $1"
             exit 1
@@ -253,6 +258,8 @@ if [ "$HELP" = true ] || [ -z "$DATA_PATH" ]; then
     echo ""
     echo "OTHER OPTIONS:"
     echo "  --output PATH                  Output directory (default: ./lora)"
+    echo "  --validation-split N           Validation split ratio (default: 0.1 = 10%)"
+    echo "                                 Examples: 0.05 = 5%, 0.01 = 1%, 0.2 = 20%"
     echo "  --no-tensorboard               Disable TensorBoard"
     echo "  --tensorboard-port N           TensorBoard port (default: 6006)"
     echo "  --tensorboard-only [PORT]      Only start TensorBoard server"
@@ -428,6 +435,7 @@ CMD="python train_lora.py --data \"$DATA_PATH\" --output \"$OUTPUT_PATH\""
 [ ! -z "$MAX_SEQ_LENGTH" ] && CMD="$CMD --max-seq-length $MAX_SEQ_LENGTH"
 [ ! -z "$MODE" ] && CMD="$CMD --mode $MODE"
 [ "$FORCE_EPOCHS" = true ] && CMD="$CMD --force-epochs"
+[ ! -z "$VALIDATION_SPLIT" ] && CMD="$CMD --validation-split $VALIDATION_SPLIT"
 
 # Function to cleanup on exit
 cleanup() {

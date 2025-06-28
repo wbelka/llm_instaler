@@ -1196,6 +1196,10 @@ def main():
     if val_dataset:
         print(f"  Validation examples: {len(val_dataset)}")
     
+    # Update config with actual dataset size for better eval_steps calculation
+    training_config.update_with_dataset_size(len(train_dataset))
+    print(f"  Evaluation frequency: every {training_config.eval_steps} steps")
+    
     # Create output directory
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
