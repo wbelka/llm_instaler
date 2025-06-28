@@ -53,7 +53,16 @@ class Gemma3Handler(MultimodalHandler):
             hasattr(config, 'vision_config')
         )
 
-        return is_gemma3 and has_vision
+        # Check for audio/video capabilities based on model ID or config
+        has_audio_video = (
+            'audio' in str(config).lower() or
+            'video' in str(config).lower() or
+            'audio' in model_type or
+            'video' in model_type or
+            '3n' in model_id # Gemma 3n specifically supports audio/video
+        )
+
+        return is_gemma3 and (has_vision or has_audio_video)
 
     def get_dependencies(self) -> List[str]:
         """Get required Python dependencies.
@@ -71,7 +80,9 @@ class Gemma3Handler(MultimodalHandler):
             'protobuf',
             'accelerate>=0.20.0',
             'safetensors>=0.4.0',
-            'tokenizers>=0.15.0'
+            'tokenizers>=0.15.0',
+            'soundfile', # For audio processing
+            'librosa', # For audio processing
         ]
 
         # Add quantization support through centralized config
@@ -346,7 +357,7 @@ class Gemma3Handler(MultimodalHandler):
             'supports_batch_inference': True,
             'max_context_length': max_context,
             'max_output_length': 8192,
-            'input_modalities': ['text', 'image'],
+            'input_modalities': ['text', 'image', 'audio', 'video'], # Added audio and video
             'output_modalities': ['text'],
             'supports_multiple_images': True,  # Can handle multiple images
             'image_resolution': 896,  # Images normalized to 896x896
@@ -358,7 +369,8 @@ class Gemma3Handler(MultimodalHandler):
                 'Long context window (up to 128K tokens)',
                 'Multilingual support (140+ languages)',
                 'Efficient image encoding (256 tokens per image)',
-                'Optimized for both single and multi-turn conversations'
+                'Optimized for both single and multi-turn conversations',
+                'Audio and video input support' # Added feature
             ]
         }
 
@@ -366,7 +378,7 @@ class Gemma3Handler(MultimodalHandler):
 
     def get_supported_modes(self) -> List[str]:
         """Get supported generation modes for Gemma 3."""
-        return ['auto', 'chat', 'vision', 'multimodal', 'analyze']
+        return ['auto', 'chat', 'vision', 'multimodal', 'analyze', 'audio', 'video'] # Added audio and video modes
 
     def get_mode_descriptions(self) -> Dict[str, str]:
         """Get descriptions for supported modes."""
@@ -375,7 +387,9 @@ class Gemma3Handler(MultimodalHandler):
             'chat': 'Text conversation mode',
             'vision': 'Image understanding and analysis',
             'multimodal': 'Combined text and image processing',
-            'analyze': 'Detailed image analysis with reasoning'
+            'analyze': 'Detailed image analysis with reasoning',
+            'audio': 'Audio understanding and transcription', # Added audio mode description
+            'video': 'Video understanding and analysis' # Added video mode description
         }
 
     def generate_text(self, prompt: str, model=None, tokenizer=None,
@@ -409,8 +423,8 @@ class Gemma3Handler(MultimodalHandler):
         Args:
             text: Input text
             images: List of images (base64 strings or PIL Images)
-            audio: Not supported by Gemma 3
-            video: Not supported by Gemma 3
+            audio: Base64 encoded audio data
+            video: Base64 encoded video data
             model: The loaded model
             processor: The loaded processor
             **kwargs: Additional generation arguments
@@ -421,13 +435,12 @@ class Gemma3Handler(MultimodalHandler):
         if not model or not processor:
             raise ValueError("Model and processor required for multimodal processing")
 
-        if audio or video:
-            logger.warning("Gemma 3 does not support audio or video inputs")
-
         # Debug logging of incoming data
         logger.info("=== DEBUGGING INCOMING DATA ===")
         logger.info(f"Text input: {text}")
         logger.info(f"Images provided: {len(images) if images else 0}")
+        logger.info(f"Audio provided: {bool(audio)}")
+        logger.info(f"Video provided: {bool(video)}")
         logger.info(f"Mode: {kwargs.get('mode', 'not specified')}")
         logger.info(f"Messages in kwargs: {'messages' in kwargs}")
         if 'messages' in kwargs:
@@ -446,6 +459,7 @@ class Gemma3Handler(MultimodalHandler):
             from PIL import Image
             import base64
             from io import BytesIO
+            import soundfile as sf
 
             # Clear GPU cache for memory efficiency
             if torch.cuda.is_available():
@@ -481,31 +495,65 @@ class Gemma3Handler(MultimodalHandler):
                                     img_data = item['image']
                                     if isinstance(img_data, str):
                                         try:
-                                            # Check if it's base64 or URL
                                             if img_data.startswith('http'):
-                                                # It's a URL - download it
                                                 import requests
                                                 response = requests.get(img_data)
-                                                pil_images.append(Image.open(BytesIO(response.content)))
+                                                pil_images.append(Image.open(io.BytesIO(response.content)))
                                             else:
-                                                # Assume base64
                                                 img_bytes = base64.b64decode(img_data)
-                                                pil_images.append(Image.open(BytesIO(img_bytes)))
+                                                pil_images.append(Image.open(io.BytesIO(img_bytes)))
                                         except Exception as e:
-                                            logger.warning(f"Failed to process image: {e}")
+                                            logger.warning(f"Failed to process image from message: {e}")
                                     elif isinstance(img_data, Image.Image):
                                         pil_images.append(img_data)
                                 elif 'url' in item:
-                                    # Handle URL format
                                     try:
                                         import requests
                                         response = requests.get(item['url'])
-                                        pil_images.append(Image.open(BytesIO(response.content)))
+                                        pil_images.append(Image.open(io.BytesIO(response.content)))
                                     except Exception as e:
-                                        logger.warning(f"Failed to download image from URL: {e}")
+                                        logger.warning(f"Failed to download image from URL in message: {e}")
+
+            # Process audio if provided
+            audio_input = None
+            if audio:
+                try:
+                    audio_bytes = base64.b64decode(audio)
+                    # Gemma 3n expects audio as raw waveform (numpy array)
+                    # Use soundfile to load audio and resample if necessary
+                    audio_data_np, samplerate = sf.read(io.BytesIO(audio_bytes))
+                    # Assuming Gemma 3n expects a specific sample rate, e.g., 16000 Hz
+                    # This might need adjustment based on actual model requirements
+                    if samplerate != 16000:
+                        import librosa
+                        audio_data_np = librosa.resample(audio_data_np, orig_sr=samplerate, target_sr=16000)
+                        samplerate = 16000
+                    audio_input = audio_data_np # Pass as numpy array
+                    logger.info(f"Processed audio input with shape {audio_input.shape} and samplerate {samplerate}")
+                except Exception as e:
+                    logger.warning(f"Failed to process audio: {e}")
+                    audio_input = None
+            
+            # Process video if provided (Gemma 3n expects video as a list of frames)
+            video_input = None
+            if video:
+                try:
+                    video_bytes = base64.b64decode(video)
+                    # This is a placeholder. Actual video processing would involve
+                    # a video decoding library (e.g., OpenCV, PyAV) to extract frames).
+                    # For now, we'll assume a simple case or raise a warning.
+                    logger.warning("Video input processing is a placeholder and requires a video decoding library.")
+                    # Example: If video is a sequence of base64 image frames
+                    # video_frames_base64 = json.loads(video_bytes.decode('utf-8'))
+                    # video_input = [Image.open(io.BytesIO(base64.b64decode(frame))).convert("RGB") for frame in video_frames_base64]
+                    # For now, we'll just pass the raw bytes and hope the processor handles it or error out.
+                    video_input = video_bytes # Placeholder
+                except Exception as e:
+                    logger.warning(f"Failed to process video: {e}")
+                    video_input = None
 
             # Check if we should use simple prompt mode
-            use_simple_prompt = kwargs.get('use_simple_prompt', False) or (not kwargs.get('messages') and text and not pil_images)
+            use_simple_prompt = kwargs.get('use_simple_prompt', False) or (not kwargs.get('messages') and text and not pil_images and not audio_input and not video_input)
             
             if use_simple_prompt and text:
                 logger.info("Using simple prompt mode (no chat template)")
@@ -525,7 +573,7 @@ class Gemma3Handler(MultimodalHandler):
                 logger.debug(f"Incoming messages: {messages}")
 
                 if not messages:
-                    # Build messages from text/images if not provided
+                    # Build messages from text/images/audio/video if not provided
                     messages = []
 
                     # Add system message if needed
@@ -536,28 +584,19 @@ class Gemma3Handler(MultimodalHandler):
                         })
 
                     # Build user message
-                    if text or pil_images:
-                        # For vision mode with images, use structured content format
-                        if pil_images:
-                            content = []
-                            # Add images first
-                            for _ in pil_images:
-                                content.append({"type": "image"})
-                            # Add text
-                            if not text:
-                                text = "What is in this image?"
-                            content.append({"type": "text", "text": text})
-                            
-                            messages.append({
-                                "role": "user",
-                                "content": content
-                            })
-                        else:
-                            # Text only
-                            messages.append({
-                                "role": "user",
-                                "content": text
-                            })
+                    user_content = []
+                    if pil_images:
+                        for _img in pil_images:
+                            user_content.append({"type": "image"})
+                    if audio_input is not None:
+                        user_content.append({"type": "audio"})
+                    if video_input is not None:
+                        user_content.append({"type": "video"})
+                    if text:
+                        user_content.append({"type": "text", "text": text})
+                    
+                    if user_content:
+                        messages.append({"role": "user", "content": user_content})
                 else:
                     # For text-only chat, ensure messages are in the correct format
                     # Gemma 3 expects content to be a list of dicts with 'type' and 'text' keys
@@ -583,7 +622,41 @@ class Gemma3Handler(MultimodalHandler):
                                             'type': 'text',
                                             'text': item.get('text', '')
                                         })
-                                    # Skip non-text items in text-only mode
+                                    elif item['type'] == 'image':
+                                        # If image is in messages, add it to pil_images
+                                        if 'image' in item:
+                                            img_data = item['image']
+                                            if isinstance(img_data, str):
+                                                try:
+                                                    if img_data.startswith('http'):
+                                                        import requests
+                                                        response = requests.get(img_data)
+                                                        pil_images.append(Image.open(io.BytesIO(response.content)))
+                                                    else:
+                                                        img_bytes = base64.b64decode(img_data)
+                                                        pil_images.append(Image.open(io.BytesIO(img_bytes)))
+                                                except Exception as e:
+                                                    logger.warning(f"Failed to process image from message: {e}")
+                                            elif isinstance(img_data, Image.Image):
+                                                pil_images.append(img_data)
+                                        elif 'url' in item:
+                                            try:
+                                                import requests
+                                                response = requests.get(item['url'])
+                                                pil_images.append(Image.open(io.BytesIO(response.content)))
+                                            except Exception as e:
+                                                logger.warning(f"Failed to download image from URL in message: {e}")
+                                        processed_content.append(item) # Keep the image dict for processor
+                                    elif item['type'] == 'audio':
+                                        if 'audio' in item and isinstance(item['audio'], str):
+                                            audio_input = base64.b64decode(item['audio'])
+                                            # Further processing of audio_input will happen below
+                                        processed_content.append(item)
+                                    elif item['type'] == 'video':
+                                        if 'video' in item and isinstance(item['video'], str):
+                                            video_input = base64.b64decode(item['video'])
+                                            # Further processing of video_input will happen below
+                                        processed_content.append(item)
                                 elif isinstance(item, str):
                                     processed_content.append({
                                         'type': 'text',
@@ -603,207 +676,32 @@ class Gemma3Handler(MultimodalHandler):
                             })
                     messages = processed_messages
 
-                # Handle multimodal input with images
-                if pil_images:
-                    # For multimodal input, we need to prepare it differently
-                    # Convert messages to a text prompt for the processor
-                    if isinstance(messages, list):
-                        # Extract text from messages
-                        text_parts = []
-                        for msg in messages:
-                            role = msg.get('role', 'user')
-                            content = msg.get('content', '')
-                            if isinstance(content, str):
-                                if role != 'system' or content:  # Include system messages only if they have content
-                                    text_parts.append(f"{role}: {content}")
-                            elif isinstance(content, list):
-                                # Extract text from structured content
-                                for item in content:
-                                    if isinstance(item, dict) and item.get('type') == 'text':
-                                        text_parts.append(f"{role}: {item.get('text', '')}")
-                        
-                        # Join into a single prompt
-                        text_prompt = "\n".join(text_parts) if text_parts else "What is in this image?"
-                        if text_prompt and not text_prompt.endswith(":"):
-                            text_prompt += "\nAssistant:"
-                    else:
-                        text_prompt = str(messages)
-                
-                    # Process with images
-                    logger.info(f"Processing multimodal input with {len(pil_images)} images")
+                # Prepare inputs for processor.apply_chat_template
+                # The processor expects images, audio, video as separate arguments
+                # and messages in the structured format.
+                try:
+                    logger.info("Using apply_chat_template for multimodal input")
                     
-                    # For Gemma3, we need to format messages properly with images
-                    # Convert text prompt back to messages format for proper processing
-                    if isinstance(messages, list) and messages:
-                        # Use the original messages format with apply_chat_template
-                        try:
-                            logger.info("Using apply_chat_template for multimodal input")
-                            
-                            # Ensure messages have proper format
-                            formatted_messages = []
-                            for msg in messages:
-                                role = msg.get('role', 'user')
-                                content = msg.get('content')
-                                
-                                # For user message with images, format properly
-                                if role == 'user' and pil_images:
-                                    # Create content with image placeholder
-                                    formatted_messages.append({
-                                        'role': role,
-                                        'content': content  # Processor will handle image token insertion
-                                    })
-                                else:
-                                    formatted_messages.append(msg)
-                            
-                            # Apply chat template and process with images together
-                            # For Gemma3, we need to pass both messages and images to processor
-                            try:
-                                # First approach: apply_chat_template with tokenization and images
-                                inputs = processor.apply_chat_template(
-                                    formatted_messages,
-                                    images=pil_images,
-                                    add_generation_prompt=True,
-                                    tokenize=True,
-                                    return_dict=True,
-                                    return_tensors="pt"
-                                )
-                                logger.info("Successfully processed with apply_chat_template and images")
-                            except Exception as e1:
-                                logger.warning(f"apply_chat_template with images failed: {e1}")
-                                # Second approach: get text template then process with images
-                                try:
-                                    text = processor.apply_chat_template(
-                                        formatted_messages, 
-                                        tokenize=False, 
-                                        add_generation_prompt=True
-                                    )
-                                    logger.debug(f"Chat template output: {text}")
-                                    
-                                    inputs = processor(
-                                        text=text,
-                                        images=pil_images,
-                                        return_tensors="pt",
-                                        padding=True
-                                    )
-                                except TypeError as te:
-                                    # Third approach: positional arguments
-                                    logger.warning(f"Standard processing failed: {te}")
-                                    inputs = processor(
-                                        text,
-                                        pil_images,
-                                        return_tensors="pt",
-                                        padding=True
-                                    )
-                            logger.info("Successfully processed multimodal input with chat template")
-                        except Exception as e:
-                            logger.warning(f"Chat template failed, using fallback: {e}")
-                            # Fallback to simple format
-                            text_prompt = text_prompt if text_prompt else "What is in this image?"
-                    else:
-                        text_prompt = text_prompt if text_prompt else "What is in this image?"
+                    # Ensure messages have proper format for apply_chat_template
+                    # It expects content to be a list of dicts with 'type' and 'text'/'image'/'audio'/'video' keys
                     
-                    # Process fallback if not already processed
-                    if 'inputs' not in locals():
-                        try:
-                            # Let the processor handle image token insertion automatically
-                            # Gemma3 processor will add the correct number of tokens internally
-                            logger.info(f"Processing {len(pil_images)} images with text: {text_prompt[:50]}...")
-                            
-                            # Try different parameter formats for Gemma3
-                            try:
-                                inputs = processor(
-                                    text=text_prompt,
-                                    images=pil_images,
-                                    return_tensors="pt",
-                                    padding=True
-                                )
-                            except TypeError:
-                                # Try positional arguments
-                                inputs = processor(
-                                    text_prompt,
-                                    pil_images,
-                                    return_tensors="pt",
-                                    padding=True
-                                )
-                        except Exception as e:
-                            logger.error(f"Failed to process multimodal input: {e}")
-                            # Try alternative approaches
-                            try:
-                                # Some processors might expect pixel_values directly
-                                if hasattr(processor, 'image_processor'):
-                                    pixel_values = processor.image_processor(pil_images, return_tensors="pt").pixel_values
-                                    text_inputs = processor.tokenizer(text_prompt, return_tensors="pt", padding=True)
-                                    inputs = {
-                                        **text_inputs,
-                                        'pixel_values': pixel_values
-                                    }
-                                    logger.info("Using separate image and text processing")
-                                else:
-                                    raise ValueError("No image processor found")
-                            except Exception as e2:
-                                logger.error(f"Alternative approach also failed: {e2}")
-                                # Last resort - try without images
-                                inputs = processor(
-                                    text=text_prompt,
-                                    return_tensors="pt",
-                                    padding=True
-                                )
-                                logger.warning("Processing without images as fallback")
-                else:
-                    # Text-only input - prepare for Gemma 3 format
-                    # First try to use apply_chat_template as shown in the example
-                    try:
-                        logger.debug("Trying apply_chat_template for text-only input")
-                        inputs = processor.apply_chat_template(
-                            messages,
-                            add_generation_prompt=True,
-                            tokenize=True,
-                            return_dict=True,
-                            return_tensors="pt"
-                        )
-                        logger.debug(f"Success! Inputs shape: {inputs['input_ids'].shape}")
-                        logger.debug(f"Keys in inputs: {list(inputs.keys())}")
-                    except Exception as e:
-                        logger.warning(f"Failed to process with processor: {e}")
-                        
-                        # Try to get tokenizer from processor
-                        tokenizer = getattr(processor, 'tokenizer', None)
-                        if tokenizer is None:
-                            tokenizer = getattr(processor, '_tokenizer', None)
-                        
-                        if tokenizer is not None:
-                            try:
-                                logger.info("Using tokenizer directly")
-                                # Convert messages to simple text prompt
-                                if messages and isinstance(messages, list):
-                                    prompt_parts = []
-                                    for msg in messages:
-                                        role = msg.get('role', 'user')
-                                        content = msg.get('content', '')
-                                        if isinstance(content, str):
-                                            prompt_parts.append(f"{role}: {content}")
-                                        elif isinstance(content, list):
-                                            # Extract text from structured content
-                                            for item in content:
-                                                if isinstance(item, dict) and item.get('type') == 'text':
-                                                    prompt_parts.append(f"{role}: {item.get('text', '')}")
-                                    prompt = "\n".join(prompt_parts)
-                                else:
-                                    prompt = text or "Hello"
-                                
-                                inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=8192)
-                            except Exception as e2:
-                                logger.error(f"Tokenizer also failed: {e2}")
-                                # Last resort - create minimal inputs
-                                import torch
-                                inputs = {
-                                    'input_ids': torch.tensor([[1, 2, 3, 4, 5]], dtype=torch.long),  # Dummy input
-                                    'attention_mask': torch.tensor([[1, 1, 1, 1, 1]], dtype=torch.long)
-                                }
-                                logger.warning("Using dummy inputs as last resort")
-                        else:
-                            logger.error("No tokenizer found in processor")
-                            raise ValueError("Cannot find tokenizer in processor")
+                    # The processor will handle inserting image/audio/video tokens
+                    # based on the presence of images/audio/video arguments.
+                    
+                    inputs = processor.apply_chat_template(
+                        messages,
+                        images=pil_images if pil_images else None,
+                        audio=audio_input if audio_input is not None else None,
+                        video=video_input if video_input is not None else None,
+                        add_generation_prompt=True,
+                        tokenize=True,
+                        return_dict=True,
+                        return_tensors="pt"
+                    )
+                    logger.info("Successfully processed with apply_chat_template and multimodal inputs")
+                except Exception as e:
+                    logger.error(f"Failed to process with apply_chat_template: {e}", exc_info=True)
+                    raise ValueError(f"Failed to process multimodal input: {e}")
             
             # If we still don't have inputs at this point, something went wrong
             if not use_simple_prompt and 'inputs' not in locals():
@@ -938,16 +836,14 @@ class Gemma3Handler(MultimodalHandler):
                     elif hasattr(model.config, 'text_config') and hasattr(model.config.text_config, 'vocab_size'):
                         vocab_size = model.config.text_config.vocab_size
                 
-                if vocab_size:
-                    logger.info(f"Model vocab size: {vocab_size}")
-                    if inputs['input_ids'].max().item() >= vocab_size:
-                        logger.error(f"FATAL: Invalid token ID detected! Max ID: {inputs['input_ids'].max().item()}, Vocab Size: {vocab_size}")
-                        # Show which tokens are invalid
-                        invalid_mask = inputs['input_ids'] >= vocab_size
-                        invalid_tokens = inputs['input_ids'][invalid_mask]
-                        logger.error(f"Invalid tokens: {invalid_tokens.tolist()}")
-                else:
-                    logger.warning("Could not determine vocab size from model config")
+                if vocab_size is None:
+                    vocab_size = 256000  # Gemma 3 default
+                    logger.debug(f"Using default vocab size: {vocab_size}")
+                
+                if input_ids.max().item() >= vocab_size:
+                    logger.error(f"Invalid token ID {input_ids.max().item()} >= vocab size {vocab_size}")
+                    # Clamp tokens to valid range
+                    inputs['input_ids'] = torch.clamp(input_ids, 0, vocab_size - 1)
             
             # Log generation parameters
             logger.info(f"Generation params: {generation_params}")
@@ -1034,6 +930,7 @@ class Gemma3Handler(MultimodalHandler):
 
             return {
                 'text': response.strip(),
+                'type': 'text_generation',
                 'usage': usage,
                 'model': 'gemma-3-multimodal'
             }

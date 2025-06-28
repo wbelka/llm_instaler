@@ -125,6 +125,8 @@ class HandlerRegistry:
             self._handlers['gemma-3'] = Gemma3Handler
             self._handlers['gemma3_vlm'] = Gemma3Handler
             self._handlers['paligemma'] = Gemma3Handler
+            self._handlers['gemma3n'] = Gemma3Handler # For Gemma 3n models
+            self._handlers['gemma-3n'] = Gemma3Handler # For Gemma 3n models
         except ImportError as e:
             import logging
             logging.getLogger(__name__).warning(f"Failed to import Gemma3Handler: {e}")
