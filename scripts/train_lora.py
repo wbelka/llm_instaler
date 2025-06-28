@@ -500,214 +500,26 @@ class SmartTrainer:
         self.plot_training_history()
     
     def _circular_training(self):
-        """Circular training through dataset."""
+        """Circular training for small datasets."""
         print("🔄 Starting circular training...")
-        
-        max_epochs = self.training_config['max_circular_epochs']
-        original_epochs = self.training_config['num_train_epochs']
-        
-        for cycle in range(max_epochs):
-            print(f"\n🔁 Circular training cycle {cycle + 1}/{max_epochs}")
-            if cycle > 0:
-                print(f"   Continuing from previous weights (not starting fresh)")
-            
-            # Train for one epoch
-            self.trainer.args.num_train_epochs = 1
-            
-            # Reset trainer state for new cycle
-            if cycle > 0:
-                # Only reset epoch counter, keep global_step for continuous logging
-                self.trainer.state.epoch = 0
-                # Keep global_step to maintain continuous statistics in TensorBoard
-                # self.trainer.state.global_step = 0
-                
-                # Clear GPU memory before starting new cycle with increased batch size
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                    torch.cuda.synchronize()
-                
-            try:
-                self.trainer.train()
-            except torch.cuda.OutOfMemoryError as e:
-                print(f"\n⚠️  CUDA Out of Memory Error!")
-                print(f"   Current batch size: {self.trainer.args.per_device_train_batch_size}")
-                
-                # Try to recover by reducing batch size
-                if self.trainer.args.per_device_train_batch_size > 1:
-                    new_batch_size = max(1, self.trainer.args.per_device_train_batch_size // 2)
-                    print(f"   Reducing batch size to {new_batch_size} and retrying...")
-                    
-                    # Clear GPU memory
-                    import torch
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                        torch.cuda.synchronize()
-                    
-                    # Update batch size
-                    self.trainer.args.per_device_train_batch_size = new_batch_size
-                    
-                    # Adjust gradient accumulation to maintain effective batch size
-                    old_effective = self.trainer.args.per_device_train_batch_size * self.trainer.args.gradient_accumulation_steps
-                    self.trainer.args.gradient_accumulation_steps = max(1, old_effective // new_batch_size)
-                    
-                    print(f"   New gradient accumulation steps: {self.trainer.args.gradient_accumulation_steps}")
-                    print(f"   Effective batch size: {new_batch_size * self.trainer.args.gradient_accumulation_steps}")
-                    
-                    # Retry training
-                    self.trainer.train()
-                else:
-                    print("   Batch size already at 1, cannot reduce further.")
-                    print("   Try: --batch-size 1 --max-seq-length 512 --use-8bit")
-                    raise e
-            
-            # Evaluate after each cycle
-            print(f"\n📊 Evaluating cycle {cycle + 1}...")
-            eval_results = self.trainer.evaluate()
-            
-            # Extract validation loss
-            val_loss = eval_results.get('eval_loss', float('inf'))
-            print(f"   Validation loss: {val_loss:.4f}")
-            
-            # Track best model across all cycles
-            if not hasattr(self, '_best_val_loss_global'):
-                self._best_val_loss_global = float('inf')
-                self._best_cycle = -1
-            
-            if val_loss < self._best_val_loss_global:
-                self._best_val_loss_global = val_loss
-                self._best_cycle = cycle + 1
-                print(f"   🎯 New best validation loss! Saving best model...")
-                
-                # Save best model
-                best_path = self.output_dir / "best"
-                best_path.mkdir(parents=True, exist_ok=True)
-                self.model.save_pretrained(best_path)
-                self.tokenizer.save_pretrained(best_path)
-                
-                # Save training state
-                state = {
-                    'best_val_loss': val_loss,
-                    'best_cycle': cycle + 1,
-                    'current_cycle': cycle + 1,
-                    'global_step': self.trainer.state.global_step,
-                    'train_loss': self.trainer.state.log_history[-1].get('loss', 'N/A') if self.trainer.state.log_history else 'N/A'
-                }
-                with open(best_path / "training_state.json", 'w') as f:
-                    json.dump(state, f, indent=2)
-            else:
-                print(f"   Current best: {self._best_val_loss_global:.4f} (cycle {self._best_cycle})")
-            
-            # Save checkpoint after each cycle
-            checkpoint_path = self.output_dir / "checkpoints" / f"checkpoint-cycle-{cycle + 1}"
-            self.trainer.save_model(str(checkpoint_path))
-            print(f"💾 Saved checkpoint for cycle {cycle + 1} at {checkpoint_path}")
-            
-            # Check if should stop
-            if hasattr(self.trainer.state, 'should_training_stop') and self.trainer.state.should_training_stop:
-                print("Training stopped by callback")
-                break
-            
-            # Early stopping based on validation loss
-            if self.training_config.get('early_stopping', True) and cycle >= self.training_config.get('min_evaluations', 5) - 1:
-                # Track validation losses for patience
-                if not hasattr(self, '_val_losses_history'):
-                    self._val_losses_history = []
-                self._val_losses_history.append(val_loss)
-                
-                # Check if we should stop
-                patience = self.training_config.get('patience', 3)
-                if len(self._val_losses_history) > patience:
-                    # Check if validation loss hasn't improved in 'patience' cycles
-                    recent_losses = self._val_losses_history[-patience:]
-                    best_recent = min(recent_losses)
-                    
-                    # Also check for overfitting
-                    train_loss = self.trainer.state.log_history[-1].get('loss', 0) if self.trainer.state.log_history else 0
-                    overfitting_threshold = self.training_config.get('overfitting_threshold', 0.1)
-                    is_overfitting = (val_loss - train_loss) > overfitting_threshold
-                    
-                    if best_recent >= self._best_val_loss_global and not is_overfitting:
-                        print(f"\n⏹️  Early stopping: validation loss hasn't improved in {patience} cycles")
-                        print(f"   Best validation loss: {self._best_val_loss_global:.4f} (cycle {self._best_cycle})")
-                        break
-                    elif is_overfitting:
-                        print(f"\n⚠️  Potential overfitting detected (val_loss - train_loss = {val_loss - train_loss:.4f})")
-                        # Don't stop immediately on overfitting, just warn
-            
-            # Check for perfect loss - adjust threshold based on task type
-            if self.training_config.get('early_stop_on_perfect', True) and not self.training_config.get('force_epochs', False):
-                # Different thresholds for different tasks
-                dataset_format = self.training_config.get('dataset_format', 'auto')
-                if dataset_format in ['text', 'completion'] or 'language-model' in self.training_config.get('model_type', ''):
-                    perfect_threshold = 0.5  # More realistic for text generation
-                else:
-                    perfect_threshold = 0.01  # Strict for QA/instruction tasks
-                
-                if self.metrics.train_losses and self.metrics.train_losses[-1] < perfect_threshold:
-                    print(f"✨ Excellent loss achieved ({self.metrics.train_losses[-1]:.4f})! Stopping...")
-                    break
-            
-            # Increase batch size for next cycle
-            if cycle < max_epochs - 1:
-                multiplier = self.training_config.get('circular_batch_multiplier', 1.0)
-                current_batch_size = self.trainer.args.per_device_train_batch_size
-                
-                # Skip if multiplier is 1.0 (no change)
-                if multiplier == 1.0:
-                    continue
-                
-                # Check available GPU memory before increasing
-                import torch
-                if torch.cuda.is_available():
-                    # Get memory stats
-                    allocated = torch.cuda.memory_allocated() / 1024**3  # GB
-                    reserved = torch.cuda.memory_reserved() / 1024**3  # GB
-                    total = torch.cuda.get_device_properties(0).total_memory / 1024**3  # GB
-                    free = total - allocated
-                    
-                    # Only increase if we have enough free memory (at least 3GB free)
-                    if free < 3.0:
-                        print(f"⚠️  Low GPU memory ({free:.1f}GB free), keeping batch size at {current_batch_size}")
-                    else:
-                        # If multiplier is between 0 and 2 (exclusive), treat as increment
-                        if 0 < multiplier < 2:
-                            new_batch_size = current_batch_size + int(multiplier)
-                        else:
-                            # Otherwise treat as multiplier
-                            new_batch_size = int(current_batch_size * multiplier)
-                        
-                        # Apply max batch size limit
-                        new_batch_size = min(new_batch_size, 32)
-                        
-                        if new_batch_size != current_batch_size:
-                            self.trainer.args.per_device_train_batch_size = new_batch_size
-                            self.trainer.args.per_device_eval_batch_size = new_batch_size
-                            print(f"📈 Increased batch size to {new_batch_size}")
-                else:
-                    # CPU training - be more conservative
-                    if 0 < multiplier < 2:
-                        new_batch_size = current_batch_size + int(multiplier)
-                    else:
-                        new_batch_size = int(current_batch_size * multiplier)
-                    
-                    new_batch_size = min(new_batch_size, 8)  # Lower max for CPU
-                    
-                    if new_batch_size != current_batch_size:
-                        self.trainer.args.per_device_train_batch_size = new_batch_size
-                        self.trainer.args.per_device_eval_batch_size = new_batch_size
-                        print(f"📈 Increased batch size to {new_batch_size}")
-        
-        # Save final model
-        self.save_final_model()
-        
-        # Print summary for circular training
-        if hasattr(self, '_best_val_loss_global'):
-            print(f"\n🏆 Best model from cycle {self._best_cycle} with validation loss: {self._best_val_loss_global:.4f}")
-            print(f"   Best model saved in: {self.output_dir}/best/")
-        
-        # Plot training history
-        self.plot_training_history()
+        print("   This mode is for small datasets. The dataset will be repeated.")
+        print("   Training will run for a large number of steps and stop automatically when the model converges.")
+
+        # Set a large number of epochs and let the auto-stop callback handle termination
+        self.trainer.args.num_train_epochs = self.training_config.get('max_circular_epochs', 100)
+        self.trainer.args.logging_first_step = True
+        self.trainer.args.logging_strategy = "steps"
+        self.trainer.args.evaluation_strategy = "steps"
+        self.trainer.args.save_strategy = "steps"
+
+        # Use a smaller evaluation frequency for circular training
+        self.trainer.args.eval_steps = self.training_config.get('eval_steps', 20)
+        self.trainer.args.save_steps = self.trainer.args.eval_steps
+
+        print(f"   Training for up to {self.trainer.args.num_train_epochs} cycles (epochs).")
+        print(f"   Evaluating every {self.trainer.args.eval_steps} steps.")
+
+        self._standard_training()
     
     def save_best_model(self):
         """Save best model."""
@@ -1233,166 +1045,124 @@ def main():
     """Main training function."""
     parser = argparse.ArgumentParser(description="Universal Fine-tune model with LoRA")
     
-    # Required arguments
-    parser.add_argument("--data", type=str, required=True,
-                       help="Path to training data (file or directory)")
+    # Add config file argument first
+    parser.add_argument("--config", type=str, default=None,
+                       help="Path to a YAML configuration file.")
     
-    # Optional arguments
-    parser.add_argument("--output", type=str, default="./lora",
-                       help="Output directory for LoRA adapter")
-    parser.add_argument("--model-path", type=str, default="./model",
-                       help="Path to base model")
+    # All other arguments are optional if a config file is provided
+    parser.add_argument("--data", type=str, help="Path to training data (file or directory)")
+    parser.add_argument("--output", type=str, help="Output directory for LoRA adapter")
+    parser.add_argument("--model-path", type=str, default="./model", help="Path to base model")
     
     # Training mode
-    parser.add_argument("--mode", type=str, default="balanced",
+    parser.add_argument("--mode", type=str,
                        choices=["slow", "medium", "fast", "circle", "non-stop", "adaptive",
                                 "quick", "balanced", "quality"],
                        help="Training mode (quick/balanced/quality or legacy names)")
-    parser.add_argument("--method", type=str, default="lora",
-                       choices=["lora", "qlora"],
-                       help="Training method")
+    parser.add_argument("--method", type=str, choices=["lora", "qlora"], help="Training method")
     
     # Training parameters
-    parser.add_argument("--epochs", type=int, default=None,
-                       help="Number of epochs (overrides mode default)")
-    parser.add_argument("--batch-size", type=int, default=None,
-                       help="Batch size (auto-detected if not set)")
-    parser.add_argument("--learning-rate", type=float, default=None,
-                       help="Learning rate (auto-detected if not set)")
-    parser.add_argument("--lora-r", type=int, default=None,
-                       help="LoRA rank (auto-detected if not set)")
-    parser.add_argument("--lora-alpha", type=int, default=None,
-                       help="LoRA alpha (default: 2*r)")
-    parser.add_argument("--target-modules", type=str, default=None,
-                       help="Comma-separated list of target modules (auto-detected if not set)")
+    parser.add_argument("--epochs", type=int, help="Number of epochs")
+    parser.add_argument("--batch-size", type=int, help="Batch size")
+    parser.add_argument("--learning-rate", type=float, help="Learning rate")
+    parser.add_argument("--lora-r", type=int, help="LoRA rank")
+    parser.add_argument("--lora-alpha", type=int, help="LoRA alpha")
+    parser.add_argument("--target-modules", type=str, help="Comma-separated list of target modules")
     
     # Data parameters
-    parser.add_argument("--max-examples", type=int, default=0,
-                       help="Maximum training examples (0 = all)")
-    parser.add_argument("--validation-split", type=float, default=0.1,
-                       help="Validation split ratio")
-    parser.add_argument("--max-seq-length", type=int, default=None,
-                       help="Maximum sequence length")
-    parser.add_argument("--dataset-format", type=str, default="auto",
-                       help="Dataset format (auto, alpaca, chat, etc.)")
+    parser.add_argument("--max-examples", type=int, help="Maximum training examples")
+    parser.add_argument("--validation-split", type=float, help="Validation split ratio")
+    parser.add_argument("--max-seq-length", type=int, help="Maximum sequence length")
+    parser.add_argument("--dataset-format", type=str, help="Dataset format")
     
     # Circular training
-    parser.add_argument("--circular", action="store_true",
-                       help="Enable circular training")
-    parser.add_argument("--max-circular-epochs", type=int, default=100,
-                       help="Maximum circular epochs")
-    parser.add_argument("--circular-batch-multiplier", type=float, default=1.0,
-                       help="Batch size multiplier per cycle (1.0=no change, 0<x<2=increment by x, >=2=multiply by x)")
+    parser.add_argument("--circular", action="store_true", help="Enable circular training")
+    parser.add_argument("--max-circular-epochs", type=int, help="Maximum circular epochs")
+    parser.add_argument("--circular-batch-multiplier", type=float, help="Batch size multiplier per cycle")
     
     # Resume training
-    parser.add_argument("--resume", action="store_true",
-                       help="Resume from last checkpoint")
-    parser.add_argument("--resume-from", type=str, default=None,
-                       help="Resume from specific checkpoint")
+    parser.add_argument("--resume", action="store_true", help="Resume from last checkpoint")
+    parser.add_argument("--resume-from", type=str, help="Resume from specific checkpoint")
     
     # Auto-stop parameters
-    parser.add_argument("--patience", type=int, default=3,
-                       help="Early stopping patience")
-    parser.add_argument("--overfitting-threshold", type=float, default=0.1,
-                       help="Overfitting detection threshold")
+    parser.add_argument("--patience", type=int, help="Early stopping patience")
+    parser.add_argument("--overfitting-threshold", type=float, help="Overfitting detection threshold")
     
     # Hardware parameters
-    parser.add_argument("--device", type=str, default="auto",
-                       help="Device (auto/cuda/cpu)")
-    parser.add_argument("--dtype", type=str, default="auto",
-                       help="Data type (auto/float16/bfloat16/float32)")
-    parser.add_argument("--use-8bit", action="store_true",
-                       help="Use 8-bit quantization")
-    parser.add_argument("--use-4bit", action="store_true",
-                       help="Use 4-bit quantization")
+    parser.add_argument("--device", type=str, help="Device (auto/cuda/cpu)")
+    parser.add_argument("--dtype", type=str, help="Data type (auto/float16/bfloat16/float32)")
+    parser.add_argument("--use-8bit", action="store_true", help="Use 8-bit quantization")
+    parser.add_argument("--use-4bit", action="store_true", help="Use 4-bit quantization")
     
     # Other parameters
-    parser.add_argument("--test-prompt", type=str, 
-                       default="Hello, how are you?",
-                       help="Test prompt after training")
-    parser.add_argument("--skip-test", action="store_true",
-                       help="Skip testing after training")
-    parser.add_argument("--seed", type=int, default=42,
-                       help="Random seed")
-    parser.add_argument("--force-epochs", action="store_true",
-                       help="Force training for specified epochs, ignore auto-stop")
+    parser.add_argument("--test-prompt", type=str, help="Test prompt after training")
+    parser.add_argument("--skip-test", action="store_true", help="Skip testing after training")
+    parser.add_argument("--seed", type=int, help="Random seed")
+    parser.add_argument("--force-epochs", action="store_true", help="Force training for specified epochs")
     
     args = parser.parse_args()
     
-    # Set random seed
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
+    # Load from config file if provided
+    config_data = {}
+    if args.config:
+        import yaml
+        with open(args.config, 'r') as f:
+            config_data = yaml.safe_load(f)
     
-    # Load model info - check both locations
-    model_info_path = Path("model_info.json")
+    # Create a dictionary of command-line arguments that were explicitly set
+    # We filter out arguments with value None or False (for action='store_true')
+    cli_args = {k: v for k, v in vars(args).items() if v is not None and v is not False and k != 'config'}
+
+    # Merge configurations: command-line arguments override config file
+    final_config = {**config_data, **cli_args}
+
+    # Check for required 'data' argument
+    if 'data' not in final_config or not final_config['data']:
+        raise ValueError("The --data argument is required, either in the config file or on the command line.")
+
+    # Set random seed
+    torch.manual_seed(final_config.get('seed', 42))
+    np.random.seed(final_config.get('seed', 42))
+    
+    # Load model info
+    model_path = final_config.get('model_path', './model')
+    model_info_path = Path(model_path) / "model_info.json"
     if not model_info_path.exists():
-        # Try in model subdirectory
-        model_info_path = Path(args.model_path) / "model_info.json"
+        model_info_path = Path("model_info.json") # Check current dir as fallback
         if not model_info_path.exists():
-            raise FileNotFoundError(f"Model info not found in current directory or {model_info_path}")
+            raise FileNotFoundError(f"model_info.json not found in {model_path} or current directory.")
     
     with open(model_info_path, 'r') as f:
         model_info = json.load(f)
     
     # Map new mode names to legacy names
-    mode_mapping = {
-        'quick': 'fast',
-        'balanced': 'medium',
-        'quality': 'slow'
-    }
-    if args.mode in mode_mapping:
-        args.mode = mode_mapping[args.mode]
+    mode_mapping = {'quick': 'fast', 'balanced': 'medium', 'quality': 'slow'}
+    current_mode = final_config.get('mode', 'balanced')
+    if current_mode in mode_mapping:
+        final_config['mode'] = mode_mapping[current_mode]
     
     # Create training config
     from training_config import TrainingConfig
     
-    config_kwargs = {
-        'training_mode': args.mode,
-        'method': args.method,
-        'output_dir': args.output,
-        'circular_training': args.circular,
-        'max_circular_epochs': args.max_circular_epochs,
-        'circular_batch_multiplier': args.circular_batch_multiplier,
-        'patience': args.patience,
-        'overfitting_threshold': args.overfitting_threshold,
-        'device': args.device,
-        'dtype': args.dtype,
-        'use_8bit': args.use_8bit,
-        'use_4bit': args.use_4bit or args.method == 'qlora',
-        'max_examples': args.max_examples if args.max_examples > 0 else None,
-        'validation_split': args.validation_split,
-        'dataset_format': args.dataset_format,
-        'model_id': model_info.get('model_id', 'unknown'),
-        'force_epochs': args.force_epochs,
-    }
-    
-    # Add explicit parameters if provided
-    if args.epochs is not None:
-        config_kwargs['num_train_epochs'] = args.epochs
-    if args.batch_size is not None:
-        config_kwargs['batch_size'] = args.batch_size
-    if args.learning_rate is not None:
-        config_kwargs['learning_rate'] = args.learning_rate
-    if args.lora_r is not None:
-        config_kwargs['lora_r'] = args.lora_r
-    if args.lora_alpha is not None:
-        config_kwargs['lora_alpha'] = args.lora_alpha
-    if args.target_modules is not None:
-        # Convert comma-separated string to list
-        config_kwargs['target_modules'] = [m.strip() for m in args.target_modules.split(',')]
-    if args.max_seq_length is not None:
-        config_kwargs['max_seq_length'] = args.max_seq_length
-    if args.resume_from:
-        config_kwargs['resume_from_checkpoint'] = args.resume_from
-    elif args.resume:
-        # Find last checkpoint
-        checkpoint_dir = Path(args.output) / "checkpoints"
+    # Prepare kwargs for TrainingConfig
+    config_kwargs = final_config.copy()
+    config_kwargs['training_mode'] = final_config.get('mode', 'balanced')
+    config_kwargs['num_train_epochs'] = final_config.get('epochs')
+    config_kwargs['use_4bit'] = final_config.get('use_4bit') or final_config.get('method') == 'qlora'
+    config_kwargs['model_id'] = model_info.get('model_id', 'unknown')
+
+    if 'target_modules' in config_kwargs and isinstance(config_kwargs['target_modules'], str):
+        config_kwargs['target_modules'] = [m.strip() for m in config_kwargs['target_modules'].split(',')]
+
+    if final_config.get('resume') and not final_config.get('resume_from'):
+        checkpoint_dir = Path(final_config.get('output', './lora')) / "checkpoints"
         if checkpoint_dir.exists():
             checkpoints = sorted(checkpoint_dir.glob("checkpoint-*"))
             if checkpoints:
                 config_kwargs['resume_from_checkpoint'] = str(checkpoints[-1])
-    
+
     training_config = TrainingConfig.from_model_info(model_info, **config_kwargs)
+
     
     # Print configuration
     print("\n" + "="*60)

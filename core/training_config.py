@@ -113,9 +113,7 @@ class TrainingConfig:
         if self.lora_alpha is None:
             self.lora_alpha = self.lora_r * 2
         
-        # Target modules based on model family
-        if self.target_modules is None:
-            self.target_modules = self._get_target_modules()
+        # Target modules are now detected dynamically in train_lora.py based on the model's architecture.
         
         # Learning rate based on model size and training mode
         if self.learning_rate is None:
@@ -164,38 +162,7 @@ class TrainingConfig:
         else:
             return 256
     
-    def _get_target_modules(self) -> List[str]:
-        """Get target modules for LoRA based on model family."""
-        # Common patterns for different model families
-        module_patterns = {
-            "llama": ["q_proj", "v_proj", "k_proj", "o_proj"],
-            "llama4": ["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-            "mistral": ["q_proj", "v_proj", "k_proj", "o_proj"],
-            "gemma": ["q_proj", "v_proj", "k_proj", "o_proj"],
-            "gemma3": ["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-            "qwen": ["q_proj", "v_proj", "k_proj", "o_proj"],
-            "qwen3": ["q_proj", "v_proj", "k_proj", "o_proj"],
-            "phi": ["q_proj", "v_proj", "k_proj", "o_proj", "dense"],
-            "gpt": ["c_attn", "c_proj"],
-            "bert": ["query", "value"],
-            "t5": ["q", "v"],
-            "default": ["q_proj", "v_proj"]  # Safe default
-        }
-        
-        # Try exact match first
-        if self.model_family in module_patterns:
-            return module_patterns[self.model_family]
-        
-        # Try model type
-        if self.model_type in module_patterns:
-            return module_patterns[self.model_type]
-        
-        # Check for partial matches
-        for key, modules in module_patterns.items():
-            if key in self.model_family.lower() or key in self.model_type.lower():
-                return modules
-        
-        return module_patterns["default"]
+    
     
     def _get_optimal_learning_rate(self) -> float:
         """Get optimal learning rate based on model size and training mode."""
@@ -241,32 +208,38 @@ class TrainingConfig:
         return lr
     
     def _get_optimal_batch_size(self) -> int:
-        """Get optimal batch size based on model size and quantization."""
-        # Conservative batch sizes for 16GB GPU
+        """Get optimal batch size based on available VRAM and model size."""
+        try:
+            import torch
+            if torch.cuda.is_available():
+                vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                # Heuristic: Allow for ~2GB of overhead
+                available_vram = vram_gb - 2
+                
+                # Estimate memory per batch item
+                # These are rough estimates and can be refined
+                if self.use_4bit:
+                    mem_per_item = self.model_size_gb / 4
+                elif self.use_8bit:
+                    mem_per_item = self.model_size_gb / 2
+                else:
+                    mem_per_item = self.model_size_gb * 1.2 # FP16/BF16
+                
+                if mem_per_item > 0:
+                    # Calculate batch size, with a minimum of 1
+                    batch_size = max(1, int(available_vram // mem_per_item))
+                    # Clamp to a reasonable maximum to prevent instability
+                    return min(batch_size, 16)
+        except Exception as e:
+            logger.warning(f"Could not dynamically determine batch size due to: {e}")
+
+        # Fallback to original logic if dynamic detection fails
         if self.use_4bit:
-            # 4-bit quantization allows larger batches
-            if self.model_size_gb < 2:
-                return 4
-            elif self.model_size_gb < 7:
-                return 2
-            else:
-                return 1
+            return 2 if self.model_size_gb < 7 else 1
         elif self.use_8bit:
-            # 8-bit quantization
-            if self.model_size_gb < 2:
-                return 2
-            elif self.model_size_gb < 7:
-                return 1
-            else:
-                return 1
+            return 1
         else:
-            # Full precision - very conservative
-            if self.model_size_gb < 1:
-                return 2
-            elif self.model_size_gb < 3:
-                return 1
-            else:
-                return 1
+            return 1
     
     def _get_gradient_accumulation_steps(self) -> int:
         """Get gradient accumulation steps for effective batch size."""

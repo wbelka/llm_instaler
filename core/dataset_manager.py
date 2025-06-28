@@ -711,38 +711,36 @@ class DatasetManager:
     def prepare_for_model(self, data: List[Dict], tokenizer: Any) -> List[Dict]:
         """Prepare data for specific model type using tokenizer."""
         prepared = []
-        
+        has_chat_template = hasattr(tokenizer, 'apply_chat_template')
+
         for item in data:
+            messages = []
             if 'messages' in item:
-                # Multi-turn conversation
-                text = tokenizer.apply_chat_template(
-                    item['messages'],
-                    tokenize=False,
-                    add_generation_prompt=False
-                )
-                prepared.append({'text': text})
-            
+                messages = item['messages']
             elif 'prompt' in item and 'completion' in item:
-                # Prompt-completion pairs
-                if hasattr(tokenizer, 'apply_chat_template'):
-                    # Use chat template if available
-                    messages = [
-                        {'role': 'user', 'content': item['prompt']},
-                        {'role': 'assistant', 'content': item['completion']}
-                    ]
+                messages = [
+                    {'role': 'user', 'content': item['prompt']},
+                    {'role': 'assistant', 'content': item['completion']}
+                ]
+            
+            if messages and has_chat_template:
+                try:
                     text = tokenizer.apply_chat_template(
                         messages,
                         tokenize=False,
                         add_generation_prompt=False
                     )
-                else:
-                    # Simple concatenation
-                    text = f"{item['prompt']}\n{item['completion']}"
-                
-                prepared.append({'text': text})
-            
+                    prepared.append({'text': text})
+                except Exception as e:
+                    logger.warning(f"Could not apply chat template: {e}. Falling back to simple concatenation.")
+                    # Fallback for misconfigured templates
+                    text = "\n".join([msg['content'] for msg in messages])
+                    prepared.append({'text': text})
+            elif 'text' in item:
+                 prepared.append(item)
             else:
-                # Fallback
-                prepared.append(item)
+                # Fallback for other formats
+                text = "\n".join(str(v) for v in item.values())
+                prepared.append({'text': text})
         
         return prepared

@@ -1,0 +1,94 @@
+# Example Training Configuration for LLM Installer
+#
+# Usage: ./train.sh --config my_training_config.yaml
+#
+# Any command-line argument will override the settings in this file.
+
+#-------------------------------------------------------------------------------
+# TRAINING MODE
+#
+# Defines the overall training strategy.
+# - quick: Fastest training, suitable for quick checks. Lower quality.
+# - balanced: A good balance between training speed and model quality. (Default)
+# - quality: Slowest training, aims for the best possible model quality.
+#-------------------------------------------------------------------------------
+mode: balanced
+
+#-------------------------------------------------------------------------------
+# METHOD & QUANTIZATION
+#
+# - method: lora or qlora
+# - use_4bit / use_8bit: Enable quantization for memory savings.
+#   Using use_4bit automatically enables the 'qlora' method.
+#-------------------------------------------------------------------------------
+method: lora
+use_4bit: false
+use_8bit: false
+
+#-------------------------------------------------------------------------------
+# DATASET PARAMETERS
+#
+# - data: Path to the dataset. Can be a file, a directory, or a glob pattern.
+#         This is the only parameter that MUST be specified, either here or
+#         on the command line.
+# - dataset_format: Format of the data. 'auto' is recommended.
+# - max_seq_length: Maximum sequence length for training. Auto-detected by default.
+# - validation_split: Percentage of data to use for validation.
+#-------------------------------------------------------------------------------
+data: "" # REQUIRED: e.g., "dataset.json" or "data/*.jsonl"
+dataset_format: "auto"
+max_seq_length: null # null for auto-detection
+validation_split: 0.1
+
+#-------------------------------------------------------------------------------
+# CORE TRAINING PARAMETERS
+#
+# These are usually auto-detected based on the mode and model size.
+# Only set them if you want to override the automatic values.
+#-------------------------------------------------------------------------------
+epochs: null
+batch_size: null
+learning_rate: null
+
+#-------------------------------------------------------------------------------
+# LORA PARAMETERS
+#
+# - lora_r: The rank of the LoRA update matrices.
+# - lora_alpha: The scaling factor for LoRA.
+# - target_modules: Layers to apply LoRA to.
+#   All are auto-detected by default.
+#-------------------------------------------------------------------------------
+lora_r: null
+lora_alpha: null
+target_modules: null # e.g., ["q_proj", "v_proj"]
+
+#-------------------------------------------------------------------------------
+# AUTO-STOP & EARLY STOPPING
+#
+# The trainer automatically stops when the model stops improving.
+# - force_epochs: Set to true to disable auto-stop and train for the full epochs.
+# - patience: How many evaluations with no improvement to wait before stopping.
+# - overfitting_threshold: The maximum allowed gap between training and validation loss.
+#-------------------------------------------------------------------------------
+force_epochs: false
+patience: 3
+overfitting_threshold: 0.15
+
+#-------------------------------------------------------------------------------
+# CIRCULAR TRAINING (for small datasets)
+#
+# Repeats the dataset to allow for more training steps.
+# Recommended for datasets with fewer than 1000 examples.
+#-------------------------------------------------------------------------------
+circular: false
+max_circular_epochs: 100
+
+#-------------------------------------------------------------------------------
+# OUTPUT & RESUME
+#
+# - output: Directory to save the LoRA adapter and logs.
+# - resume: Set to true to resume from the last checkpoint in the output dir.
+#-------------------------------------------------------------------------------
+output: "./lora"
+resume: false
+
