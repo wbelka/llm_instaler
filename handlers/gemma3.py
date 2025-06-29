@@ -206,10 +206,15 @@ class Gemma3Handler(MultimodalHandler):
         try:
             from transformers import (
                 AutoProcessor,
-                Gemma3ForConditionalGeneration,
                 BitsAndBytesConfig
             )
             import torch
+            
+            # Import the correct model class based on model type
+            if '3n' in self.model_id.lower():
+                from transformers import Gemma3nForConditionalGeneration as ModelClass
+            else:
+                from transformers import Gemma3ForConditionalGeneration as ModelClass
 
             # Load processor with use_fast=True to avoid warning
             processor = AutoProcessor.from_pretrained(model_path, use_fast=True)
@@ -279,16 +284,16 @@ class Gemma3Handler(MultimodalHandler):
             if not (load_in_8bit or load_in_4bit):
                 try:
                     model_kwargs['attn_implementation'] = 'flash_attention_2'
-                    model = Gemma3ForConditionalGeneration.from_pretrained(**model_kwargs)
+                    model = ModelClass.from_pretrained(**model_kwargs)
                     logger.info("Using Flash Attention 2 for better performance")
                 except Exception:
                     # Fallback to standard attention
                     model_kwargs.pop('attn_implementation', None)
-                    model = Gemma3ForConditionalGeneration.from_pretrained(**model_kwargs)
+                    model = ModelClass.from_pretrained(**model_kwargs)
                     logger.info("Using standard attention implementation")
             else:
                 # For quantized models, use standard attention
-                model = Gemma3ForConditionalGeneration.from_pretrained(**model_kwargs)
+                model = ModelClass.from_pretrained(**model_kwargs)
                 logger.info("Using standard attention implementation (quantized model)")
 
             # Move to device if not using device_map='auto'
