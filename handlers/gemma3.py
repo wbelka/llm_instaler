@@ -347,7 +347,11 @@ class Gemma3Handler(MultimodalHandler):
         Returns:
             Dictionary of inference parameters.
         """
-        return {
+        model_id_lower = self.model_id.lower()
+        is_gemma3n = '3n' in model_id_lower
+        
+        # Default parameters based on model variant
+        params = {
             'temperature': 0.7,
             'max_new_tokens': 2048,
             'do_sample': True,
@@ -356,6 +360,12 @@ class Gemma3Handler(MultimodalHandler):
             'repetition_penalty': 1.1,
             'use_cache': True
         }
+        
+        # Adjust for Gemma-3n if needed
+        if is_gemma3n:
+            params['max_new_tokens'] = 32768  # Can generate up to 32K tokens
+            
+        return params
 
     def get_model_capabilities(self) -> Dict[str, Any]:
         """Get Gemma 3 model capabilities.
@@ -365,11 +375,19 @@ class Gemma3Handler(MultimodalHandler):
         """
         model_id_lower = self.model_id.lower()
 
-        # Base context length depends on model size
-        if '1b' in model_id_lower:
+        # Check if this is a Gemma 3n model
+        is_gemma3n = '3n' in model_id_lower
+        
+        # Base context length depends on model variant
+        if is_gemma3n:
+            max_context = 32768  # 32K for Gemma 3n models
+            max_output = 32768  # 32K output (minus input tokens)
+        elif '1b' in model_id_lower:
             max_context = 32768  # 32K for 1B
+            max_output = 8192
         else:
             max_context = 131072  # 128K for 4B, 12B, 27B
+            max_output = 8192
 
         capabilities = {
             'stream': True,  # Changed from 'supports_streaming' to match serve_api.py
@@ -379,23 +397,33 @@ class Gemma3Handler(MultimodalHandler):
             'supports_multimodal': True,
             'supports_batch_inference': True,
             'max_context_length': max_context,
-            'max_output_length': 8192,
+            'max_output_length': max_output,
             'input_modalities': ['text', 'image', 'audio', 'video'], # Added audio and video
             'output_modalities': ['text'],
             'supports_multiple_images': True,  # Can handle multiple images
-            'image_resolution': 896,  # Images normalized to 896x896
+            'image_resolutions': [256, 512, 768] if is_gemma3n else [896],  # Gemma 3n supports specific resolutions
             'image_tokens_per_image': 256,  # Each image encoded to 256 tokens
+            'audio_tokens_per_second': 6.25 if is_gemma3n else None,  # Gemma 3n: 6.25 tokens/sec
             'supports_multilingual': True,
             'supported_languages': 140,  # Supports over 140 languages
             'chat_template': 'gemma3',  # Uses specific Gemma 3 chat template
             'special_features': [
-                'Long context window (up to 128K tokens)',
+                f'Context window: {max_context} tokens',
                 'Multilingual support (140+ languages)',
                 'Efficient image encoding (256 tokens per image)',
                 'Optimized for both single and multi-turn conversations',
                 'Audio and video input support' # Added feature
             ]
         }
+        
+        # Add Gemma-3n specific features
+        if is_gemma3n:
+            capabilities['special_features'].extend([
+                'Selective parameter activation (2B/4B effective params)',
+                'Optimized for low-resource devices',
+                'Audio encoding: 6.25 tokens per second',
+                'Multiple image resolutions: 256x256, 512x512, 768x768'
+            ])
 
         return capabilities
 
