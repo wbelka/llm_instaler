@@ -1079,7 +1079,7 @@ class Gemma3Handler(MultimodalHandler):
         return params
     
     async def generate_stream(self, prompt: str = None, messages: List[Dict[str, str]] = None,
-                              model=None, tokenizer=None, processor=None, **kwargs):
+                              model=None, tokenizer=None, processor=None, images=None, **kwargs):
         """Stream text generation for Gemma 3 models.
         
         This is an async generator that yields chunks of generated text.
@@ -1117,6 +1117,30 @@ class Gemma3Handler(MultimodalHandler):
                 messages = [{"role": "user", "content": prompt}]
             elif not messages:
                 raise ValueError("Either prompt or messages must be provided")
+            
+            # Check if this is multimodal request
+            is_multimodal = images is not None and len(images) > 0
+            
+            if is_multimodal:
+                # For multimodal, delegate to process_multimodal
+                logger.info(f"[STREAM] Detected multimodal request with {len(images)} images")
+                result = self.process_multimodal(
+                    text=prompt,
+                    images=images,
+                    model=model,
+                    processor=processor or tokenizer,
+                    messages=messages,
+                    **kwargs
+                )
+                # Convert single response to streaming format
+                yield {
+                    "type": "text",
+                    "token": result.get('text', ''),
+                    "text": result.get('text', ''),
+                    "finished": True,
+                    "usage": result.get('usage', {})
+                }
+                return
             
             # For text-only streaming, convert messages to proper format
             processed_messages = []

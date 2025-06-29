@@ -644,6 +644,23 @@ async def generate_stream(request: SecureGenerateRequest):
     if not MODEL:
         raise HTTPException(status_code=503, detail="Model not loaded yet. Please try again shortly.")
     
+    # Log request for debugging (without sensitive data)
+    logger.info(f"[STREAM] Processing request: mode={request.mode}, has_prompt={bool(request.prompt)}, "
+               f"has_messages={bool(request.messages)}, has_images={bool(request.images or request.image_data)}")
+    
+    # Debug: Check for images in messages
+    if request.messages:
+        logger.info(f"[STREAM] Number of messages: {len(request.messages)}")
+        for i, msg in enumerate(request.messages):
+            logger.info(f"[STREAM] Message {i}: role={msg.get('role')}, content type={type(msg.get('content'))}")
+            if isinstance(msg.get('content'), list):
+                logger.info(f"[STREAM]   Content has {len(msg.get('content', []))} items")
+                for j, item in enumerate(msg.get('content', [])):
+                    if isinstance(item, dict):
+                        logger.info(f"[STREAM]     Item {j}: type={item.get('type')}")
+                        if item.get('type') == 'image':
+                            logger.info(f"[STREAM]       Image found! Keys: {list(item.keys())}")
+    
     # Check if the handler supports streaming before proceeding
     if HANDLER and not HANDLER.get_model_capabilities().get("stream", False):
          raise HTTPException(
@@ -668,9 +685,17 @@ async def generate_stream(request: SecureGenerateRequest):
             elif request.prompt:
                 messages = [{"role": "user", "content": request.prompt}]
 
+            # Extract images from request
+            images = []
+            if request.image_data:
+                images.append(request.image_data)
+            if request.images:
+                images.extend(request.images)
+            
             # Use handler's streaming method if available (preferred)
             if HANDLER and hasattr(HANDLER, 'generate_stream'):
                 logger.info("Using handler's unified generate_stream method")
+                logger.info(f"[STREAM] Passing {len(images)} images to handler")
                 
                 # The handler is now expected to be an async generator yielding dicts
                 async for chunk in HANDLER.generate_stream(
@@ -683,7 +708,8 @@ async def generate_stream(request: SecureGenerateRequest):
                     top_p=request.top_p,
                     top_k=request.top_k,
                     stop_sequences=request.stop_sequences,
-                    mode=request.mode
+                    mode=request.mode,
+                    images=images if images else None
                 ):
                     yield {"data": json.dumps(chunk)}
                     await asyncio.sleep(0.001) # Yield control to the event loop
