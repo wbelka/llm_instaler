@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modern LLM Chat</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+
+        :root {
+            --bg-light: #ffffff;
+            --text-light: #1f2937;
+            --border-light: #e5e7eb;
+            --primary-light: #3b82f6;
+            --user-msg-bg-light: #f3f4f6;
+            --model-msg-bg-light: #ffffff;
+
+            --bg-dark: #111827;
+            --text-dark: #d1d5db;
+            --border-dark: #374151;
+            --primary-dark: #60a5fa;
+            --user-msg-bg-dark: #1f2937;
+            --model-msg-bg-dark: #111827;
+        }
+
+        [data-theme="light"] {
+            --bg-color: var(--bg-light);
+            --text-color: var(--text-light);
+            --border-color: var(--border-light);
+            --primary-color: var(--primary-light);
+            --user-msg-bg: var(--user-msg-bg-light);
+            --model-msg-bg: var(--model-msg-bg-light);
+        }
+
+        [data-theme="dark"] {
+            --bg-color: var(--bg-dark);
+            --text-color: var(--text-dark);
+            --border-color: var(--border-dark);
+            --primary-color: var(--primary-dark);
+            --user-msg-bg: var(--user-msg-bg-dark);
+            --model-msg-bg: var(--model-msg-bg-dark);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        .sidebar {
+            width: 260px;
+            background-color: var(--user-msg-bg);
+            border-right: 1px solid var(--border-color);
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar h1 {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+        }
+
+        .new-chat-btn {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            background: none;
+            color: var(--text-color);
+            font-size: 1rem;
+            cursor: pointer;
+            text-align: left;
+            margin-bottom: 1rem;
+        }
+
+        .sidebar-footer {
+            margin-top: auto;
+        }
+
+        .theme-switcher {
+            width: 100%;
+            padding: 0.75rem;
+            background: none;
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            border-radius: 0.5rem;
+            cursor: pointer;
+        }
+
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .chat-header {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            text-align: center;
+            font-weight: 500;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+        }
+
+        .message {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            max-width: 800px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .message-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background-color: var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+        }
+
+        .message-content {
+            flex: 1;
+            padding-top: 0.5rem;
+        }
+
+        .message.user {
+            background-color: var(--user-msg-bg);
+            padding: 1rem;
+            border-radius: 0.5rem;
+        }
+
+        .message.model .message-content pre {
+            background-color: var(--user-msg-bg);
+            color: var(--text-color);
+            padding: 1rem;
+            border-radius: 0.5rem;
+            overflow-x: auto;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .message.model .message-content code {
+             font-family: 'JetBrains Mono', monospace;
+        }
+
+        .chat-input-area {
+            padding: 1rem;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .input-wrapper {
+            max-width: 800px;
+            margin: 0 auto;
+            position: relative;
+        }
+
+        #chatInput {
+            width: 100%;
+            padding: 1rem;
+            padding-right: 3.5rem;
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-size: 1rem;
+            font-family: inherit;
+        }
+
+        .send-btn {
+            position: absolute;
+            right: 0.5rem;
+            top: 50%;
+            transform: translateY(-50%);
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            width: 32px;
+            height: 32px;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .send-btn.loading {
+            cursor: not-allowed;
+            background-color: #9ca3af;
+        }
+
+        .typing-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background-color: var(--text-color);
+            border-radius: 50%;
+            animation: blink 1.4s infinite both;
+        }
+
+        @keyframes blink {
+            0% { opacity: 0.2; }
+            20% { opacity: 1; }
+            100% { opacity: 0.2; }
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <h1>Modern Chat</h1>
+        <button class="new-chat-btn" onclick="resetSession()">+ New Chat</button>
+        <!-- History can be added here -->
+        <div class="sidebar-footer">
+            <button class="theme-switcher" id="themeSwitcher">Toggle Theme</button>
+        </div>
+    </div>
+
+    <div class="chat-container">
+        <div class="chat-header" id="chatHeader">Loading Model...</div>
+        <div class="chat-messages" id="chatMessages">
+            <!-- Messages will be appended here -->
+        </div>
+        <div class="chat-input-area">
+            <div class="input-wrapper">
+                <input type="text" id="chatInput" placeholder="Ask me anything...">
+                <button class="send-btn" id="sendBtn">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11ZM6.636 10.07l2.761 4.338L14.13 2.576zm6.787-8.201L1.591 6.602l4.339 2.76z"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const chatInput = document.getElementById('chatInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const chatMessages = document.getElementById('chatMessages');
+        const chatHeader = document.getElementById('chatHeader');
+        const themeSwitcher = document.getElementById('themeSwitcher');
+
+        let messages = [];
+        let isProcessing = false;
+        let modelInfo = null;
+
+        // --- THEME ---
+        function applyTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('theme', theme);
+        }
+
+        themeSwitcher.addEventListener('click', () => {
+            const currentTheme = localStorage.getItem('theme') || 'light';
+            const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+            applyTheme(newTheme);
+        });
+
+        // Apply saved theme on load
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        applyTheme(savedTheme);
+
+        // --- API ---
+        async function initialize() {
+            try {
+                const response = await fetch('/info');
+                if (!response.ok) throw new Error('Failed to fetch model info');
+                modelInfo = await response.json();
+                chatHeader.textContent = `Model: ${modelInfo.model_id}`;
+                addMessage('model', 'Hello! I am ready to assist you. How can I help?');
+            } catch (error) {
+                chatHeader.textContent = 'Error loading model';
+                addMessage('model', `Error: ${error.message}`);
+            }
+        }
+
+        function addMessage(role, content) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}`;
+
+            const avatar = document.createElement('div');
+            avatar.className = 'message-avatar';
+            avatar.textContent = role === 'user' ? 'U' : 'M';
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+            
+            if (role === 'model') {
+                contentDiv.innerHTML = marked.parse(content);
+            } else {
+                contentDiv.textContent = content;
+            }
+
+            messageDiv.appendChild(avatar);
+            messageDiv.appendChild(contentDiv);
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return contentDiv;
+        }
+
+        function showLoading(isLoading) {
+            isProcessing = isLoading;
+            sendBtn.disabled = isLoading;
+            if (isLoading) {
+                sendBtn.classList.add('loading');
+                sendBtn.innerHTML = `<div class="typing-indicator"></div>`;
+            } else {
+                sendBtn.classList.remove('loading');
+                sendBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11ZM6.636 10.07l2.761 4.338L14.13 2.576zm6.787-8.201L1.591 6.602l4.339 2.76z"/></svg>`;
+            }
+        }
+
+        async function sendMessage() {
+            const prompt = chatInput.value.trim();
+            if (!prompt || isProcessing) return;
+
+            chatInput.value = '';
+            addMessage('user', prompt);
+            showLoading(true);
+
+            messages.push({ role: 'user', content: prompt });
+
+            const modelMessageDiv = addMessage('model', '<span class="typing-indicator"></span>');
+
+            try {
+                const requestBody = {
+                    messages: [
+                        { role: 'system', content: 'You are a helpful AI assistant.' },
+                        ...messages
+                    ],
+                    mode: 'chat'
+                };
+
+                const response = await fetch('/generate/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'Streaming failed');
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let fullText = '';
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+                                if (data.token) {
+                                    fullText += data.token;
+                                    modelMessageDiv.innerHTML = marked.parse(fullText + ' ▋');
+                                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                                } else if (data.finished) {
+                                    const finalText = data.text || fullText;
+                                    modelMessageDiv.innerHTML = marked.parse(finalText);
+                                    messages.push({ role: 'assistant', content: finalText });
+                                }
+                            } catch (e) {
+                                console.error('SSE parse error:', e);
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                modelMessageDiv.innerHTML = `<strong>Error:</strong> ${error.message}`;
+            } finally {
+                showLoading(false);
+                chatInput.focus();
+            }
+        }
+
+        function resetSession() {
+            messages = [];
+            chatMessages.innerHTML = '';
+            addMessage('model', 'Session reset. How can I help you now?');
+        }
+
+        // --- EVENT LISTENERS ---
+        sendBtn.addEventListener('click', sendMessage);
+        chatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        window.onload = initialize;
+    </script>
+</body>
+</html>

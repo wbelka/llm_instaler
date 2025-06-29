@@ -38,6 +38,7 @@ HOST="0.0.0.0"
 DTYPE="auto"
 DEVICE="auto"
 STREAM_MODE="false"
+UI_FILE="serve_terminal.html"
 EXTRA_ARGS=""
 
 while [[ $# -gt 0 ]]; do
@@ -65,6 +66,10 @@ while [[ $# -gt 0 ]]; do
         --stream)
             STREAM_MODE="true"
             shift
+            ;;
+        --ui-file)
+            UI_FILE="$2"
+            shift 2
             ;;
         *)
             EXTRA_ARGS="$EXTRA_ARGS $1"
@@ -110,6 +115,7 @@ python serve_api.py \
     --dtype "$DTYPE" \
     --device "$DEVICE" \
     --stream-mode "$STREAM_MODE" \
+    --ui-file "$UI_FILE" \
     $EXTRA_ARGS &
 
 API_PID=$!

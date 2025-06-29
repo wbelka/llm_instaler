@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A.I. Core Interface</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&display=swap');
+
+        :root {
+            --bg-color: #010409;
+            --text-color: #c9d1d9;
+            --primary-glow: #3081f7;
+            --secondary-glow: #58a6ff;
+            --border-color: rgba(88, 166, 255, 0.2);
+            --scanline-opacity: 0.05;
+            --flicker-speed: 1.5s;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Share Tech Mono', monospace;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            padding: 1rem;
+            background-image:
+                linear-gradient(var(--border-color) 1px, transparent 1px),
+                linear-gradient(90deg, var(--border-color) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+
+        body::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(rgba(1, 4, 9, 0) 50%, rgba(1, 4, 9, 0.75) 100%);
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        body::after {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            background: linear-gradient(to bottom, rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.03));
+            background-size: 100% 2px, 3px 100%;
+            z-index: 2;
+            pointer-events: none;
+            animation: flicker var(--flicker-speed) infinite;
+        }
+
+        @keyframes flicker {
+            0% { opacity: 0.21; }
+            2% { opacity: 0.8; }
+            8% { opacity: 0.31; }
+            9% { opacity: 0.4; }
+            12% { opacity: 0.25; }
+            20% { opacity: 0.8; }
+            25% { opacity: 0.3; }
+            30% { opacity: 1; }
+            70% { opacity: 0.2; }
+            100% { opacity: 0.25; }
+        }
+
+        .main-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid var(--border-color);
+            background: rgba(1, 4, 9, 0.8);
+            backdrop-filter: blur(2px);
+            box-shadow: 0 0 20px var(--primary-glow);
+            z-index: 1;
+        }
+
+        .header {
+            padding: 0.5rem 1rem;
+            border-bottom: 1px solid var(--border-color);
+            font-family: 'Orbitron', sans-serif;
+            text-transform: uppercase;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            text-shadow: 0 0 5px var(--primary-glow);
+        }
+
+        #modelStatus {
+            font-size: 0.8rem;
+            color: var(--secondary-glow);
+        }
+
+        .chat-output {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            font-size: 1rem;
+            line-height: 1.6;
+        }
+
+        .message-line {
+            margin-bottom: 1rem;
+            text-shadow: 0 0 3px var(--secondary-glow);
+        }
+
+        .message-line .prefix {
+            color: var(--primary-glow);
+            font-weight: 700;
+        }
+
+        .message-line.user .prefix {
+            color: #2f8132;
+        }
+
+        .message-line.system .prefix {
+            color: #b392f0;
+        }
+
+        .typing-cursor {
+            display: inline-block;
+            width: 10px;
+            height: 1.2em;
+            background-color: var(--secondary-glow);
+            animation: blink-cursor 1s step-end infinite;
+            box-shadow: 0 0 5px var(--secondary-glow);
+        }
+
+        @keyframes blink-cursor {
+            from, to { background-color: transparent }
+            50% { background-color: var(--secondary-glow); }
+        }
+
+        .input-area {
+            border-top: 1px solid var(--border-color);
+            padding: 1rem;
+            display: flex;
+        }
+
+        .prompt-prefix {
+            color: #2f8132;
+            margin-right: 0.5rem;
+            font-size: 1.2rem;
+        }
+
+        #chatInput {
+            flex: 1;
+            background: none;
+            border: none;
+            color: var(--text-color);
+            font-family: inherit;
+            font-size: 1.2rem;
+            outline: none;
+        }
+
+        #chatInput:focus {
+            text-shadow: 0 0 5px var(--secondary-glow);
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--primary-glow);
+            border-radius: 4px;
+        }
+
+        .boot-sequence {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--bg-color);
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--primary-glow);
+            font-size: 1.2rem;
+            text-align: center;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .boot-line {
+            opacity: 0;
+            animation: fadeIn 0.5s forwards;
+        }
+
+        @keyframes fadeIn {
+            to { opacity: 1; }
+        }
+
+        .loader {
+            border: 2px solid var(--border-color);
+            border-top: 2px solid var(--primary-glow);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="boot-sequence" id="bootSequence">
+        <div class="boot-line" style="animation-delay: 0.5s;">INITIALIZING A.I. CORE...</div>
+        <div class="boot-line" style="animation-delay: 1.5s;">LOADING MODEL PARAMETERS...</div>
+        <div class="boot-line" style="animation-delay: 2.5s;">ESTABLISHING NEURAL LINK...</div>
+        <div class="boot-line" style="animation-delay: 3.5s;"><div class="loader"></div></div>
+    </div>
+
+    <div class="main-container" style="visibility: hidden;">
+        <div class="header">
+            <span>A.I. CORE INTERFACE</span>
+            <span id="modelStatus"></span>
+        </div>
+        <div class="chat-output" id="chatOutput"></div>
+        <div class="input-area">
+            <span class="prompt-prefix">&gt;</span>
+            <input type="text" id="chatInput" autofocus>
+        </div>
+    </div>
+
+    <script>
+        const chatInput = document.getElementById('chatInput');
+        const chatOutput = document.getElementById('chatOutput');
+        const modelStatus = document.getElementById('modelStatus');
+        const bootSequence = document.getElementById('bootSequence');
+        const mainContainer = document.querySelector('.main-container');
+
+        let messages = [];
+        let isProcessing = false;
+        let modelInfo = null;
+
+        // --- API & INITIALIZATION ---
+        async function initialize() {
+            try {
+                const response = await fetch('/info');
+                if (!response.ok) throw new Error('CONNECTION FAILED');
+                modelInfo = await response.json();
+                modelStatus.textContent = `[ONLINE] MODEL: ${modelInfo.model_id}`;
+                
+                // End boot sequence
+                setTimeout(() => {
+                    bootSequence.style.display = 'none';
+                    mainContainer.style.visibility = 'visible';
+                    typewriterEffect('SYSTEM', 'A.I. Core online. Awaiting your command.');
+                }, 4500);
+
+            } catch (error) {
+                modelStatus.textContent = `[ERROR] ${error.message}`;
+                bootSequence.innerHTML = `<div>CRITICAL ERROR: ${error.message}</div>`;
+            }
+        }
+
+        // --- UI & EFFECTS ---
+        function addLine(role, content) {
+            const lineDiv = document.createElement('div');
+            lineDiv.className = `message-line ${role}`;
+            
+            const prefixSpan = document.createElement('span');
+            prefixSpan.className = 'prefix';
+            prefixSpan.textContent = `[${role.toUpperCase()}] `;
+            
+            const contentSpan = document.createElement('span');
+            contentSpan.innerHTML = content;
+
+            lineDiv.appendChild(prefixSpan);
+            lineDiv.appendChild(contentSpan);
+            chatOutput.appendChild(lineDiv);
+            chatOutput.scrollTop = chatOutput.scrollHeight;
+            return contentSpan;
+        }
+
+        async function typewriterEffect(role, text, speed = 20) {
+            const contentSpan = addLine(role, '');
+            for (let i = 0; i < text.length; i++) {
+                contentSpan.textContent += text[i];
+                chatOutput.scrollTop = chatOutput.scrollHeight;
+                await new Promise(resolve => setTimeout(resolve, speed));
+            }
+        }
+
+        // --- CHAT LOGIC ---
+        async function handleInput() {
+            const prompt = chatInput.value.trim();
+            if (!prompt || isProcessing) return;
+
+            isProcessing = true;
+            chatInput.value = '';
+            chatInput.disabled = true;
+
+            addLine('user', prompt);
+            messages.push({ role: 'user', content: prompt });
+
+            const modelLine = addLine('model', '<span class="typing-cursor"></span>');
+
+            try {
+                const requestBody = {
+                    messages: [
+                        { role: 'system', content: 'You are a futuristic AI core. Respond with precision and a slightly robotic tone.' },
+                        ...messages
+                    ],
+                    mode: 'chat'
+                };
+
+                const response = await fetch('/generate/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'STREAMING PROTOCOL FAILED');
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let fullText = '';
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+                                if (data.token) {
+                                    fullText += data.token;
+                                    modelLine.innerHTML = fullText + '<span class="typing-cursor"></span>';
+                                    chatOutput.scrollTop = chatOutput.scrollHeight;
+                                } else if (data.finished) {
+                                    const finalText = data.text || fullText;
+                                    modelLine.textContent = finalText;
+                                    messages.push({ role: 'assistant', content: finalText });
+                                }
+                            } catch (e) {
+                                console.error('SSE parse error:', e);
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                modelLine.innerHTML = `<span style="color: #ff4f4f;">// ERROR: ${error.message}</span>`;
+            } finally {
+                isProcessing = false;
+                chatInput.disabled = false;
+                chatInput.focus();
+            }
+        }
+
+        // --- EVENT LISTENERS ---
+        chatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                handleInput();
+            }
+        });
+
+        window.onload = initialize;
+    </script>
+</body>
+</html>

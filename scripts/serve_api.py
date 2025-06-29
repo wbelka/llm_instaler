@@ -106,6 +106,7 @@ DEVICE = None
 DTYPE = None
 HANDLER = None
 STREAM_MODE = False
+UI_FILE_PATH = None
 
 
 def sanitize_text(text: str) -> str:
@@ -319,10 +320,6 @@ async def startup_event():
     global MODEL, TOKENIZER, MODEL_INFO, DEVICE, DTYPE, STREAM_MODE
     
     try:
-        # Load model info
-        MODEL_INFO = get_model_config()
-        logger.info(f"Loading model: {MODEL_INFO['model_id']}")
-        
         # Parse command line arguments (passed from start.sh)
         parser = argparse.ArgumentParser()
         parser.add_argument("--port", type=int, default=8000)
@@ -331,15 +328,28 @@ async def startup_event():
         parser.add_argument("--dtype", default="auto")
         parser.add_argument("--load-lora", type=str, default=None)
         parser.add_argument("--stream-mode", type=str, default="false")
+        parser.add_argument("--ui-file", type=str, default="serve_terminal.html", 
+                            help="Path to the HTML file for the UI, relative to the script directory.")
         parser.add_argument("--allow-all-origins", action="store_true", help="Allow all CORS origins (development only)")
         args, _ = parser.parse_known_args()
         
+        # Set UI file path
+        global UI_FILE_PATH
+        script_dir = Path(__file__).parent
+        UI_FILE_PATH = script_dir / args.ui_file
+        if not UI_FILE_PATH.exists():
+            logger.warning(f"UI file not found at specified path: {UI_FILE_PATH}. The root endpoint '/' will not serve a UI.")
+            UI_FILE_PATH = None
+
         # Update CORS if needed (development only)
         if args.allow_all_origins:
             logger.warning("ALLOWING ALL CORS ORIGINS - DEVELOPMENT MODE ONLY!")
             global ALLOWED_ORIGINS
             ALLOWED_ORIGINS = ["*"]
         
+        # Load model info
+        MODEL_INFO = get_model_config()
+        logger.info(f"Loading model: {MODEL_INFO['model_id']}")
         DEVICE = args.device
         DTYPE = args.dtype
         STREAM_MODE = args.stream_mode.lower() == "true"
@@ -402,14 +412,12 @@ async def startup_event():
 @app.get("/")
 async def root():
     """Serve the terminal UI."""
-    script_dir = Path(__file__).parent
-    terminal_ui = script_dir / "serve_terminal.html"
-    
-    if terminal_ui.exists():
-        return FileResponse(terminal_ui)
+    global UI_FILE_PATH
+    if UI_FILE_PATH and UI_FILE_PATH.exists():
+        return FileResponse(UI_FILE_PATH)
     else:
         return HTMLResponse(
-            content="<h1>Model API</h1><p>Terminal UI not found. API is running at /docs</p>"
+            content="<h1>Model API</h1><p>UI file not found or not specified. API is running at /docs</p>"
         )
 
 
@@ -834,6 +842,8 @@ def main():
     parser.add_argument("--dtype", default="auto")
     parser.add_argument("--load-lora", type=str, default=None)
     parser.add_argument("--stream-mode", type=str, default="false")
+    parser.add_argument("--ui-file", type=str, default="serve_terminal.html", 
+                        help="Path to the HTML file for the UI, relative to the script directory.")
     parser.add_argument("--allow-all-origins", action="store_true")
     args = parser.parse_args()
     
