@@ -1320,6 +1320,10 @@ To install manually:
             ("train_lora.py", True),
             ("serve_api.py", False),
             ("serve_terminal.html", False),
+            ("serve_android.html", False),
+            ("serve_apple.html", False),
+            ("serve_modern.html", False),
+            ("serve_scifi.html", False),
             ("model_loader.py", False)
         ]
 

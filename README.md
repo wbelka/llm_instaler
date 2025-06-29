@@ -899,8 +899,8 @@ Installation aborted.
 - `~/LLM/installer/scripts/start.sh` → `start.sh`
 - `~/LLM/installer/scripts/train.sh` → `train.sh`
 - `~/LLM/installer/scripts/serve_api.py` → `serve_api.py`
-- `~/LLM/installer/scripts/serve_ui.py` → `serve_ui.py`
 - `~/LLM/installer/scripts/model_loader.py` → `model_loader.py`
+- `~/LLM/installer/scripts/*.html` → `*.html` (все веб-интерфейсы)
 
 **8.2 Установка прав:**
 - chmod +x для .sh скриптов

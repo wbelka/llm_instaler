@@ -5,6 +5,7 @@ that support both text and image inputs with text output.
 """
 
 import logging
+import io
 from typing import List, Dict, Any, Optional, Tuple, Union
 from pathlib import Path
 
@@ -204,10 +205,7 @@ class Gemma3Handler(MultimodalHandler):
             Tuple of (model, processor).
         """
         try:
-            from transformers import (
-                AutoProcessor,
-                BitsAndBytesConfig
-            )
+            from transformers import AutoProcessor
             import torch
             
             # Import the correct model class based on model type
@@ -359,7 +357,8 @@ class Gemma3Handler(MultimodalHandler):
             max_context = 131072  # 128K for 4B, 12B, 27B
 
         capabilities = {
-            'supports_streaming': True,
+            'stream': True,  # Changed from 'supports_streaming' to match serve_api.py
+            'supports_streaming': True,  # Keep for backward compatibility
             'supports_reasoning': False,
             'supports_system_prompt': True,
             'supports_multimodal': True,
@@ -1035,3 +1034,140 @@ class Gemma3Handler(MultimodalHandler):
         }
         
         return params
+    
+    async def generate_stream(self, prompt: str = None, messages: List[Dict[str, str]] = None,
+                              model=None, tokenizer=None, processor=None, **kwargs):
+        """Stream text generation for Gemma 3 models.
+        
+        This is an async generator that yields chunks of generated text.
+        
+        Args:
+            prompt: Text prompt (optional if messages provided)
+            messages: List of messages for chat format
+            model: The loaded model
+            tokenizer: The loaded tokenizer
+            processor: The loaded processor (preferred over tokenizer)
+            **kwargs: Additional generation arguments
+            
+        Yields:
+            Dictionary chunks with streaming data
+        """
+        import torch
+        import asyncio
+        from transformers import TextIteratorStreamer
+        from threading import Thread
+        
+        try:
+            # Use processor if available, otherwise tokenizer
+            tokenizer_to_use = processor or tokenizer
+            if not tokenizer_to_use:
+                raise ValueError("No tokenizer or processor available")
+            
+            # Get the actual tokenizer from processor if needed
+            if hasattr(tokenizer_to_use, 'tokenizer'):
+                actual_tokenizer = tokenizer_to_use.tokenizer
+            else:
+                actual_tokenizer = tokenizer_to_use
+            
+            # Prepare messages
+            if not messages and prompt:
+                messages = [{"role": "user", "content": prompt}]
+            elif not messages:
+                raise ValueError("Either prompt or messages must be provided")
+            
+            # For text-only streaming, convert messages to proper format
+            processed_messages = []
+            for msg in messages:
+                role = msg.get('role', 'user')
+                content = msg.get('content', '')
+                
+                if isinstance(content, str):
+                    processed_messages.append({
+                        "role": role,
+                        "content": [{"type": "text", "text": content}]
+                    })
+                else:
+                    processed_messages.append(msg)
+            
+            # Apply chat template
+            if hasattr(tokenizer_to_use, 'apply_chat_template'):
+                text = tokenizer_to_use.apply_chat_template(
+                    processed_messages,
+                    tokenize=False,
+                    add_generation_prompt=True
+                )
+            else:
+                # Fallback to simple format
+                text = "\n".join([f"{msg['role']}: {msg['content'][0]['text'] if isinstance(msg['content'], list) else msg['content']}" 
+                                 for msg in processed_messages])
+            
+            # Tokenize
+            inputs = actual_tokenizer(text, return_tensors="pt", truncation=True, max_length=8192)
+            
+            # Move to model device
+            if hasattr(model, 'device'):
+                inputs = {k: v.to(model.device) for k, v in inputs.items()}
+            
+            # Create streamer
+            streamer = TextIteratorStreamer(
+                actual_tokenizer,
+                skip_prompt=True,
+                skip_special_tokens=True
+            )
+            
+            # Prepare generation kwargs
+            generation_kwargs = {
+                **inputs,
+                'streamer': streamer,
+                'max_new_tokens': kwargs.get('max_tokens', 2048),
+                'temperature': kwargs.get('temperature', 0.7),
+                'top_p': kwargs.get('top_p', 0.95),
+                'top_k': kwargs.get('top_k', 40),
+                'do_sample': kwargs.get('temperature', 0.7) > 0,
+                'pad_token_id': actual_tokenizer.pad_token_id or actual_tokenizer.eos_token_id,
+                'eos_token_id': actual_tokenizer.eos_token_id,
+            }
+            
+            # Start generation in a separate thread
+            thread = Thread(target=model.generate, kwargs=generation_kwargs)
+            thread.start()
+            
+            # Stream tokens
+            generated_text = ""
+            for new_text in streamer:
+                if new_text:
+                    generated_text += new_text
+                    yield {
+                        "type": "text",
+                        "token": new_text,
+                        "text": generated_text,
+                        "finished": False
+                    }
+                    await asyncio.sleep(0)  # Yield control
+            
+            # Wait for generation to complete
+            thread.join()
+            
+            # Calculate token usage
+            prompt_tokens = len(inputs['input_ids'][0])
+            completion_tokens = len(actual_tokenizer.encode(generated_text))
+            
+            # Final yield with usage stats
+            yield {
+                "type": "done",
+                "full_text": generated_text,
+                "finished": True,
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in Gemma 3 streaming: {e}", exc_info=True)
+            yield {
+                "type": "error",
+                "error": str(e),
+                "finished": True
+            }
