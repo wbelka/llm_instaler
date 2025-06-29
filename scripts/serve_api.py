@@ -156,7 +156,7 @@ class SecureGenerateRequest(BaseModel):
     model_config = {"extra": "forbid"}
     
     prompt: Optional[str] = Field(None, max_length=MAX_TEXT_LENGTH)
-    messages: Optional[List[Dict[str, str]]] = Field(None, max_items=100)
+    messages: Optional[List[Dict[str, Any]]] = Field(None, max_items=100)
     temperature: Annotated[float, Field(ge=0.0, le=2.0)] = 0.7
     max_tokens: Annotated[int, Field(ge=1, le=131072)] = 4096
     top_p: Annotated[float, Field(ge=0.0, le=1.0)] = 0.9
@@ -532,6 +532,18 @@ async def generate(request: SecureGenerateRequest):
         # Log request for debugging (without sensitive data)
         logger.info(f"Processing request: mode={request.mode}, has_prompt={bool(request.prompt)}, "
                    f"has_messages={bool(request.messages)}, has_images={bool(request.images or request.image_data)}")
+        
+        # Debug: Check for images in messages
+        if request.messages:
+            for i, msg in enumerate(request.messages):
+                if isinstance(msg.get('content'), list):
+                    for item in msg.get('content', []):
+                        if isinstance(item, dict) and item.get('type') == 'image':
+                            logger.info(f"Found image in message {i}: has image data={bool(item.get('image'))}")
+                            if 'url' in item:
+                                logger.info(f"  Image URL: {item['url'][:50]}...")
+                            elif 'image' in item:
+                                logger.info(f"  Image data length: {len(str(item['image']))}")
         
         # Determine the task based on request and mode
         if request.mode == "image" or (request.mode == "auto" and 
