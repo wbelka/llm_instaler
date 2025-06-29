@@ -620,7 +620,7 @@ async def generate_stream(request: SecureGenerateRequest):
             detail="Streaming is not supported for this model type."
         )
 
-    async def event_generator():
+    async def event_generator(request):
         import torch
         import asyncio
         from transformers import TextIteratorStreamer
@@ -732,7 +732,7 @@ async def generate_stream(request: SecureGenerateRequest):
                 })
             }
     
-    return EventSourceResponse(event_generator())
+    return EventSourceResponse(event_generator(request))
 
 
 @app.websocket("/ws")
