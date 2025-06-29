@@ -211,6 +211,11 @@ class Gemma3Handler(MultimodalHandler):
             # Import the correct model class based on model type
             if '3n' in self.model_id.lower():
                 from transformers import Gemma3nForConditionalGeneration as ModelClass
+                # Gemma3n has issues with 4-bit quantization due to altup layer
+                if load_in_4bit:
+                    logger.warning("Gemma3n models have compatibility issues with 4-bit quantization. Falling back to 8-bit.")
+                    load_in_4bit = False
+                    load_in_8bit = True
             else:
                 from transformers import Gemma3ForConditionalGeneration as ModelClass
 
