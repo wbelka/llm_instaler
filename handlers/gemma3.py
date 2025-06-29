@@ -1105,8 +1105,16 @@ class Gemma3Handler(MultimodalHandler):
             inputs = actual_tokenizer(text, return_tensors="pt", truncation=True, max_length=8192)
             
             # Move to model device
-            if hasattr(model, 'device'):
+            if hasattr(model, 'device') and model.device.type != 'meta':
                 inputs = {k: v.to(model.device) for k, v in inputs.items()}
+            elif hasattr(model, 'hf_device_map'):
+                # For models with device_map='auto', move inputs to first device
+                first_device = next(iter(model.hf_device_map.values()))
+                if isinstance(first_device, int):
+                    first_device = f'cuda:{first_device}'
+                elif first_device == 'cpu':
+                    first_device = 'cpu'
+                inputs = {k: v.to(first_device) for k, v in inputs.items()}
             
             # Create streamer
             streamer = TextIteratorStreamer(
@@ -1127,6 +1135,11 @@ class Gemma3Handler(MultimodalHandler):
                 'pad_token_id': actual_tokenizer.pad_token_id or actual_tokenizer.eos_token_id,
                 'eos_token_id': actual_tokenizer.eos_token_id,
             }
+            
+            # For models with device_map, we need to handle cache differently
+            if hasattr(model, 'hf_device_map') and model.hf_device_map:
+                # Don't use cache for models with device_map to avoid the error
+                generation_kwargs['use_cache'] = False
             
             # Start generation in a separate thread
             thread = Thread(target=model.generate, kwargs=generation_kwargs)
