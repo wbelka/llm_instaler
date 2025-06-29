@@ -535,17 +535,25 @@ async def generate(request: SecureGenerateRequest):
         
         # Debug: Check for images in messages
         if request.messages:
+            logger.info(f"Number of messages: {len(request.messages)}")
             for i, msg in enumerate(request.messages):
+                logger.info(f"Message {i}: role={msg.get('role')}, content type={type(msg.get('content'))}")
                 if isinstance(msg.get('content'), list):
-                    for item in msg.get('content', []):
-                        if isinstance(item, dict) and item.get('type') == 'image':
-                            logger.info(f"Found image in message {i}: has image data={bool(item.get('image'))}")
-                            if 'url' in item:
-                                logger.info(f"  Image URL: {item['url'][:50]}...")
-                            elif 'image' in item:
-                                logger.info(f"  Image data length: {len(str(item['image']))}")
+                    logger.info(f"  Content has {len(msg.get('content', []))} items")
+                    for j, item in enumerate(msg.get('content', [])):
+                        if isinstance(item, dict):
+                            logger.info(f"    Item {j}: type={item.get('type')}")
+                            if item.get('type') == 'image':
+                                logger.info(f"      Image found! Keys: {list(item.keys())}")
+                                if 'url' in item:
+                                    logger.info(f"      Image URL: {item['url'][:50]}...")
+                                elif 'image' in item:
+                                    logger.info(f"      Image data length: {len(str(item['image']))}")
+                        else:
+                            logger.info(f"    Item {j} is not a dict: {type(item)}")
         
         # Determine the task based on request and mode
+        logger.info("=== ROUTING DECISION ===")
         if request.mode == "image" or (request.mode == "auto" and 
             request.prompt and any(word in request.prompt.lower() 
                                  for word in ["draw", "generate image", "create image"])):
@@ -573,6 +581,7 @@ async def generate(request: SecureGenerateRequest):
                 any(item.get('type') == 'image' for item in msg.get('content', []) if isinstance(item, dict))
                 for msg in request.messages
             )):
+            logger.info(">>> MULTIMODAL PROCESSING ROUTE")
             # Multimodal processing
             if hasattr(HANDLER, 'process_multimodal'):
                 images = []
@@ -600,6 +609,7 @@ async def generate(request: SecureGenerateRequest):
                 raise HTTPException(status_code=501, detail="Handler does not support multimodal processing")
         
         else:
+            logger.info(">>> TEXT GENERATION ROUTE")
             # Text generation
             if hasattr(HANDLER, 'generate_text'):
                 result = HANDLER.generate_text(
