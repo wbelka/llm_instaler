@@ -18,6 +18,9 @@ from pathlib import Path
 import base64
 from io import BytesIO
 import hashlib
+
+# Suppress transformers warnings about unused generation parameters
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 import time
 from collections import defaultdict
 import re
@@ -491,7 +494,7 @@ def apply_mode_settings(request: SecureGenerateRequest, mode: str) -> SecureGene
     if mode in mode_settings:
         settings = mode_settings[mode]
         for key, value in settings.items():
-            if hasattr(request, key) and getattr(request, key) == SecureGenerateRequest.__fields__[key].default:
+            if hasattr(request, key) and getattr(request, key) == SecureGenerateRequest.model_fields[key].default:
                 setattr(request, key, value)
     
     return request
