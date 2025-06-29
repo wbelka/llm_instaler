@@ -555,7 +555,12 @@ async def generate(request: SecureGenerateRequest):
             else:
                 raise HTTPException(status_code=501, detail="Handler does not support image generation")
         
-        elif request.images or request.image_data or request.mode == "vision":
+        elif request.images or request.image_data or request.mode == "vision" or (
+            request.messages and any(
+                isinstance(msg.get('content'), list) and 
+                any(item.get('type') == 'image' for item in msg.get('content', []) if isinstance(item, dict))
+                for msg in request.messages
+            )):
             # Multimodal processing
             if hasattr(HANDLER, 'process_multimodal'):
                 images = []
@@ -575,7 +580,8 @@ async def generate(request: SecureGenerateRequest):
                     max_tokens=request.max_tokens,
                     top_p=request.top_p,
                     mode=request.mode,
-                    max_image_size=request.max_image_size or 2048
+                    max_image_size=request.max_image_size or 2048,
+                    messages=request.messages
                 )
                 return GenerateResponse(**result)
             else:
