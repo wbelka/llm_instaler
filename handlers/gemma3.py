@@ -84,6 +84,10 @@ class Gemma3Handler(MultimodalHandler):
             'soundfile', # For audio processing
             'librosa', # For audio processing
         ]
+        
+        # Add timm for Gemma-3n models
+        if '3n' in self.model_id.lower():
+            base_deps.append('timm>=0.9.0')
 
         # Add quantization support through centralized config
         from core.quantization_config import QuantizationConfig
