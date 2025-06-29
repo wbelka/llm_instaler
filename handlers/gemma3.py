@@ -257,6 +257,10 @@ class Gemma3Handler(MultimodalHandler):
             # Log quantization config for debugging
             if 'quantization_config' in quant_config:
                 logger.info(f"Quantization config: {quant_config['quantization_config']}")
+                # Enable CPU offloading for 8-bit quantization to handle large models
+                if load_in_8bit:
+                    quant_config['quantization_config'].llm_int8_enable_fp32_cpu_offload = True
+                    logger.info("Enabled FP32 CPU offloading for 8-bit quantization")
 
             # Prepare model loading arguments
             model_kwargs = {
@@ -270,15 +274,21 @@ class Gemma3Handler(MultimodalHandler):
 
             # Add device map and memory optimization
             if device == 'auto':
-                model_kwargs['device_map'] = 'auto'
-                # Add offload settings for better memory management
-                model_kwargs['offload_folder'] = 'offload'
-                model_kwargs['offload_state_dict'] = True
+                # For quantized models, use balanced device map
+                if load_in_8bit or load_in_4bit:
+                    model_kwargs['device_map'] = 'balanced'
+                    # Allow CPU offloading for large quantized models
+                    model_kwargs['max_memory'] = {0: '22GiB', 'cpu': '100GiB'}
+                else:
+                    model_kwargs['device_map'] = 'auto'
+                    # Add offload settings for better memory management
+                    model_kwargs['offload_folder'] = 'offload'
+                    model_kwargs['offload_state_dict'] = True
 
-                # For large models, use sequential device map
-                if self._estimate_model_size() > 20:  # 20GB+
-                    model_kwargs['device_map'] = 'sequential'
-                    model_kwargs['max_memory'] = {0: '20GiB', 'cpu': '100GiB'}
+                    # For large models, use sequential device map
+                    if self._estimate_model_size() > 20:  # 20GB+
+                        model_kwargs['device_map'] = 'sequential'
+                        model_kwargs['max_memory'] = {0: '20GiB', 'cpu': '100GiB'}
 
             # Load model with low CPU memory usage
             model_kwargs['low_cpu_mem_usage'] = True
