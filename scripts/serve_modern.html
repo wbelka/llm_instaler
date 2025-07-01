@@ -874,6 +874,14 @@
                     </svg>
                     Settings
                 </button>
+                <button class="sidebar-button" id="clearButton" onclick="clearConversation()">
+                    <svg class="icon" viewBox="0 0 24 24">
+                        <path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/>
+                        <line x1="18" y1="9" x2="12" y2="15"/>
+                        <line x1="12" y1="9" x2="18" y2="15"/>
+                    </svg>
+                    Clear Context
+                </button>
             </div>
         </aside>
 
@@ -1365,6 +1373,13 @@
             messages = [];
             document.getElementById('chatMessages').innerHTML = '';
             addMessage('assistant', 'New session started. How can I help you?');
+        }
+
+        // Clear conversation
+        function clearConversation() {
+            messages = [];
+            document.getElementById('chatMessages').innerHTML = '';
+            addMessage('system', 'Conversation context has been cleared.', true);
         }
 
         // Settings functions

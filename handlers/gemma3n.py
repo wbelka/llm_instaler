@@ -1,59 +1,63 @@
-"""Handler for Gemma 3 multimodal models.
+"""Handler for Gemma 3n multimodal models with extended capabilities.
 
-This module provides specialized handling for Google's Gemma 3 multimodal models
-that support both text and image inputs with text output.
+This module provides specialized handling for Google's Gemma 3n multimodal models
+that extend standard Gemma 3 with support for audio and video inputs in addition
+to text and images.
 """
 
 import logging
+import io
 from typing import List, Dict, Any, Optional, Tuple, Union
 from pathlib import Path
 
-from handlers.multimodal import MultimodalHandler
+from handlers.gemma3 import Gemma3Handler
 from core.checker import ModelRequirements
 from core.quantization_config import QuantizationConfig
 
 logger = logging.getLogger(__name__)
 
 
-class Gemma3Handler(MultimodalHandler):
-    """Handler for Gemma 3 multimodal models."""
+class Gemma3nHandler(Gemma3Handler):
+    """Handler for Gemma 3n multimodal models with audio/video support.
+
+    Extends the base Gemma3Handler with additional capabilities for
+    audio and video processing.
+    """
 
     def __init__(self, model_info: Dict[str, Any]):
-        """Initialize Gemma 3 handler.
+        """Initialize Gemma 3n handler.
 
         Args:
             model_info: Model information dictionary.
         """
         super().__init__(model_info)
-        self.is_gemma3_model = self._check_if_gemma3_model()
+        self.is_gemma3n_model = self._check_if_gemma3n_model()
 
-    def _check_if_gemma3_model(self) -> bool:
-        """Check if the model is a Gemma 3 multimodal model.
+    def _check_if_gemma3n_model(self) -> bool:
+        """Check if the model is a Gemma 3n multimodal model.
 
         Returns:
-            True if it's a Gemma 3 multimodal model, False otherwise.
+            True if it's a Gemma 3n multimodal model, False otherwise.
         """
         model_id = self.model_id.lower()
         model_type = self.model_info.get('model_type', '').lower()
         config = self.model_info.get('config', {})
 
-        # Check for Gemma 3 models (multimodal variants)
-        is_gemma3 = (
-            'gemma-3' in model_id or
-            'gemma3' in model_id or
-            (('gemma' in model_id) and ('3-' in model_id or '3_' in model_id))
-        )
+        # Check for Gemma 3n models specifically
+        is_gemma3n = '3n' in model_id and ('gemma' in model_id)
 
-        # Check if it's multimodal (has vision capabilities)
-        has_vision = (
+        # Check if it's multimodal (has vision/audio/video capabilities)
+        has_multimodal = (
             'vision' in str(config).lower() or
             'image' in str(config).lower() or
+            'audio' in str(config).lower() or
+            'video' in str(config).lower() or
             'multimodal' in model_type or
             'vlm' in model_type or
             hasattr(config, 'vision_config')
         )
 
-        return is_gemma3 and has_vision
+        return is_gemma3n and has_multimodal
 
     def get_dependencies(self) -> List[str]:
         """Get required Python dependencies.
@@ -63,7 +67,7 @@ class Gemma3Handler(MultimodalHandler):
         """
         base_deps = [
             'torch>=2.6.0',
-            'transformers>=4.50.0',  # Gemma 3 requires transformers 4.50.0+
+            'transformers>=4.50.0',  # Gemma 3n requires latest transformers
             'Pillow>=9.0.0',
             'numpy',
             'einops',
@@ -72,6 +76,9 @@ class Gemma3Handler(MultimodalHandler):
             'accelerate>=0.20.0',
             'safetensors>=0.4.0',
             'tokenizers>=0.15.0',
+            'timm>=0.9.0',  # Required for Gemma 3n
+            'soundfile',  # For audio processing
+            'librosa',  # For audio processing
         ]
 
         # Add quantization support through centralized config
@@ -97,7 +104,7 @@ class Gemma3Handler(MultimodalHandler):
         # Base requirements
         requirements = ModelRequirements()
         requirements.model_type = self.model_type
-        requirements.model_family = "gemma3"
+        requirements.model_family = "gemma3n"  # Use gemma3n as family
         requirements.primary_library = "transformers"
         requirements.base_dependencies = self.get_dependencies()
         requirements.special_dependencies = []
@@ -111,34 +118,35 @@ class Gemma3Handler(MultimodalHandler):
         }
         from core.quantization_config import QuantizationConfig
 
+        # Gemma 3n has limited quantization support
         supports_quant = QuantizationConfig.supports_quantization(
             self.model_type, self.model_family, self.model_info
         )
 
         requirements.capabilities = {
             "supports_text_generation": True,
-            "supports_image_generation": False,  # Gemma 3 doesn't generate images
+            "supports_image_generation": False,
             "supports_chat": True,
             "supports_cpu_inference": False,  # Multimodal models need GPU
             "supports_quantization": supports_quant,
-            "supported_quantization": ["int8", "int4"] if supports_quant else [],
+            "supported_quantization": ["int8"] if supports_quant else [],  # Only 8-bit
             "requires_gpu": True
         }
         requirements.special_config = {
-            "is_gemma3_model": True,
-            "max_context_length": 128000,  # 128K context for 4B, 12B, 27B
+            "is_gemma3n_model": True,
+            "max_context_length": 32768,  # 32K context for Gemma 3n
+            "max_output_length": 32768,  # 32K output
             "supported_gpus": ['nvidia_a100', 'nvidia_a6000', 'nvidia_rtx_4090',
-                               'nvidia_rtx_3090', 'nvidia_v100', 'nvidia_h100']
+                               'nvidia_rtx_3090', 'nvidia_v100', 'nvidia_h100'],
+            "audio_sample_rate": 16000,  # 16kHz audio
+            "audio_tokens_per_second": 6.25,
+            "supports_selective_activation": True,  # 2B/4B effective params
         }
-
-        # Adjust for 1B model
-        if '1b' in self.model_id.lower():
-            requirements.special_config['max_context_length'] = 32000  # 32K for 1B
 
         return requirements
 
     def _estimate_model_size(self) -> float:
-        """Estimate model size in GB based on Gemma 3 variants.
+        """Estimate model size in GB based on Gemma 3n variants.
 
         Returns:
             Estimated size in GB.
@@ -153,18 +161,9 @@ class Gemma3Handler(MultimodalHandler):
             # Rough estimation: 2 bytes per parameter for fp16
             return (param_count * 2) / (1024 ** 3)
 
-        # Default estimates based on Gemma 3 model sizes
-        model_id_lower = self.model_id.lower()
-        if '27b' in model_id_lower:
-            return 54.0  # 27B model
-        elif '12b' in model_id_lower:
-            return 24.0  # 12B model
-        elif '4b' in model_id_lower:
-            return 8.0   # 4B model
-        elif '1b' in model_id_lower:
-            return 2.0   # 1B model
-        else:
-            return 10.0  # Conservative default
+        # Default estimates for Gemma 3n models
+        # Gemma 3n models are typically smaller due to selective activation
+        return 4.0  # Conservative default for Gemma 3n
 
     def load_model(
         self,
@@ -175,25 +174,41 @@ class Gemma3Handler(MultimodalHandler):
         load_in_4bit: bool = False,
         **kwargs
     ) -> Tuple[Any, Any]:
-        """Load Gemma 3 multimodal model with appropriate configuration.
+        """Load Gemma 3n multimodal model with appropriate configuration.
 
         Args:
             model_path: Path to model files.
             device: Device to load on.
             dtype: Data type for model.
             load_in_8bit: Whether to use 8-bit quantization.
-            load_in_4bit: Whether to use 4-bit quantization.
+            load_in_4bit: Whether to use 4-bit quantization (will fallback to 8-bit).
             **kwargs: Additional loading arguments.
 
         Returns:
             Tuple of (model, processor).
         """
         try:
-            from transformers import AutoProcessor, Gemma3ForConditionalGeneration
+            from transformers import AutoProcessor, Gemma3nForConditionalGeneration
             import torch
+
+            # Gemma3n has issues with 4-bit quantization due to altup layer
+            if load_in_4bit:
+                logger.warning(
+                    "Gemma3n models have compatibility issues with 4-bit quantization. Falling back to 8-bit.")
+                load_in_4bit = False
+                load_in_8bit = True
 
             # Load processor with use_fast=True to avoid warning
             processor = AutoProcessor.from_pretrained(model_path, use_fast=True)
+
+            # Log processor info
+            logger.info(f"Processor type: {type(processor)}")
+            if hasattr(processor, 'image_token'):
+                # Removed token logging
+                pass
+            if hasattr(processor, 'tokenizer') and hasattr(processor.tokenizer, 'image_token'):
+                # Removed token logging
+                pass
 
             # Check if model has native dtype preference
             config_path = Path(model_path) / 'config.json'
@@ -232,7 +247,7 @@ class Gemma3Handler(MultimodalHandler):
             model_kwargs = {
                 'pretrained_model_name_or_path': model_path,
                 'torch_dtype': torch_dtype,
-                'trust_remote_code': True  # Gemma 3 may require this
+                'trust_remote_code': True  # Gemma 3n may require this
             }
 
             # Merge quantization config
@@ -248,97 +263,55 @@ class Gemma3Handler(MultimodalHandler):
                 else:
                     available_memory = 0
                 
-                # For quantized models, try to fit on GPU first
-                if load_in_8bit or load_in_4bit:
-                    # First try to load fully on GPU
-                    estimated_size = self._estimate_model_size()
-                    # Quantized models use less memory (approximately 1/2 for int8, 1/4 for int4)
-                    if load_in_8bit:
-                        estimated_size = estimated_size / 2
-                    elif load_in_4bit:
-                        estimated_size = estimated_size / 4
-                    
-                    logger.info(f"Estimated quantized model size: {estimated_size:.1f}GB")
-                    
-                    if estimated_size < available_memory - 2:  # Leave 2GB buffer
-                        # Model should fit on GPU
-                        model_kwargs['device_map'] = {'': 0}  # Load entire model on GPU 0
-                        logger.info(f"Loading quantized model fully on GPU (estimated {estimated_size:.1f}GB)")
-                    else:
-                        # For Gemma3 with quantization, prefer auto device map to avoid issues
-                        model_kwargs['device_map'] = 'auto'
-                        logger.info(f"Using auto device map for quantized model")
+                # For quantized models, use balanced device map
+                if load_in_8bit:
+                    model_kwargs['device_map'] = 'balanced'
+                    # Allow CPU offloading for large quantized models
+                    # Adjust GPU memory based on actual availability
+                    gpu_limit = f"{int(available_memory - 2)}GiB" if available_memory > 4 else "2GiB"
+                    model_kwargs['max_memory'] = {0: gpu_limit, 'cpu': '100GiB'}
+                    logger.info(f"Using balanced device map with GPU limit: {gpu_limit}")
                 else:
                     model_kwargs['device_map'] = 'auto'
                     # Add offload settings for better memory management
                     model_kwargs['offload_folder'] = 'offload'
                     model_kwargs['offload_state_dict'] = True
-
-                    # For large models, use sequential device map
-                    estimated_size = self._estimate_model_size()
-                    if estimated_size > available_memory:
-                        logger.info(f"Model size ({estimated_size}GB) exceeds GPU memory, enabling CPU offloading")
-                        model_kwargs['device_map'] = 'sequential'
-                        gpu_limit = f"{int(available_memory - 2)}GiB" if available_memory > 4 else "2GiB"
-                        model_kwargs['max_memory'] = {0: gpu_limit, 'cpu': '100GiB'}
-                        model_kwargs['offload_buffers'] = True
+                    
+                    # For Gemma3n models, always enable CPU offloading due to multimodal requirements
+                    logger.info("Enabling CPU offloading for Gemma3n multimodal model")
+                    model_kwargs['device_map'] = 'balanced'
+                    gpu_limit = f"{int(available_memory - 3)}GiB" if available_memory > 6 else "3GiB"
+                    model_kwargs['max_memory'] = {0: gpu_limit, 'cpu': '100GiB'}
+                    model_kwargs['offload_buffers'] = True
 
             # Load model with low CPU memory usage
             model_kwargs['low_cpu_mem_usage'] = True
 
-            # Try to use Flash Attention 2 if available (but not with quantization)
-            if not (load_in_8bit or load_in_4bit):
-                try:
-                    model_kwargs['attn_implementation'] = 'flash_attention_2'
-                    model = Gemma3ForConditionalGeneration.from_pretrained(**model_kwargs)
-                    logger.info("Using Flash Attention 2 for better performance")
-                except Exception:
-                    # Fallback to standard attention
-                    model_kwargs.pop('attn_implementation', None)
-                    model = Gemma3ForConditionalGeneration.from_pretrained(**model_kwargs)
-                    logger.info("Using standard attention implementation")
-            else:
-                # For quantized models, use standard attention
-                model = Gemma3ForConditionalGeneration.from_pretrained(**model_kwargs)
-                logger.info("Using standard attention implementation (quantized model)")
+            # For Gemma 3n, we use standard attention (no Flash Attention with quantization)
+            model = Gemma3nForConditionalGeneration.from_pretrained(**model_kwargs)
+            logger.info("Using standard attention implementation for Gemma 3n")
 
             # Move to device if not using device_map='auto'
-            if device != 'auto' and not (load_in_8bit or load_in_4bit):
+            if device != 'auto' and not load_in_8bit:
                 if device == 'cuda' and not torch.cuda.is_available():
                     device = 'cpu'
                     logger.warning("CUDA not available, falling back to CPU")
                 model = model.to(device)
 
-            # Gemma 3 uses built-in image tokens, no need to add custom ones
-            # The processor already handles <start_of_image> and <end_of_image>
-            logger.info("Gemma 3 model loaded with built-in image support")
-            
-            # Log device placement
-            if hasattr(model, 'hf_device_map'):
-                logger.info("Model loaded with device map")
-                # Count layers on each device
-                device_counts = {}
-                for module, device in model.hf_device_map.items():
-                    device_str = f'cuda:{device}' if isinstance(device, int) else device
-                    device_counts[device_str] = device_counts.get(device_str, 0) + 1
-                logger.info(f"Module distribution across {len(device_counts)} devices")
-            elif hasattr(model, 'device'):
-                logger.info(f"Model on device: {model.device}")
-
             # Set to eval mode
             model.eval()
 
-            logger.info(f"Successfully loaded Gemma 3 model from {model_path}")
+            logger.info(f"Successfully loaded Gemma 3n model from {model_path}")
             return model, processor
 
         except ImportError as e:
             logger.error(f"Failed to import required dependencies: {e}")
             logger.info(
-                "Please ensure transformers>=4.50.0 is installed for Gemma 3 support"
+                "Please ensure transformers>=4.50.0 and timm>=0.9.0 are installed for Gemma 3n support"
             )
             raise
         except Exception as e:
-            logger.error(f"Failed to load Gemma 3 model: {e}")
+            logger.error(f"Failed to load Gemma 3n model: {e}")
             # Fallback to base multimodal handler
             logger.info("Attempting fallback to standard multimodal loading")
             return super().load_model(
@@ -351,15 +324,15 @@ class Gemma3Handler(MultimodalHandler):
             )
 
     def get_inference_params(self) -> Dict[str, Any]:
-        """Get default inference parameters for Gemma 3.
+        """Get default inference parameters for Gemma 3n.
 
         Returns:
             Dictionary of inference parameters.
         """
-        # Default parameters for Gemma 3
+        # Gemma 3n specific parameters
         params = {
             'temperature': 0.7,
-            'max_new_tokens': 2048,
+            'max_new_tokens': 32768,  # Can generate up to 32K tokens
             'do_sample': True,
             'top_p': 0.95,
             'top_k': 40,
@@ -370,55 +343,47 @@ class Gemma3Handler(MultimodalHandler):
         return params
 
     def get_model_capabilities(self) -> Dict[str, Any]:
-        """Get Gemma 3 model capabilities.
+        """Get Gemma 3n model capabilities.
 
         Returns:
             Dictionary of capabilities.
         """
-        model_id_lower = self.model_id.lower()
-
-        # Base context length depends on model variant
-        if '1b' in model_id_lower:
-            max_context = 32768  # 32K for 1B
-            max_output = 8192
-        else:
-            max_context = 131072  # 128K for 4B, 12B, 27B
-            max_output = 8192
-
         capabilities = {
-            'stream': True,  # Changed from 'supports_streaming' to match serve_api.py
-            'supports_streaming': True,  # Keep for backward compatibility
+            'stream': True,
+            'supports_streaming': True,
             'supports_reasoning': False,
             'supports_system_prompt': True,
             'supports_multimodal': True,
             'supports_batch_inference': True,
-            'max_context_length': max_context,
-            'max_output_length': max_output,
-            'input_modalities': ['text', 'image'],
+            'max_context_length': 32768,  # 32K for Gemma 3n
+            'max_output_length': 32768,  # 32K output
+            'input_modalities': ['text', 'image', 'audio', 'video'],
             'output_modalities': ['text'],
-            'supports_multiple_images': True,  # Can handle multiple images
-            'image_resolutions': [896],  # Gemma 3 resolution (896x896)
-            'image_tokens_per_image': 256,  # Each image encoded to 256 tokens
+            'supports_multiple_images': True,
+            'image_resolutions': [256, 512, 768],  # Multiple resolutions
+            'image_tokens_per_image': 256,
+            'audio_tokens_per_second': 6.25,
+            'audio_sample_rate': 16000,  # 16kHz
             'supports_multilingual': True,
-            'supported_languages': 140,  # Supports over 140 languages
-            'chat_template': 'gemma3',  # Uses specific Gemma 3 chat template
+            'supported_languages': 140,
+            'chat_template': 'gemma3',
             'special_features': [
-                f'Context window: {max_context} tokens',
+                'Context window: 32768 tokens',
                 'Multilingual support (140+ languages)',
                 'Efficient image encoding (256 tokens per image)',
-                'Optimized for both single and multi-turn conversations'
-            ],
-            'special_tokens': {
-                'image_token': '<start_of_image>',  # Gemma 3 uses this instead of <image_soft_token>
-                'image_end_token': '<end_of_image>'
-            }
+                'Audio encoding: 6.25 tokens per second',
+                'Video input support',
+                'Selective parameter activation (2B/4B effective params)',
+                'Optimized for low-resource devices',
+                'Multiple image resolutions: 256x256, 512x512, 768x768'
+            ]
         }
 
         return capabilities
 
     def get_supported_modes(self) -> List[str]:
-        """Get supported generation modes for Gemma 3."""
-        return ['auto', 'chat', 'vision', 'multimodal', 'analyze']
+        """Get supported generation modes for Gemma 3n."""
+        return ['auto', 'chat', 'vision', 'multimodal', 'analyze', 'audio', 'video']
 
     def get_mode_descriptions(self) -> Dict[str, str]:
         """Get descriptions for supported modes."""
@@ -427,7 +392,9 @@ class Gemma3Handler(MultimodalHandler):
             'chat': 'Text conversation mode',
             'vision': 'Image understanding and analysis',
             'multimodal': 'Combined text and image processing',
-            'analyze': 'Detailed image analysis with reasoning'
+            'analyze': 'Detailed image analysis with reasoning',
+            'audio': 'Audio understanding and transcription',
+            'video': 'Video understanding and analysis'
         }
     
     def _prepare_generation_params(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -470,10 +437,6 @@ class Gemma3Handler(MultimodalHandler):
         if 'do_sample' not in generation_params:
             generation_params['do_sample'] = generation_params.get('temperature', 0.7) > 0
         
-        # Ensure we don't have conflicting parameters
-        if 'max_length' in generation_params and 'max_new_tokens' in generation_params:
-            del generation_params['max_length']  # Prefer max_new_tokens
-        
         return generation_params
 
     def generate_text(self, prompt: str, model=None, tokenizer=None,
@@ -498,16 +461,9 @@ class Gemma3Handler(MultimodalHandler):
         try:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-                # Log GPU memory status
-                gpu_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-                gpu_used = torch.cuda.memory_allocated(0) / (1024**3)
-                gpu_free = (torch.cuda.get_device_properties(0).total_memory - torch.cuda.memory_allocated(0)) / (1024**3)
-                logger.info(f"GPU Memory - Total: {gpu_mem:.1f}GB, Used: {gpu_used:.1f}GB, Free: {gpu_free:.1f}GB")
             
-            logger.info(f"generate_text called with prompt: {prompt[:100] if prompt else 'None'}...")
-            logger.info(f"kwargs keys: {list(kwargs.keys())}")
-            if 'messages' in kwargs:
-                logger.info(f"Messages provided: {len(kwargs['messages'])} messages")
+            logger.debug(f"generate_text called with prompt: {prompt[:100] if prompt else 'None'}...")
+            logger.debug(f"kwargs keys: {list(kwargs.keys())}")
             
             # Use tokenizer for text-only generation (avoid multimodal processing)
             tokenizer_to_use = processor.tokenizer if processor and hasattr(processor, 'tokenizer') else (tokenizer or processor)
@@ -532,16 +488,11 @@ class Gemma3Handler(MultimodalHandler):
                     prompt = full_prompt.strip()
             
             # Ensure we have a prompt
-            logger.info(f"Prompt after message processing: {prompt[:100] if prompt else 'None'}...")
             if not prompt:
-                logger.error(f"No prompt after processing {len(messages)} messages")
                 raise ValueError("No prompt provided for text generation")
             
             # Apply chat template for text-only generation
-            # For Gemma3, we need to be careful with the chat template
-            use_chat_template = hasattr(tokenizer_to_use, 'apply_chat_template') and not kwargs.get('raw_mode', False)
-            
-            if use_chat_template:
+            if hasattr(tokenizer_to_use, 'apply_chat_template'):
                 # Create simple text messages without structured content
                 if messages:
                     simple_messages = []
@@ -571,7 +522,7 @@ class Gemma3Handler(MultimodalHandler):
                     )
                     prompt = formatted_prompt
             
-            logger.info(f"Text generation prompt preview: {prompt[:200] if prompt else 'PROMPT IS NONE'}...")
+            logger.debug(f"Text generation prompt: {prompt[:200]}...")
             
             # Tokenize the prompt
             # Check if we're dealing with a processor that might expect multimodal input
@@ -615,26 +566,10 @@ class Gemma3Handler(MultimodalHandler):
                 inputs = {k: v.cuda() for k, v in inputs.items()}
                 logger.info("Moving inputs to CUDA (fallback)")
             
-            logger.info(f"Input shape: {inputs['input_ids'].shape}")
-            logger.info(f"Input device: {inputs['input_ids'].device}")
-            
             # Prepare generation parameters
             generation_params = self._prepare_generation_params(kwargs)
-            logger.info(f"Generation params set: temperature={generation_params.get('temperature', 'default')}, max_new_tokens={generation_params.get('max_new_tokens', 'default')}")
-            
-            # Log device map info but don't limit generation
-            if hasattr(model, 'hf_device_map'):
-                # Check if model is partially on CPU
-                device_map = model.hf_device_map
-                cpu_modules = sum(1 for d in device_map.values() if d == 'cpu')
-                if cpu_modules > 0:
-                    logger.warning(f"Model has {cpu_modules} modules on CPU - generation may be slower")
             
             # Generate response
-            logger.info("Starting generation...")
-            import time
-            start_time = time.time()
-            
             with torch.no_grad():
                 # Get pad_token_id and eos_token_id from the actual tokenizer
                 if hasattr(tokenizer_to_use, 'tokenizer'):
@@ -646,22 +581,12 @@ class Gemma3Handler(MultimodalHandler):
                     pad_token_id = tokenizer_to_use.pad_token_id
                     eos_token_id = tokenizer_to_use.eos_token_id
                 
-                logger.info("Calling model.generate()...")
-                # Removed token ID logging
-                
-                # For Gemma models, ensure we have the right stopping criteria
-                if 'stopping_criteria' in generation_params:
-                    del generation_params['stopping_criteria']  # Remove incorrect stopping_criteria
-                
                 outputs = model.generate(
                     **inputs,
                     **generation_params,
                     pad_token_id=pad_token_id,
                     eos_token_id=eos_token_id
                 )
-                
-                generation_time = time.time() - start_time
-                logger.info(f"Generation completed in {generation_time:.2f} seconds")
             
             # Decode the generated text
             generated_tokens = outputs[0][inputs['input_ids'].shape[1]:]
@@ -687,70 +612,51 @@ class Gemma3Handler(MultimodalHandler):
                 "finish_reason": "stop"
             }
             
-        except torch.cuda.OutOfMemoryError as e:
-            logger.error(f"GPU Out of Memory: {str(e)}")
-            logger.info("Attempting to recover by clearing cache and retrying with CPU offloading...")
-            
-            # Clear GPU memory
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-            
-            # Try generation with smaller batch or CPU offloading
-            try:
-                # Reduce max_new_tokens if it's too high
-                if generation_params.get('max_new_tokens', 512) > 256:
-                    generation_params['max_new_tokens'] = min(256, generation_params.get('max_new_tokens', 512))
-                    logger.info(f"Reduced max_new_generations to {generation_params['max_new_tokens']}")
-                
-                # Move some computation to CPU if possible
-                if hasattr(model, 'config') and hasattr(model.config, 'use_cache'):
-                    model.config.use_cache = False  # Disable KV cache to save memory
-                    logger.info("Disabled KV cache to save memory")
-                
-                # Retry generation
-                with torch.no_grad():
-                    outputs = model.generate(
-                        **inputs,
-                        **generation_params,
-                        pad_token_id=pad_token_id,
-                        eos_token_id=eos_token_id
-                    )
-                
-                # Re-enable cache
-                if hasattr(model, 'config') and hasattr(model.config, 'use_cache'):
-                    model.config.use_cache = True
-                
-                # Decode the generated text
-                generated_tokens = outputs[0][inputs['input_ids'].shape[1]:]
-                
-                # Use the correct tokenizer for decoding
-                if hasattr(tokenizer_to_use, 'tokenizer'):
-                    generated_text = tokenizer_to_use.tokenizer.decode(generated_tokens, skip_special_tokens=True)
-                else:
-                    generated_text = tokenizer_to_use.decode(generated_tokens, skip_special_tokens=True)
-                
-                # Calculate usage statistics
-                usage = {
-                    "prompt_tokens": inputs['input_ids'].shape[1],
-                    "completion_tokens": generated_tokens.shape[0],
-                    "total_tokens": outputs[0].shape[0]
-                }
-                
-                return {
-                    "text": generated_text.strip(),
-                    "usage": usage,
-                    "finish_reason": "stop",
-                    "warning": "Generated with reduced parameters due to memory constraints"
-                }
-                
-            except Exception as retry_error:
-                logger.error(f"Failed to generate even with reduced parameters: {str(retry_error)}")
-                raise RuntimeError(f"GPU Out of Memory and recovery failed: {str(e)}")
-        
         except Exception as e:
             logger.error(f"Error in text generation: {str(e)}", exc_info=True)
             raise
+
+    def process_audio(self, audio_data: bytes) -> Any:
+        """Process audio data for Gemma 3n.
+
+        Args:
+            audio_data: Raw audio bytes
+
+        Returns:
+            Processed audio suitable for model input
+        """
+        try:
+            import soundfile as sf
+            import librosa
+            from io import BytesIO
+
+            # Load audio and resample to 16kHz if necessary
+            audio_np, samplerate = sf.read(BytesIO(audio_data))
+
+            if samplerate != 16000:
+                audio_np = librosa.resample(audio_np, orig_sr=samplerate, target_sr=16000)
+                samplerate = 16000
+
+            logger.info(f"Processed audio: shape={audio_np.shape}, samplerate={samplerate}")
+            return audio_np
+
+        except Exception as e:
+            logger.error(f"Failed to process audio: {e}")
+            return None
+
+    def process_video(self, video_data: bytes) -> Any:
+        """Process video data for Gemma 3n.
+
+        Args:
+            video_data: Raw video bytes or list of frame images
+
+        Returns:
+            Processed video frames suitable for model input
+        """
+        # This is a placeholder implementation
+        # In production, you would use a video processing library like OpenCV or PyAV
+        logger.warning("Video processing is not fully implemented. Returning raw data.")
+        return video_data
 
     def _prepare_multimodal_messages(self, text: str = None, images: List[Any] = None, messages: List[Dict] = None) -> List[Dict]:
         """Prepare a structured message list for multimodal input."""
@@ -794,9 +700,9 @@ class Gemma3Handler(MultimodalHandler):
     def process_multimodal(self, text: str = None, images: List[Union[str, Any]] = None,
                            audio: str = None, video: str = None,
                            model=None, processor=None, **kwargs) -> Dict[str, Any]:
-        """Process multimodal inputs for Gemma 3 using the standard transformers workflow."""
+        """Process multimodal inputs for Gemma 3n using the standard transformers workflow."""
         if audio or video:
-            logger.warning("Gemma 3 models do not support audio or video input.")
+            logger.warning("Gemma 3n models do not support audio or video input.")
         if not model or not processor:
             raise ValueError("Model and processor are required for multimodal processing.")
 
@@ -886,7 +792,6 @@ class Gemma3Handler(MultimodalHandler):
             sanitized_generation_params['eos_token_id'] = tokenizer.eos_token_id
 
             # 7. Generate response
-            # 7. Generate response
             with torch.no_grad():
                 outputs = model.generate(**inputs, **sanitized_generation_params)
 
@@ -909,14 +814,14 @@ class Gemma3Handler(MultimodalHandler):
             }
 
         except Exception as e:
-            logger.error(f"Fatal error in Gemma 3 multimodal processing: {e}", exc_info=True)
+            logger.error(f"Fatal error in Gemma 3n multimodal processing: {e}", exc_info=True)
             # Fallback to the base handler's processing as a last resort
             return super().process_multimodal(
                 text=text, images=images, model=model, processor=processor, **kwargs
             )
 
     def validate_model_files(self, model_path: str) -> Tuple[bool, Optional[str]]:
-        """Validate required model files exist for Gemma 3.
+        """Validate required model files exist for Gemma 3n.
 
         Args:
             model_path: Path to model directory.
@@ -927,7 +832,7 @@ class Gemma3Handler(MultimodalHandler):
         required_files = [
             'config.json',
             'tokenizer_config.json',
-            'tokenizer.json'  # Gemma 3 uses fast tokenizer
+            'tokenizer.json'  # Gemma 3n uses fast tokenizer
         ]
 
         model_path_obj = Path(model_path)
@@ -937,7 +842,7 @@ class Gemma3Handler(MultimodalHandler):
             if not (model_path_obj / file).exists():
                 return False, f"Missing required file: {file}"
 
-        # Check for model weights (Gemma 3 typically uses safetensors)
+        # Check for model weights (Gemma 3n typically uses safetensors)
         has_weights = any(
             model_path_obj.glob(pattern)
             for pattern in ['*.safetensors', '*.bin', '*.pth', '*.pt']
@@ -955,53 +860,54 @@ class Gemma3Handler(MultimodalHandler):
 
         if missing_processor:
             logger.warning(
-                f"Missing processor files for Gemma 3 model: {missing_processor}"
+                f"Missing processor files for Gemma 3n model: {missing_processor}"
             )
 
         return True, None
 
     def get_training_parameters(self) -> Dict[str, Any]:
-        """Get Gemma 3 specific training parameters.
+        """Get Gemma 3n specific training parameters.
 
         Returns:
             Dictionary with training parameter overrides.
         """
         params = super().get_training_parameters()
 
-        # Gemma 3 specific modules for LoRA
+        # Gemma 3n specific modules for LoRA
         params['lora_target_modules'] = [
             "q_proj", "v_proj", "k_proj", "o_proj",
             "gate_proj", "up_proj", "down_proj"
         ]
 
-        # Gemma 3 prefers bfloat16
+        # Gemma 3n prefers bfloat16
         params['training_precision'] = 'bf16'
 
-        # Context length based on model size
-        if '1b' in self.model_id.lower():
-            params['max_seq_length'] = 8192  # 1B model limit
-        else:
-            params['max_seq_length'] = 8192  # Safe limit for all
+        # Context length for Gemma 3n
+        params['max_seq_length'] = 8192  # Safe limit
 
-        # Dataset formats - multimodal support
+        # Dataset formats - multimodal support including audio/video
         params['dataset_formats'] = [
             'alpaca', 'sharegpt', 'openai', 'chat',
-            'completion', 'qa', 'vision', 'vision_qa'
+            'completion', 'qa', 'vision', 'vision_qa',
+            'audio', 'video', 'multimodal'
         ]
 
-        # Gemma 3 doesn't support flash attention with quantization
+        # Gemma 3n doesn't support flash attention with quantization
         params['supports_flash_attention'] = False
 
-        # Special tokens for Gemma
+        # Special tokens for Gemma 3n
         params['special_tokens'] = {
-            'image_token': '<image_soft_token>'
+            'image_token': '<image_soft_token>',
+            'audio_token': '<audio_soft_token>',
+            'video_token': '<video_soft_token>'
         }
 
         return params
 
     async def generate_stream(self, prompt: str = None, messages: List[Dict[str, str]] = None,
-                              model=None, tokenizer=None, processor=None, images=None, **kwargs):
-        """Stream text generation for Gemma 3 models.
+                              model=None, tokenizer=None, processor=None, images=None,
+                              audio=None, video=None, **kwargs):
+        """Stream text generation for Gemma 3n models.
 
         This is an async generator that yields chunks of generated text.
 
@@ -1011,6 +917,9 @@ class Gemma3Handler(MultimodalHandler):
             model: The loaded model
             tokenizer: The loaded tokenizer
             processor: The loaded processor (preferred over tokenizer)
+            images: Images for multimodal input
+            audio: Audio for multimodal input
+            video: Video for multimodal input
             **kwargs: Additional generation arguments
 
         Yields:
@@ -1039,14 +948,18 @@ class Gemma3Handler(MultimodalHandler):
                 raise ValueError("Either prompt or messages must be provided")
 
             # Check if this is multimodal request
-            is_multimodal = images is not None and len(images) > 0
+            is_multimodal = (images is not None and len(images) > 0) or audio is not None or video is not None
 
             if is_multimodal:
                 # For multimodal, delegate to process_multimodal
-                logger.info(f"[STREAM] Detected multimodal request with {len(images)} images")
+                logger.info(
+                    f"[STREAM] Detected multimodal request - images: {len(images) if images else 0}, "
+                    f"audio: {bool(audio)}, video: {bool(video)}")
                 result = self.process_multimodal(
                     text=prompt,
                     images=images,
+                    audio=audio,
+                    video=video,
                     model=model,
                     processor=processor or tokenizer,
                     messages=messages,
@@ -1167,7 +1080,7 @@ class Gemma3Handler(MultimodalHandler):
             }
 
         except Exception as e:
-            logger.error(f"Error in Gemma 3 streaming: {e}", exc_info=True)
+            logger.error(f"Error in Gemma 3n streaming: {e}", exc_info=True)
             yield {
                 "type": "error",
                 "error": str(e),
