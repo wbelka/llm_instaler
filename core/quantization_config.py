@@ -1,6 +1,6 @@
 """Centralized quantization configuration for LLM models."""
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List
 import logging
 
 logger = logging.getLogger(__name__)
@@ -54,6 +54,11 @@ class QuantizationConfig:
             "preferred_compute_dtype": "bfloat16",
             "supports_flash_attention_with_quantization": False,
         },
+        "gemma3n": {
+            "preferred_compute_dtype": "bfloat16",
+            "supports_flash_attention_with_quantization": False,
+            "supports_4bit": False,  # Gemma3n has issues with 4-bit due to altup layer
+        },
         "qwen2": {
             "preferred_compute_dtype": "float16",
             "supports_flash_attention_with_quantization": True,
@@ -88,8 +93,8 @@ class QuantizationConfig:
         return cls.DEFAULT_BITSANDBYTES_VERSION
     
     @classmethod
-    def supports_quantization(cls, model_type: str, model_family: str, 
-                            model_info: Dict[str, Any] = None) -> bool:
+    def supports_quantization(cls, model_type: str, model_family: str,
+                              model_info: Dict[str, Any] = None) -> bool:
         """Check if a model supports quantization.
         
         Args:
@@ -153,7 +158,7 @@ class QuantizationConfig:
     
     @classmethod
     def should_include_bitsandbytes(cls, model_type: str, model_family: str,
-                                  dependencies: List[str]) -> bool:
+                                    dependencies: List[str]) -> bool:
         """Check if bitsandbytes should be included in dependencies.
         
         Args:

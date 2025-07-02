@@ -46,16 +46,19 @@ def get_handler_class(model_info: Dict[str, Any]) -> Type[BaseHandler]:
 
     # Check for specific models
     model_id = model_info.get('model_id', '').lower()
-    
+
     # Check for DeepSeek models (especially R1)
     if 'deepseek' in model_id:
         handler_module = 'deepseek'
 
+    # Check for Gemma 3n models first (they need special audio/video handling)
+    if '3n' in model_id and ('gemma' in model_id):
+        handler_module = 'gemma3n'
     # Check for Gemma 3 multimodal models
-    if (('gemma-3' in model_id or 'gemma3' in model_id) and
-        (model_info.get('is_gemma3_multimodal', False) or
-         model_family == 'multimodal' or
-         'vision' in str(model_info.get('config', {})).lower())):
+    elif (('gemma-3' in model_id or 'gemma3' in model_id) and
+          (model_info.get('is_gemma3_multimodal', False) or
+           model_family == 'multimodal' or
+           'vision' in str(model_info.get('config', {})).lower())):
         handler_module = 'gemma3'
     # Check for PaliGemma models
     elif 'paligemma' in model_id:
@@ -85,20 +88,26 @@ def get_handler_class(model_info: Dict[str, Any]) -> Type[BaseHandler]:
     try:
         # Import the module securely
         module = importlib.import_module(f'handlers.{handler_module}')
-        
-        # Get the handler class name (capitalize first letter)
-        handler_class_name = f'{handler_module.title()}Handler'
-        
+
+        # Get the handler class name (capitalize first letter of each word)
+        # Special handling for underscore-separated names
+        if handler_module == 'qwen_vl':
+            # Special case: qwen_vl -> QwenVLHandler (not QwenVlHandler)
+            handler_class_name = 'QwenVLHandler'
+        else:
+            parts = handler_module.split('_')
+            handler_class_name = ''.join(part.capitalize() for part in parts) + 'Handler'
+
         # Get the handler class from the module
         if not hasattr(module, handler_class_name):
             raise AttributeError(f"Module {handler_module} does not have {handler_class_name}")
-            
+
         handler_class = getattr(module, handler_class_name)
-        
+
         # Validate it's actually a handler class
         if not issubclass(handler_class, BaseHandler):
             raise TypeError(f"{handler_class_name} is not a subclass of BaseHandler")
-            
+
         return handler_class
     except (ImportError, AttributeError, TypeError) as e:
         raise ValueError(f"Failed to load handler for {handler_module}: {e}")

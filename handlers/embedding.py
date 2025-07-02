@@ -313,8 +313,20 @@ class EmbeddingHandler(BaseHandler):
                 max_length=kwargs.get('max_length', 512)
             )
             
-            if hasattr(model, 'device'):
+            # Move inputs to the correct device
+            if hasattr(model, 'device') and model.device.type != 'meta':
                 encoded = {k: v.to(model.device) for k, v in encoded.items()}
+            elif hasattr(model, 'hf_device_map'):
+                # For models with device_map, move inputs to first device (usually GPU)
+                first_device = next(iter(model.hf_device_map.values()))
+                if isinstance(first_device, int):
+                    first_device = f'cuda:{first_device}'
+                elif first_device == 'cpu':
+                    first_device = 'cpu'
+                encoded = {k: v.to(first_device) for k, v in encoded.items()}
+            elif torch.cuda.is_available():
+                # Fallback: if GPU is available, use it
+                encoded = {k: v.cuda() for k, v in encoded.items()}
             
             # Generate embeddings
             with torch.no_grad():
@@ -369,8 +381,21 @@ class EmbeddingHandler(BaseHandler):
                 raise ValueError("Processor required for image encoding")
             
             inputs = processor(images=pil_images, return_tensors="pt")
-            if hasattr(model, 'device'):
+            
+            # Move inputs to the correct device
+            if hasattr(model, 'device') and model.device.type != 'meta':
                 inputs = {k: v.to(model.device) for k, v in inputs.items()}
+            elif hasattr(model, 'hf_device_map'):
+                # For models with device_map, move inputs to first device (usually GPU)
+                first_device = next(iter(model.hf_device_map.values()))
+                if isinstance(first_device, int):
+                    first_device = f'cuda:{first_device}'
+                elif first_device == 'cpu':
+                    first_device = 'cpu'
+                inputs = {k: v.to(first_device) for k, v in inputs.items()}
+            elif torch.cuda.is_available():
+                # Fallback: if GPU is available, use it
+                inputs = {k: v.cuda() for k, v in inputs.items()}
             
             with torch.no_grad():
                 embeddings = model.encode_image(**inputs)
@@ -417,9 +442,20 @@ class EmbeddingHandler(BaseHandler):
         if not inputs:
             raise ValueError("Either text or image must be provided")
         
-        # Move to device
-        if hasattr(model, 'device'):
+        # Move inputs to the correct device
+        if hasattr(model, 'device') and model.device.type != 'meta':
             inputs = {k: v.to(model.device) for k, v in inputs.items()}
+        elif hasattr(model, 'hf_device_map'):
+            # For models with device_map, move inputs to first device (usually GPU)
+            first_device = next(iter(model.hf_device_map.values()))
+            if isinstance(first_device, int):
+                first_device = f'cuda:{first_device}'
+            elif first_device == 'cpu':
+                first_device = 'cpu'
+            inputs = {k: v.to(first_device) for k, v in inputs.items()}
+        elif torch.cuda.is_available():
+            # Fallback: if GPU is available, use it
+            inputs = {k: v.cuda() for k, v in inputs.items()}
         
         # Generate embeddings
         embeddings = {}

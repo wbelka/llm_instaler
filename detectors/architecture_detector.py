@@ -59,6 +59,7 @@ class ArchitectureDetector:
         'multi_modality': 'multimodal',
         'paligemma': 'multimodal',  # Google's PaliGemma VLM
         'gemma3_vlm': 'multimodal',  # Gemma 3 multimodal variant
+        'gemma3n': 'multimodal',  # Gemma 3n with audio/video support
 
         # Vision models
         'vit': 'vision',
@@ -119,6 +120,7 @@ class ArchitectureDetector:
         'GemmaForCausalLM': 'language-model',
         'Gemma2ForCausalLM': 'language-model',
         'Gemma3ForConditionalGeneration': 'multimodal',  # Gemma 3 multimodal
+        'Gemma3nForConditionalGeneration': 'multimodal',  # Gemma 3n with audio/video
         'PaliGemmaForConditionalGeneration': 'multimodal',  # PaliGemma VLM
         'PhiForCausalLM': 'language-model',
 
@@ -162,13 +164,16 @@ class ArchitectureDetector:
             # Determine model family
             model_family = 'unknown'
 
+            # Special cases (most specific first)
+            if "stabilityai/stable-diffusion-3.5-large" in config.get('_name_or_path', '').lower():
+                model_type = 'stable-diffusion-3'
+                model_family = 'stable-diffusion-3'
             # First check architecture mapping
-            if architecture and architecture in self.ARCHITECTURE_HANDLERS:
+            elif architecture and architecture in self.ARCHITECTURE_HANDLERS:
                 model_family = self.ARCHITECTURE_HANDLERS[architecture]
             # Then check model type mapping
             elif model_type in self.MODEL_TYPE_MAPPING:
                 model_family = self.MODEL_TYPE_MAPPING[model_type]
-            # Special cases
             elif 'vision' in model_type and 'language' in model_type:
                 model_family = 'multimodal'
             elif 'text-to-image' in model_type or 'diffusion' in model_type:
@@ -260,6 +265,8 @@ class ArchitectureDetector:
             'internlm',
             'gemma3',  # Gemma 3 multimodal may require trust_remote_code
             'gemma-3',
+            'gemma3n',  # Gemma 3n with audio/video support
+            'gemma-3n',
             'paligemma',
         ]
 
@@ -287,7 +294,8 @@ class ArchitectureDetector:
             True if it's a Gemma 3 multimodal model
         """
         # Check architecture first
-        if architecture and 'Gemma3ForConditionalGeneration' in architecture:
+        if architecture and ('Gemma3ForConditionalGeneration' in architecture or
+                             'Gemma3nForConditionalGeneration' in architecture):
             return True
 
         # Check model type
@@ -299,15 +307,20 @@ class ArchitectureDetector:
                 return True
             if 'max_image_tokens' in config:
                 return True
+            # Check for audio/video indicators (Gemma 3n)
+            if 'audio_config' in config or 'video_config' in config:
+                return True
 
         # Check for specific Gemma 3 multimodal model names in _name_or_path
         name_or_path = config.get('_name_or_path', '').lower()
         if 'gemma-3' in name_or_path or 'gemma3' in name_or_path:
             # Check if it's the instruction-tuned multimodal variant
-            indicators = ['-it', 'instruct', 'chat', 'vlm', 'vision']
+            indicators = ['-it', 'instruct', 'chat', 'vlm', 'vision', '3n']
             if any(indicator in name_or_path for indicator in indicators):
                 # Additional check for multimodal capabilities
-                if any(key in config for key in ['vision_config', 'image_token_id', 'vocab_size']):
+                multimodal_keys = ['vision_config', 'image_token_id', 'vocab_size',
+                                   'audio_config', 'video_config']
+                if any(key in config for key in multimodal_keys):
                     return True
 
         return False
@@ -391,7 +404,10 @@ class ArchitectureDetector:
             pipeline_class = model_index.get('_class_name', '')
 
             # Determine family from pipeline class
-            if 'Video' in pipeline_class:
+            if 'StableDiffusion3Pipeline' in pipeline_class:
+                model_family = 'stable-diffusion-3'
+                model_type = 'stable-diffusion-3'
+            elif 'Video' in pipeline_class:
                 model_family = 'video-generation'
                 model_type = 'text-to-video'
             elif 'Audio' in pipeline_class:

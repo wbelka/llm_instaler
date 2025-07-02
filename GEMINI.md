@@ -40,6 +40,8 @@ When adding support for a new model or modifying existing functionality, please 
 - `DETECTION_ALGORITHM.md`: Explains how the system identifies model types.
 - `HANDLER_DEVELOPMENT_GUIDE.md`: A detailed guide to creating new model handlers.
 - `QUANTIZATION_SUPPORT.md`: Describes how quantization is implemented and supported.
+- `LLM_INSTALLER_REFERENCE.md`: Installer Help
+- `config.yaml`: configuration file
 
 ## How to Approach Common Tasks
 
@@ -78,6 +80,12 @@ You have access to a variety of tools to help you with your tasks. These include
 - `run_shell_command`: Execute a shell command.
 
 Please use these tools to interact with the file system and the codebase.
+
+## Update installed models
+
+read documentation
+LLM_INSTALLER_REFERENCE.md and config.yaml
+
 
 ## Final Notes
 

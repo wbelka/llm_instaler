@@ -173,7 +173,8 @@ class BaseHandler(ABC):
                 else:
                     model_kwargs['quantization_config'] = BitsAndBytesConfig(
                         load_in_8bit=True,
-                        bnb_4bit_compute_dtype=None,
+                        llm_int8_enable_fp32_cpu_offload=True,  # Enable CPU offloading for large models
+                        bnb_4bit_compute_dtype=torch_dtype if torch_dtype != torch.float32 else None,
                     )
                 # Add bitsandbytes to dependencies if not present
                 from core.quantization_config import QuantizationConfig

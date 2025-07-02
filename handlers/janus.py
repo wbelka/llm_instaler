@@ -81,12 +81,29 @@ class JanusHandler(MultimodalHandler):
         )
         
         # Tokenize
-        input_ids = tokenizer(
+        inputs = tokenizer(
             sft_format,
             return_tensors="pt",
             max_length=kwargs.get('max_length', 2048),
             truncation=True
-        ).input_ids.to(model.device)
+        )
+        
+        # Move inputs to the correct device
+        if hasattr(model, 'device') and model.device.type != 'meta':
+            input_ids = inputs.input_ids.to(model.device)
+        elif hasattr(model, 'hf_device_map'):
+            # For models with device_map, move inputs to first device (usually GPU)
+            first_device = next(iter(model.hf_device_map.values()))
+            if isinstance(first_device, int):
+                first_device = f'cuda:{first_device}'
+            elif first_device == 'cpu':
+                first_device = 'cpu'
+            input_ids = inputs.input_ids.to(first_device)
+        elif torch.cuda.is_available():
+            # Fallback: if GPU is available, use it
+            input_ids = inputs.input_ids.cuda()
+        else:
+            input_ids = inputs.input_ids
         
         # Generate
         with torch.no_grad():

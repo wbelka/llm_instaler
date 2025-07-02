@@ -478,7 +478,14 @@
             maxTokens: 4096,
             topP: 0.9,
             systemPrompt: "You are a helpful AI assistant.",
-            maxImageSize: 2048
+            maxImageSize: 2048,
+            // Image generation settings
+            num_inference_steps: 28,
+            guidance_scale: 4.5,
+            width: 1024,
+            height: 1024,
+            negative_prompt: "",
+            max_sequence_length: 512
         };
 
         // Initialize
@@ -731,7 +738,14 @@
                     max_tokens: settings.maxTokens,
                     top_p: settings.topP,
                     mode: currentMode,
-                    max_image_size: settings.maxImageSize
+                    max_image_size: settings.maxImageSize,
+                    // Add image generation parameters
+                    num_inference_steps: settings.num_inference_steps,
+                    guidance_scale: settings.guidance_scale,
+                    width: settings.width,
+                    height: settings.height,
+                    negative_prompt: settings.negative_prompt,
+                    max_sequence_length: settings.max_sequence_length
                 };
                 
                 // Add images if present (from current upload or history)
@@ -1056,18 +1070,115 @@
 
         // Settings functions
         function openSettings() {
-            document.getElementById('settingsModal').style.display = 'block';
+            // Create settings modal dynamically
+            const modal = document.createElement('div');
+            modal.id = 'settingsModal';
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.8);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 1000;
+            `;
             
-            // Load current settings
-            document.getElementById('temperature').value = settings.temperature;
-            document.getElementById('maxTokens').value = settings.maxTokens;
-            document.getElementById('topP').value = settings.topP;
-            document.getElementById('systemPrompt').value = settings.systemPrompt;
-            document.getElementById('maxImageSize').value = settings.maxImageSize;
+            const content = document.createElement('div');
+            content.style.cssText = `
+                background: var(--bg-color);
+                border: 2px solid var(--border-color);
+                padding: 20px;
+                max-width: 600px;
+                max-height: 80vh;
+                overflow-y: auto;
+                color: var(--text-color);
+                font-family: inherit;
+            `;
+            
+            content.innerHTML = `
+                <h2 style="margin-bottom: 20px; color: var(--text-color);">SYSTEM CONFIGURATION</h2>
+                
+                <div style="margin-bottom: 20px;">
+                    <h3 style="color: var(--info-color); margin-bottom: 10px;">TEXT GENERATION</h3>
+                    <label style="display: block; margin-bottom: 10px;">
+                        Temperature (0-2): 
+                        <input type="number" id="temperature" value="${settings.temperature}" min="0" max="2" step="0.1" style="background: var(--button-bg); color: var(--text-color); border: 1px solid var(--border-color); padding: 5px; width: 100px;">
+                    </label>
+                    <label style="display: block; margin-bottom: 10px;">
+                        Max Tokens: 
+                        <input type="number" id="maxTokens" value="${settings.maxTokens}" min="1" max="131072" style="background: var(--button-bg); color: var(--text-color); border: 1px solid var(--border-color); padding: 5px; width: 100px;">
+                    </label>
+                    <label style="display: block; margin-bottom: 10px;">
+                        Top P (0-1): 
+                        <input type="number" id="topP" value="${settings.topP}" min="0" max="1" step="0.1" style="background: var(--button-bg); color: var(--text-color); border: 1px solid var(--border-color); padding: 5px; width: 100px;">
+                    </label>
+                </div>
+                
+                <div style="margin-bottom: 20px;">
+                    <h3 style="color: var(--info-color); margin-bottom: 10px;">IMAGE GENERATION</h3>
+                    <label style="display: block; margin-bottom: 10px;">
+                        Steps (1-1000): 
+                        <input type="number" id="num_inference_steps" value="${settings.num_inference_steps}" min="1" max="1000" style="background: var(--button-bg); color: var(--text-color); border: 1px solid var(--border-color); padding: 5px; width: 100px;">
+                    </label>
+                    <label style="display: block; margin-bottom: 10px;">
+                        Guidance Scale (0-20): 
+                        <input type="number" id="guidance_scale" value="${settings.guidance_scale}" min="0" max="20" step="0.5" style="background: var(--button-bg); color: var(--text-color); border: 1px solid var(--border-color); padding: 5px; width: 100px;">
+                    </label>
+                    <label style="display: block; margin-bottom: 10px;">
+                        Width: 
+                        <input type="number" id="width" value="${settings.width}" min="64" max="4096" step="64" style="background: var(--button-bg); color: var(--text-color); border: 1px solid var(--border-color); padding: 5px; width: 100px;">
+                    </label>
+                    <label style="display: block; margin-bottom: 10px;">
+                        Height: 
+                        <input type="number" id="height" value="${settings.height}" min="64" max="4096" step="64" style="background: var(--button-bg); color: var(--text-color); border: 1px solid var(--border-color); padding: 5px; width: 100px;">
+                    </label>
+                    <label style="display: block; margin-bottom: 10px;">
+                        Max Sequence Length: 
+                        <input type="number" id="max_sequence_length" value="${settings.max_sequence_length}" min="1" max="512" style="background: var(--button-bg); color: var(--text-color); border: 1px solid var(--border-color); padding: 5px; width: 100px;">
+                    </label>
+                    <label style="display: block; margin-bottom: 10px;">
+                        Negative Prompt: 
+                        <textarea id="negative_prompt" style="background: var(--button-bg); color: var(--text-color); border: 1px solid var(--border-color); padding: 5px; width: 100%; height: 60px;">${settings.negative_prompt}</textarea>
+                    </label>
+                </div>
+                
+                <div style="margin-bottom: 20px;">
+                    <h3 style="color: var(--info-color); margin-bottom: 10px;">SYSTEM</h3>
+                    <label style="display: block; margin-bottom: 10px;">
+                        System Prompt: 
+                        <textarea id="systemPrompt" style="background: var(--button-bg); color: var(--text-color); border: 1px solid var(--border-color); padding: 5px; width: 100%; height: 100px;">${settings.systemPrompt}</textarea>
+                    </label>
+                    <label style="display: block; margin-bottom: 10px;">
+                        Max Image Size: 
+                        <input type="number" id="maxImageSize" value="${settings.maxImageSize}" min="256" max="4096" style="background: var(--button-bg); color: var(--text-color); border: 1px solid var(--border-color); padding: 5px; width: 100px;">
+                    </label>
+                </div>
+                
+                <div style="text-align: right;">
+                    <button onclick="saveSettings()" style="background: var(--button-bg); color: var(--text-color); border: 1px solid var(--border-color); padding: 10px 20px; margin-right: 10px; cursor: pointer;">SAVE</button>
+                    <button onclick="closeSettings()" style="background: var(--button-bg); color: var(--text-color); border: 1px solid var(--border-color); padding: 10px 20px; cursor: pointer;">CANCEL</button>
+                </div>
+            `;
+            
+            modal.appendChild(content);
+            document.body.appendChild(modal);
+            
+            // Close on outside click
+            modal.onclick = function(e) {
+                if (e.target === modal) {
+                    closeSettings();
+                }
+            };
         }
 
         function closeSettings() {
-            document.getElementById('settingsModal').style.display = 'none';
+            const modal = document.getElementById('settingsModal');
+            if (modal) {
+                modal.remove();
+            }
         }
 
         function saveSettings() {
@@ -1076,6 +1187,14 @@
             settings.topP = parseFloat(document.getElementById('topP').value);
             settings.systemPrompt = document.getElementById('systemPrompt').value;
             settings.maxImageSize = parseInt(document.getElementById('maxImageSize').value);
+            
+            // Image generation settings
+            settings.num_inference_steps = parseInt(document.getElementById('num_inference_steps').value);
+            settings.guidance_scale = parseFloat(document.getElementById('guidance_scale').value);
+            settings.width = parseInt(document.getElementById('width').value);
+            settings.height = parseInt(document.getElementById('height').value);
+            settings.negative_prompt = document.getElementById('negative_prompt').value;
+            settings.max_sequence_length = parseInt(document.getElementById('max_sequence_length').value);
             
             localStorage.setItem('terminalSettings', JSON.stringify(settings));
             closeSettings();

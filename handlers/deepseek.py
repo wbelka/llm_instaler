@@ -125,8 +125,21 @@ class DeepseekHandler(BaseHandler):
         
         # Tokenize
         inputs = tokenizer(text, return_tensors="pt")
-        if hasattr(model, "device"):
+        
+        # Move inputs to the correct device
+        if hasattr(model, 'device') and model.device.type != 'meta':
             inputs = {k: v.to(model.device) for k, v in inputs.items()}
+        elif hasattr(model, 'hf_device_map'):
+            # For models with device_map, move inputs to first device (usually GPU)
+            first_device = next(iter(model.hf_device_map.values()))
+            if isinstance(first_device, int):
+                first_device = f'cuda:{first_device}'
+            elif first_device == 'cpu':
+                first_device = 'cpu'
+            inputs = {k: v.to(first_device) for k, v in inputs.items()}
+        elif torch.cuda.is_available():
+            # Fallback: if GPU is available, use it
+            inputs = {k: v.cuda() for k, v in inputs.items()}
         
         # Generate
         with torch.no_grad():
@@ -159,7 +172,7 @@ class DeepseekHandler(BaseHandler):
         input_length = inputs["input_ids"].shape[1]
         generated_tokens = outputs[0][input_length:]
         
-        logger.info(f"Generated {len(generated_tokens)} new tokens")
+        # Removed token count logging
         
         generated_text = tokenizer.decode(
             generated_tokens,
@@ -261,8 +274,21 @@ class DeepseekHandler(BaseHandler):
         
         # Tokenize
         inputs = tokenizer(text, return_tensors="pt")
-        if hasattr(model, "device"):
+        
+        # Move inputs to the correct device
+        if hasattr(model, 'device') and model.device.type != 'meta':
             inputs = {k: v.to(model.device) for k, v in inputs.items()}
+        elif hasattr(model, 'hf_device_map'):
+            # For models with device_map, move inputs to first device (usually GPU)
+            first_device = next(iter(model.hf_device_map.values()))
+            if isinstance(first_device, int):
+                first_device = f'cuda:{first_device}'
+            elif first_device == 'cpu':
+                first_device = 'cpu'
+            inputs = {k: v.to(first_device) for k, v in inputs.items()}
+        elif torch.cuda.is_available():
+            # Fallback: if GPU is available, use it
+            inputs = {k: v.cuda() for k, v in inputs.items()}
         
         # Create streamer
         streamer = TextIteratorStreamer(

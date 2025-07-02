@@ -283,6 +283,7 @@ class TrainingConfig:
             "mistral": 4096,
             "gemma": 4096,
             "gemma3": 4096,
+            "gemma3n": 4096,  # Gemma 3n has 32K context but safer to use 4K for training
             "qwen": 2048,
             "qwen3": 2048,  # Much safer for training than 32k
             "phi": 2048,

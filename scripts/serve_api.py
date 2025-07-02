@@ -172,9 +172,11 @@ class SecureGenerateRequest(BaseModel):
     negative_prompt: Optional[str] = Field(None, max_length=1000)
     num_inference_steps: Annotated[int, Field(ge=1, le=1000)] = 50
     guidance_scale: Annotated[float, Field(ge=0.0, le=20.0)] = 7.5
-    width: Annotated[int, Field(ge=64, le=2048)] = 512
-    height: Annotated[int, Field(ge=64, le=2048)] = 512
+    width: Annotated[int, Field(ge=64, le=4096)] = 1024
+    height: Annotated[int, Field(ge=64, le=4096)] = 1024
     seed: Optional[Annotated[int, Field(ge=0)]] = None
+    # SD3 specific parameters
+    max_sequence_length: Annotated[int, Field(ge=1, le=512)] = 512
     
     # Video generation parameters
     num_frames: Annotated[int, Field(ge=1, le=128)] = 16
@@ -562,18 +564,26 @@ async def generate(request: SecureGenerateRequest):
                                  for word in ["draw", "generate image", "create image"])):
             # Image generation
             if hasattr(HANDLER, 'generate_image'):
-                result = HANDLER.generate_image(
-                    prompt=request.prompt or (request.messages[-1]["content"] if request.messages else ""),
-                    negative_prompt=request.negative_prompt,
-                    model=MODEL,
-                    tokenizer=TOKENIZER,
-                    temperature=request.temperature,
-                    guidance_scale=request.guidance_scale,
-                    width=request.width,
-                    height=request.height,
-                    num_inference_steps=request.num_inference_steps,
-                    seed=request.seed
-                )
+                # Prepare kwargs for generate_image
+                kwargs = {
+                    "prompt": request.prompt or (request.messages[-1]["content"] if request.messages else ""),
+                    "negative_prompt": request.negative_prompt,
+                    "model": MODEL,
+                    "temperature": request.temperature,
+                    "guidance_scale": request.guidance_scale,
+                    "width": request.width,
+                    "height": request.height,
+                    "num_inference_steps": request.num_inference_steps,
+                    "seed": request.seed
+                }
+                
+                # Check if handler's generate_image method accepts tokenizer parameter
+                import inspect
+                sig = inspect.signature(HANDLER.generate_image)
+                if 'tokenizer' in sig.parameters:
+                    kwargs["tokenizer"] = TOKENIZER
+                
+                result = HANDLER.generate_image(**kwargs)
                 return GenerateResponse(**result)
             else:
                 raise HTTPException(status_code=501, detail="Handler does not support image generation")
@@ -613,10 +623,15 @@ async def generate(request: SecureGenerateRequest):
         
         else:
             logger.info(">>> TEXT GENERATION ROUTE")
+            logger.debug(f"Text generation request - prompt: {request.prompt[:100] if request.prompt else 'None'}...")
+            logger.debug(f"Messages count: {len(request.messages) if request.messages else 0}")
+            logger.debug(f"Generation params - temp: {request.temperature}, max_tokens: {request.max_tokens}, mode: {request.mode}")
+            
             # Text generation
             if hasattr(HANDLER, 'generate_text'):
+                logger.debug(f"Using handler: {type(HANDLER).__name__}")
                 result = HANDLER.generate_text(
-                    prompt=request.prompt,
+                    request.prompt or "",  # Pass empty string if prompt is None
                     messages=request.messages,
                     model=MODEL,
                     tokenizer=TOKENIZER,
@@ -627,6 +642,7 @@ async def generate(request: SecureGenerateRequest):
                     stop_sequences=request.stop_sequences,
                     mode=request.mode
                 )
+                logger.debug(f"Text generation completed - response length: {len(result.get('text', '')) if result else 0}")
                 return GenerateResponse(**result)
             else:
                 raise HTTPException(status_code=501, detail="Handler does not support text generation")
@@ -634,8 +650,11 @@ async def generate(request: SecureGenerateRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Generation error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
+        logger.error(f"Generation error: {type(e).__name__}: {str(e)}")
+        logger.error(f"Request details - mode: {request.mode}, has_messages: {bool(request.messages)}, has_images: {bool(request.images or request.image_data)}")
+        import traceback
+        logger.error(f"Full traceback:\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {type(e).__name__}: {str(e)}")
 
 
 @app.post("/generate/stream")

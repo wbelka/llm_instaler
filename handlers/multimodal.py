@@ -585,9 +585,22 @@ Note: This is a large package and may take some time to install.
             else:
                 inputs['images'] = pil_images
         
-        # Move to device
-        if hasattr(model, 'device'):
+        # Move inputs to the correct device
+        if hasattr(model, 'device') and model.device.type != 'meta':
             inputs = {k: v.to(model.device) if hasattr(v, 'to') else v 
+                     for k, v in inputs.items()}
+        elif hasattr(model, 'hf_device_map'):
+            # For models with device_map, move inputs to first device (usually GPU)
+            first_device = next(iter(model.hf_device_map.values()))
+            if isinstance(first_device, int):
+                first_device = f'cuda:{first_device}'
+            elif first_device == 'cpu':
+                first_device = 'cpu'
+            inputs = {k: v.to(first_device) if hasattr(v, 'to') else v 
+                     for k, v in inputs.items()}
+        elif torch.cuda.is_available():
+            # Fallback: if GPU is available, use it
+            inputs = {k: v.cuda() if hasattr(v, 'cuda') else v 
                      for k, v in inputs.items()}
         
         # Generate with memory-efficient settings

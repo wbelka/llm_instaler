@@ -75,11 +75,19 @@ class DiffusersDetector(BaseDetector):
         """
         config_data = model_info.get('config_data', {})
         model_index = config_data.get('model_index.json', {})
+        model_id = model_info.get('model_id', '').lower()
         
         # Determine model type from pipeline class
         pipeline_class = model_index.get('_class_name', '')
         
-        if 'Video' in pipeline_class:
+        # Check for Stable Diffusion 3 models
+        if ('StableDiffusion3' in pipeline_class or 
+            'stable-diffusion-3' in model_id or
+            'sd3' in model_id or
+            'stabilityai/stable-diffusion-3' in model_id):
+            model_family = 'stable-diffusion-3'
+            model_type = 'stable-diffusion-3'
+        elif 'Video' in pipeline_class:
             model_family = 'video-generation'
             model_type = 'text-to-video'
         elif 'Audio' in pipeline_class:

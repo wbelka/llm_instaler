@@ -39,6 +39,7 @@ DTYPE="auto"
 DEVICE="auto"
 STREAM_MODE="false"
 UI_FILE="serve_terminal.html"
+CPU_OFFLOAD="false"
 EXTRA_ARGS=""
 
 while [[ $# -gt 0 ]]; do
@@ -70,6 +71,10 @@ while [[ $# -gt 0 ]]; do
         --ui-file)
             UI_FILE="$2"
             shift 2
+            ;;
+        --cpu-offload)
+            CPU_OFFLOAD="true"
+            shift
             ;;
         *)
             EXTRA_ARGS="$EXTRA_ARGS $1"

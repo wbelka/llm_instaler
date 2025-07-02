@@ -19,6 +19,7 @@ from core.utils import (
     print_info, console
 )
 from detectors.registry import get_detector_registry
+from handlers.registry import get_handler_registry
 from rich.table import Table
 
 
@@ -568,6 +569,23 @@ class ModelChecker:
             model_data: Dict[str, Any],
             files_info: List[Dict[str, Any]]) -> ModelRequirements:
         """Collect all model requirements."""
+        # Check if we have a handler that can analyze requirements
+        handler_registry = get_handler_registry()
+        handler_class = handler_registry.get_handler_for_model(model_data)
+        
+        if handler_class:
+            try:
+                # Create handler instance and analyze
+                handler = handler_class(model_data)
+                if hasattr(handler, 'analyze'):
+                    handler_requirements = handler.analyze()
+                    # Use handler requirements but calculate size from actual files
+                    handler_requirements.disk_space_gb = self._calculate_disk_space(files_info)
+                    return handler_requirements
+            except Exception as e:
+                self.logger.warning(f"Failed to get requirements from handler: {e}")
+        
+        # Fallback to default requirements collection
         requirements = ModelRequirements()
 
         # Basic model info
@@ -604,6 +622,20 @@ class ModelChecker:
 
     def _get_base_dependencies(self, model_data: Dict[str, Any]) -> List[str]:
         """Get base dependencies for the model."""
+        # First check if we have a handler that can provide dependencies
+        handler_registry = get_handler_registry()
+        handler_class = handler_registry.get_handler_for_model(model_data)
+        
+        if handler_class:
+            try:
+                # Create handler instance and get dependencies
+                handler = handler_class(model_data)
+                if hasattr(handler, 'get_dependencies'):
+                    return handler.get_dependencies()
+            except Exception as e:
+                self.logger.warning(f"Failed to get dependencies from handler: {e}")
+        
+        # Fallback to default dependency resolution
         deps = ["torch", "accelerate"]
 
         # Add primary library
@@ -613,7 +645,10 @@ class ModelChecker:
 
         # Add dependencies based on model family
         family = model_data.get("model_family", "")
-        if family == "image-generation":
+        if family == "stable-diffusion-3":
+            # SD3 specific dependencies
+            deps.extend(["pillow", "numpy", "sentencepiece", "bitsandbytes"])
+        elif family == "image-generation":
             deps.extend(["pillow", "numpy"])
         elif family == "video-generation":
             deps.extend(["pillow", "numpy", "opencv-python", "imageio"])

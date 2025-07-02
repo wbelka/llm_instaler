@@ -1334,74 +1334,96 @@ To install manually:
                 dst = model_dir / script_name
 
                 if src.exists():
-                    shutil.copy2(src, dst)
-
-                    if make_executable:
-                        # Make executable
-                        dst.chmod(dst.stat().st_mode | 0o755)
-
-                    self._log_install(log_path, "INFO", f"Copied {script_name}")
+                    try:
+                        shutil.copy2(src, dst)
+                        if make_executable:
+                            dst.chmod(dst.stat().st_mode | 0o755)
+                        self._log_install(log_path, "INFO", f"Copied {script_name}")
+                    except Exception as e:
+                        self._log_install(log_path, "ERROR", f"Failed to copy {script_name}: {e}")
+                        print_error(f"Failed to copy {script_name}: {e}")
+                        return False
                 else:
-                    self._log_install(log_path, "WARNING", f"Script {script_name} not found")
+                    self._log_install(log_path, "WARNING", f"Script {script_name} not found at {src}")
+                    print_warning(f"Script {script_name} not found at {src}")
 
             # Copy handlers directory
             handlers_src = installer_root / "handlers"
             handlers_dst = model_dir / "handlers"
             if handlers_src.exists():
                 print_info("Copying handlers library...")
-                shutil.copytree(handlers_src, handlers_dst, dirs_exist_ok=True)
-                self._log_install(log_path, "INFO", "Copied handlers library")
+                try:
+                    if handlers_dst.exists():
+                        shutil.rmtree(handlers_dst)
+                    shutil.copytree(handlers_src, handlers_dst)
+                    self._log_install(log_path, "INFO", "Copied handlers library")
+                except Exception as e:
+                    self._log_install(log_path, "ERROR", f"Failed to copy handlers library: {e}")
+                    print_error(f"Failed to copy handlers library: {e}")
+                    return False
 
             # Copy detectors directory
             detectors_src = installer_root / "detectors"
             detectors_dst = model_dir / "detectors"
             if detectors_src.exists():
                 print_info("Copying detectors library...")
-                shutil.copytree(detectors_src, detectors_dst, dirs_exist_ok=True)
-                self._log_install(log_path, "INFO", "Copied detectors library")
+                try:
+                    if detectors_dst.exists():
+                        shutil.rmtree(detectors_dst)
+                    shutil.copytree(detectors_src, detectors_dst)
+                    self._log_install(log_path, "INFO", "Copied detectors library")
+                except Exception as e:
+                    self._log_install(log_path, "ERROR", f"Failed to copy detectors library: {e}")
+                    print_error(f"Failed to copy detectors library: {e}")
+                    return False
 
             # Copy core utilities (only needed files)
             core_dst = model_dir / "core"
-            core_dst.mkdir(exist_ok=True)
+            try:
+                core_dst.mkdir(exist_ok=True)
 
-            # Copy utils.py
-            core_utils_src = installer_root / "core" / "utils.py"
-            if core_utils_src.exists():
-                shutil.copy2(core_utils_src, core_dst / "utils.py")
+                # Copy utils.py
+                core_utils_src = installer_root / "core" / "utils.py"
+                if core_utils_src.exists():
+                    shutil.copy2(core_utils_src, core_dst / "utils.py")
 
-            # Copy checker.py (needed by handlers)
-            core_checker_src = installer_root / "core" / "checker.py"
-            if core_checker_src.exists():
-                shutil.copy2(core_checker_src, core_dst / "checker.py")
+                # Copy checker.py (needed by handlers)
+                core_checker_src = installer_root / "core" / "checker.py"
+                if core_checker_src.exists():
+                    shutil.copy2(core_checker_src, core_dst / "checker.py")
 
-            # Copy config.py (needed by checker)
-            core_config_src = installer_root / "core" / "config.py"
-            if core_config_src.exists():
-                shutil.copy2(core_config_src, core_dst / "config.py")
+                # Copy config.py (needed by checker)
+                core_config_src = installer_root / "core" / "config.py"
+                if core_config_src.exists():
+                    shutil.copy2(core_config_src, core_dst / "config.py")
 
-            # Copy quantization_config.py (needed by handlers)
-            core_quant_src = installer_root / "core" / "quantization_config.py"
-            if core_quant_src.exists():
-                shutil.copy2(core_quant_src, core_dst / "quantization_config.py")
+                # Copy quantization_config.py (needed by handlers)
+                core_quant_src = installer_root / "core" / "quantization_config.py"
+                if core_quant_src.exists():
+                    shutil.copy2(core_quant_src, core_dst / "quantization_config.py")
 
-            # Copy training_config.py (needed for training)
-            core_train_src = installer_root / "core" / "training_config.py"
-            if core_train_src.exists():
-                shutil.copy2(core_train_src, core_dst / "training_config.py")
+                # Copy training_config.py (needed for training)
+                core_train_src = installer_root / "core" / "training_config.py"
+                if core_train_src.exists():
+                    shutil.copy2(core_train_src, core_dst / "training_config.py")
 
-            # Copy dataset_manager.py (needed for training)
-            core_dataset_src = installer_root / "core" / "dataset_manager.py"
-            if core_dataset_src.exists():
-                shutil.copy2(core_dataset_src, core_dst / "dataset_manager.py")
+                # Copy dataset_manager.py (needed for training)
+                core_dataset_src = installer_root / "core" / "dataset_manager.py"
+                if core_dataset_src.exists():
+                    shutil.copy2(core_dataset_src, core_dst / "dataset_manager.py")
 
-            # Copy lora_utils.py (needed for LoRA training)
-            core_lora_src = installer_root / "core" / "lora_utils.py"
-            if core_lora_src.exists():
-                shutil.copy2(core_lora_src, core_dst / "lora_utils.py")
+                # Copy lora_utils.py (needed for LoRA training)
+                core_lora_src = installer_root / "core" / "lora_utils.py"
+                if core_lora_src.exists():
+                    shutil.copy2(core_lora_src, core_dst / "lora_utils.py")
 
-            # Create __init__.py
-            (core_dst / "__init__.py").touch()
-            self._log_install(log_path, "INFO", "Copied core modules")
+                # Create __init__.py
+                (core_dst / "__init__.py").touch()
+                self._log_install(log_path, "INFO", "Copied core modules")
+            except Exception as e:
+                self._log_install(log_path, "ERROR", f"Failed to copy core modules: {e}")
+                print_error(f"Failed to copy core modules: {e}")
+                return False
 
             return True
 

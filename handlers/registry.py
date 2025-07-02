@@ -80,7 +80,7 @@ class HandlerRegistry:
         try:
             from handlers.trocr import TrOCRHandler
             self._handlers['ocr'] = TrOCRHandler
-            self._handlers['trocr'] = TrOCRHandler # Also register by name
+            self._handlers['trocr'] = TrOCRHandler  # Also register by name
         except ImportError:
             pass
 
@@ -103,10 +103,13 @@ class HandlerRegistry:
 
         try:
             from handlers.qwen_vl import QwenVLHandler
-            # Register Qwen VL handler
-            self._handlers['qwen_vl'] = QwenVLHandler
-            self._handlers['qwen2_vl'] = QwenVLHandler
-            self._handlers['qwen2_5_vl'] = QwenVLHandler
+            self._handlers['qwen-vl'] = QwenVLHandler
+        except ImportError:
+            pass
+
+        try:
+            from handlers.sd3_large_handler import StableDiffusion3LargeHandler
+            self._handlers['stable-diffusion-3'] = StableDiffusion3LargeHandler
         except ImportError:
             pass
 
@@ -120,16 +123,18 @@ class HandlerRegistry:
 
         try:
             from handlers.gemma3 import Gemma3Handler
+            from handlers.gemma3n import Gemma3nHandler
             # Register Gemma 3 multimodal handler
             self._handlers['gemma3'] = Gemma3Handler
             self._handlers['gemma-3'] = Gemma3Handler
             self._handlers['gemma3_vlm'] = Gemma3Handler
             self._handlers['paligemma'] = Gemma3Handler
-            self._handlers['gemma3n'] = Gemma3Handler # For Gemma 3n models
-            self._handlers['gemma-3n'] = Gemma3Handler # For Gemma 3n models
+            # Register Gemma 3n handler for models with audio/video support
+            self._handlers['gemma3n'] = Gemma3nHandler
+            self._handlers['gemma-3n'] = Gemma3nHandler
         except ImportError as e:
             import logging
-            logging.getLogger(__name__).warning(f"Failed to import Gemma3Handler: {e}")
+            logging.getLogger(__name__).warning(f"Failed to import Gemma3 handlers: {e}")
             pass
 
         try:
@@ -139,7 +144,7 @@ class HandlerRegistry:
             self._handlers['deepseek_r1'] = DeepseekHandler
         except ImportError:
             pass
-        
+
         try:
             from handlers.llama4 import Llama4Handler
             # Register Llama 4 multimodal handler
@@ -192,10 +197,13 @@ class HandlerRegistry:
         model_id = model_info.get('model_id', '').lower()
         model_family = model_info.get('model_family', '')
         model_type = model_info.get('model_type', '')
-        
+
         import logging
         logger = logging.getLogger(__name__)
-        logger.info(f"Registry: Looking for handler - model_id={model_id}, model_type={model_type}, model_family={model_family}")
+        logger.info(
+            f"Registry: Looking for handler - model_id={model_id}, "
+            f"model_type={model_type}, model_family={model_family}"
+        )
 
         # Check for model-specific handlers
         # Check for DeepSeek models first (especially R1)
@@ -209,16 +217,16 @@ class HandlerRegistry:
             if 'deepseek' in self._handlers:
                 logger.info("Registry: Found DeepSeekHandler")
                 return self._handlers['deepseek']
-        
+
         if 'janus' in model_id:
             if 'janus' in self._handlers:
                 return self._handlers['janus']
 
         # Check for Llama 4 models
         if 'llama-4' in model_id or 'llama4' in model_id or model_type == 'llama4':
-            logger.info(f"Registry: Checking for llama4 handler")
+            logger.info("Registry: Checking for llama4 handler")
             if 'llama4' in self._handlers:
-                logger.info(f"Registry: Found Llama4Handler")
+                logger.info("Registry: Found Llama4Handler")
                 return self._handlers['llama4']
 
         # Check for Qwen3 models first (before Qwen VL)
@@ -226,24 +234,31 @@ class HandlerRegistry:
             if 'qwen3' in self._handlers:
                 return self._handlers['qwen3']
 
+        # Check for Gemma 3n models first (they have extended capabilities)
+        if '3n' in model_id and 'gemma' in model_id:
+            logger.info("Registry: Checking for gemma3n handler")
+            if 'gemma3n' in self._handlers:
+                logger.info("Registry: Found Gemma3nHandler")
+                return self._handlers['gemma3n']
+
         # Check for Gemma 3 multimodal models
         # Check model_type first as it's more specific
         if model_type == 'gemma3':
-            logger.info(f"Registry: Checking for gemma3 handler by model_type")
+            logger.info("Registry: Checking for gemma3 handler by model_type")
             if 'gemma3' in self._handlers:
-                logger.info(f"Registry: Found Gemma3Handler by model_type")
+                logger.info("Registry: Found Gemma3Handler by model_type")
                 return self._handlers['gemma3']
             else:
                 logger.warning(f"Registry: gemma3 not in handlers: {list(self._handlers.keys())}")
-        
+
         # Also check by model ID patterns
         if (('gemma-3' in model_id or 'gemma3' in model_id) and
             (model_info.get('is_gemma3_multimodal', False) or
              'vision' in str(model_info.get('config', {})).lower() or
              model_family == 'multimodal')):
-            logger.info(f"Registry: Checking for gemma3 handler by model_id pattern")
+            logger.info("Registry: Checking for gemma3 handler by model_id pattern")
             if 'gemma3' in self._handlers:
-                logger.info(f"Registry: Found Gemma3Handler by model_id pattern")
+                logger.info("Registry: Found Gemma3Handler by model_id pattern")
                 return self._handlers['gemma3']
 
         # Check for PaliGemma models
@@ -257,11 +272,11 @@ class HandlerRegistry:
                 return self._handlers['qwen_vl']
 
         # Check for reasoning models (o1-style and DeepSeek-R1)
-        if ('o1' in model_id or 
-            'reasoning' in model_info.get('tags', []) or
-            'deepseek-r1' in model_id or
-            'deepseek_r1' in model_id or
-            '-r1-' in model_id):
+        if ('o1' in model_id or
+                'reasoning' in model_info.get('tags', []) or
+                'deepseek-r1' in model_id or
+                'deepseek_r1' in model_id or
+                '-r1-' in model_id):
             if 'reasoning' in self._handlers:
                 return self._handlers['reasoning']
 
@@ -273,11 +288,17 @@ class HandlerRegistry:
         # Try to find in registered handlers
         # Check model_type first as it's more specific than model_family
         if model_type and model_type in self._handlers:
-            logger.info(f"Registry: Found handler for model_type '{model_type}': {self._handlers[model_type].__name__}")
+            logger.info(
+                f"Registry: Found handler for model_type '{model_type}': "
+                f"{self._handlers[model_type].__name__}"
+            )
             return self._handlers[model_type]
-        
+
         if model_family and model_family in self._handlers:
-            logger.info(f"Registry: Found handler for model_family '{model_family}': {self._handlers[model_family].__name__}")
+            logger.info(
+                f"Registry: Found handler for model_family '{model_family}': "
+                f"{self._handlers[model_family].__name__}"
+            )
             return self._handlers[model_family]
 
         # Fall back to dynamic loading
