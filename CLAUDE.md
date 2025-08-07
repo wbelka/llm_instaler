@@ -41,7 +41,7 @@ This will install bitsandbytes and other CUDA dependencies.
 
 ## Model Detection Algorithm
 
-- See detailed detection algorithm in [DETECTION_ALGORITHM.md](/home/wblk/llm_instaler/DETECTION_ALGORITHM.md)
+- See detailed detection algorithm in [docs/DETECTION_ALGORITHM.md](docs/DETECTION_ALGORITHM.md)
 - Detection is based on model structure and metadata, NOT on model name
 - Uses chain of detectors with priorities (ConfigDetector → DiffusersDetector → etc.)
 - Each detector checks if it can handle the model via matches() method
@@ -57,7 +57,7 @@ The LLM Installer uses a handler-based architecture for model-specific logic:
 3. **Registry** - Maps model types to appropriate handlers
 
 ### When Working with Handlers:
-1. Check HANDLER_DEVELOPMENT_GUIDE.md for detailed instructions
+1. Check [docs/HANDLER_DEVELOPMENT_GUIDE.md](docs/HANDLER_DEVELOPMENT_GUIDE.md) for detailed instructions
 2. All handlers must implement abstract methods from BaseHandler
 3. Use existing handlers (transformer, multimodal, janus) as references
 4. Add new handlers to handlers/registry.py

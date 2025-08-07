@@ -163,12 +163,24 @@ CPU offloading allows running models larger than GPU memory by automatically mov
 ./llm-installer update <model_dir>
 ```
 
-## 📖 Additional Documentation
+## 📖 Documentation
 
-- [Full Manual](docs/installer-manual.md)
-- [Quantization System](docs/quantization-system.md)
-- [Training Guide](docs/training-guide.md)
-- [Handler Development](docs/handler-training-development.md)
+### Core Documentation
+- [**Installer Manual**](docs/installer-manual.md) - Complete command reference and usage examples
+- [**Technical Requirements**](docs/TECHNICAL_REQUIREMENTS.md) - System requirements and architecture overview
+- [**Changelog**](docs/CHANGELOG.md) - Version history and recent updates
+
+### System Architecture
+- [**Handler System**](docs/HANDLER_SYSTEM.md) - Universal handler architecture for model management
+- [**Detection Algorithm**](docs/DETECTION_ALGORITHM.md) - How the installer detects and classifies model types
+- [**Quantization Support**](docs/QUANTIZATION_SUPPORT.md) - Quantization capabilities for different model types
+- [**Quantization System**](docs/quantization-system.md) - Centralized quantization configuration
+
+### Development Guides
+- [**Handler Development Guide**](docs/HANDLER_DEVELOPMENT_GUIDE.md) - Creating custom handlers for new model types
+- [**Handler Training Development**](docs/handler-training-development.md) - Implementing training support in handlers
+- [**Training Guide**](docs/training-guide.md) - Fine-tuning models with LoRA/QLoRA
+- [**LLM Installer Reference**](docs/LLM_INSTALLER_REFERENCE.md) - Complete API and function reference
 
 ## 🤝 Contributing
 
