@@ -1,23 +1,23 @@
-# Алгоритм детекции типов моделей в LLM Installer
+# Model Type Detection Algorithm in LLM Installer
 
-## Обзор
+## Overview
 
-Система детекции определяет тип модели НЕ по её названию, а по структуре и метаданным. Это позволяет автоматически поддерживать новые модели без изменения кода.
+The detection system determines the model type NOT by its name, but by its structure and metadata. This allows automatic support for new models without code changes.
 
-## Пошаговый алгоритм
+## Step-by-Step Algorithm
 
-### Шаг 1: Загрузка метаданных (ModelChecker.check_model)
+### Step 1: Load Metadata (ModelChecker.check_model)
 
 ```python
-model_id = "Qwen/Qwen2.5-VL-7B-Instruct"  # пример
+model_id = "Qwen/Qwen2.5-VL-7B-Instruct"  # example
 ```
 
-1. **Запрос к HuggingFace API**:
-   - Получение информации о модели (tags, pipeline_tag, library_name)
-   - Получение списка файлов в репозитории
-   - Скачивание конфигурационных файлов
+1. **HuggingFace API Request**:
+   - Get model information (tags, pipeline_tag, library_name)
+   - Get list of files in repository
+   - Download configuration files
 
-2. **Формирование структуры данных**:
+2. **Form Data Structure**:
 ```python
 model_data = {
     "model_id": "Qwen/Qwen2.5-VL-7B-Instruct",
@@ -25,7 +25,7 @@ model_data = {
         {"path": "config.json", "size": 1234},
         {"path": "model.safetensors", "size": 15000000000},
         {"path": "tokenizer.json", "size": 5678},
-        # ... другие файлы
+        # ... other files
     ],
     "config_data": {
         "config.json": {
@@ -33,50 +33,50 @@ model_data = {
             "architectures": ["Qwen2_5_VLForConditionalGeneration"],
             "vision_config": {...},
             "hidden_size": 3584,
-            # ... остальные поля
+            # ... other fields
         },
-        # Если есть другие конфиги (model_index.json для diffusers)
+        # If other configs exist (model_index.json for diffusers)
     },
     "tags": ["vision", "multimodal", "text-generation"],
-    "pipeline_tag": "text-generation",  # или None
-    "library_name": "transformers"  # или "diffusers", "timm", etc
+    "pipeline_tag": "text-generation",  # or None
+    "library_name": "transformers"  # or "diffusers", "timm", etc
 }
 ```
 
-### Шаг 2: Запуск цепочки детекторов
+### Step 2: Run Detector Chain
 
 ```python
-# DetectorRegistry содержит упорядоченный список детекторов
+# DetectorRegistry contains an ordered list of detectors
 detectors = [
-    ConfigDetector(priority=100),      # Высший приоритет
+    ConfigDetector(priority=100),      # Highest priority
     DiffusersDetector(priority=90),    
     AudioDetector(priority=80),
     EmbeddingDetector(priority=70),
-    # ... другие детекторы
+    # ... other detectors
 ]
 ```
 
-### Шаг 3: Проверка каждого детектора
+### Step 3: Check Each Detector
 
-Для каждого детектора в порядке убывания приоритета:
+For each detector in descending priority order:
 
 ```python
 for detector in detectors:
     if detector.matches(model_data):
         analysis = detector.analyze(model_data)
         model_data.update(analysis)
-        break  # Первый подходящий детектор определяет тип
+        break  # First matching detector determines the type
 ```
 
-### Шаг 4: Логика детекторов
+### Step 4: Detector Logic
 
-#### ConfigDetector (приоритет 100)
-**matches()**: Проверяет наличие config.json в model_data["config_data"]
+#### ConfigDetector (priority 100)
+**matches()**: Checks for config.json in model_data["config_data"]
 
 **analyze()**: 
-1. Извлекает config.json
-2. Читает model_type и architectures
-3. Проверяет маппинги:
+1. Extracts config.json
+2. Reads model_type and architectures
+3. Checks mappings:
    ```python
    ARCHITECTURE_HANDLERS = {
        "Qwen2_5_VLForConditionalGeneration": "multimodal",
@@ -92,53 +92,53 @@ for detector in detectors:
        # ...
    }
    ```
-4. Если не нашел в маппингах, анализирует структуру:
-   - Есть `vision_config` или `image_token_id` → multimodal
-   - Есть `audio_config` или `mel_bins` → audio-model
-   - Есть только `vocab_size` и `hidden_size` → language-model
+4. If not found in mappings, analyzes structure:
+   - Has `vision_config` or `image_token_id` → multimodal
+   - Has `audio_config` or `mel_bins` → audio-model
+   - Has only `vocab_size` and `hidden_size` → language-model
 
-#### DiffusersDetector (приоритет 90)
+#### DiffusersDetector (priority 90)
 **matches()**: 
-- Есть model_index.json
-- Или есть папки unet/, vae/
-- Или library_name == "diffusers"
+- Has model_index.json
+- Or has unet/, vae/ folders
+- Or library_name == "diffusers"
 
 **analyze()**: 
-- Читает pipeline класс из model_index.json
-- Определяет тип: text-to-image, text-to-video, inpainting, etc
+- Reads pipeline class from model_index.json
+- Determines type: text-to-image, text-to-video, inpainting, etc
 
-#### AudioDetector (приоритет 80)
+#### AudioDetector (priority 80)
 **matches()**: 
-- Есть feature_extractor_type в конфиге
-- Или есть audio_processor
-- Или model_type содержит "whisper", "wav2vec2", etc
+- Has feature_extractor_type in config
+- Or has audio_processor
+- Or model_type contains "whisper", "wav2vec2", etc
 
-### Шаг 5: Результат анализа
+### Step 5: Analysis Result
 
-Детектор возвращает:
+Detector returns:
 ```python
 {
-    "model_type": "qwen2_5_vl",              # Точный тип модели
-    "model_family": "multimodal",            # Семейство (для выбора handler)
+    "model_type": "qwen2_5_vl",              # Exact model type
+    "model_family": "multimodal",            # Family (for handler selection)
     "architecture_type": "Qwen2_5_VLForConditionalGeneration",
-    "primary_library": "transformers",       # Основная библиотека
-    "trust_remote_code": True,               # Нужен ли trust_remote_code
+    "primary_library": "transformers",       # Primary library
+    "trust_remote_code": True,               # Whether trust_remote_code is needed
     "capabilities": {
         "supports_images": True,
         "supports_vision": True,
         "max_context_length": 128000,
         # ...
     },
-    "special_requirements": ["flash-attn"],  # Особые зависимости
+    "special_requirements": ["flash-attn"],  # Special dependencies
 }
 ```
 
-### Шаг 6: Fallback механизм
+### Step 6: Fallback Mechanism
 
-Если ни один детектор не сработал:
+If no detector matched:
 ```python
 def _infer_model_type(model_data):
-    # Пытаемся определить по pipeline_tag из HuggingFace
+    # Try to determine by pipeline_tag from HuggingFace
     pipeline_tag = model_data.get("pipeline_tag", "")
     
     if "text-generation" in pipeline_tag:
@@ -151,37 +151,37 @@ def _infer_model_type(model_data):
             "model_type": "diffusion",
             "model_family": "image-generation"
         }
-    # ... и т.д.
+    # ... etc.
     
-    # Если совсем ничего не нашли
+    # If nothing found at all
     return {
         "model_type": "unknown",
         "model_family": "unknown"
     }
 ```
 
-## Пример работы для Qwen2.5-VL
+## Example for Qwen2.5-VL
 
-1. **Загрузка**: Получаем config.json с model_type="qwen2_5_vl"
-2. **ConfigDetector.matches()**: Да, есть config.json → True
+1. **Loading**: Get config.json with model_type="qwen2_5_vl"
+2. **ConfigDetector.matches()**: Yes, has config.json → True
 3. **ConfigDetector.analyze()**:
    - model_type = "qwen2_5_vl"
-   - Проверяем ARCHITECTURE_HANDLERS["Qwen2_5_VLForConditionalGeneration"] = "multimodal"
-   - Находим vision_config в конфиге → подтверждаем multimodal
-   - trust_remote_code = True (для qwen моделей)
-4. **Результат**: model_family = "multimodal" → будет использован MultimodalHandler или QwenVLHandler
+   - Check ARCHITECTURE_HANDLERS["Qwen2_5_VLForConditionalGeneration"] = "multimodal"
+   - Find vision_config in config → confirm multimodal
+   - trust_remote_code = True (for qwen models)
+4. **Result**: model_family = "multimodal" → will use MultimodalHandler or QwenVLHandler
 
-## Важные принципы
+## Important Principles
 
-1. **Детекция НЕ по имени**: Не проверяем название модели, только структуру
-2. **Приоритетность**: Более специфичные детекторы имеют высший приоритет
-3. **Первый подходящий**: Используется первый детектор, который вернул matches()=True
-4. **Расширяемость**: Новые детекторы автоматически регистрируются через registry
-5. **Fallback**: Всегда есть запасной вариант через pipeline_tag
+1. **Detection NOT by name**: Don't check model name, only structure
+2. **Priority-based**: More specific detectors have higher priority
+3. **First match wins**: Uses first detector that returned matches()=True
+4. **Extensibility**: New detectors are automatically registered through registry
+5. **Fallback**: Always has fallback option through pipeline_tag
 
-## Добавление поддержки новой модели
+## Adding Support for a New Model
 
-1. Если модель имеет уникальную структуру → создать новый детектор
-2. Если модель похожа на существующую → добавить в маппинги
-3. Создать соответствующий handler в handlers/
-4. Система автоматически начнет определять и поддерживать новый тип
+1. If model has unique structure → create new detector
+2. If model is similar to existing → add to mappings
+3. Create corresponding handler in handlers/
+4. System will automatically start detecting and supporting new type
