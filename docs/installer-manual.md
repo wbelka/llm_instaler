@@ -142,8 +142,11 @@ Approximate memory usage by model size and quantization:
 ### CUDA Out of Memory
 If you get CUDA out of memory errors:
 1. Use quantization: `--dtype int4` or `--quantization 4bit`
-2. Reduce batch size in generation
-3. Clear GPU cache between runs
+2. Enable CPU offloading: `./start.sh --cpu-offload`
+3. Reduce batch size in generation
+4. Clear GPU cache between runs
+
+CPU offloading allows models larger than GPU memory by automatically moving layers between GPU and CPU/RAM.
 
 ### Quantization Not Working
 If quantization doesn't reduce memory usage:
@@ -219,6 +222,27 @@ After installation:
 ```bash
 cd /path/to/installed/model
 ./start.sh --dtype int4
+```
+
+Start options:
+- `--port`: Port number (default: 8000)
+- `--host`: Host address (default: 0.0.0.0)
+- `--device`: Device to use (auto/cuda/cpu/mps)
+- `--dtype`: Data type (auto/float16/float32/int8/int4)
+- `--cpu-offload`: Enable CPU offloading for large models
+- `--stream`: Enable streaming mode
+- `--ui-file`: UI file to use (default: serve_terminal.html)
+
+Examples:
+```bash
+# Run with CPU offloading for large models
+./start.sh --dtype int4 --cpu-offload
+
+# Run on specific port
+./start.sh --port 8080
+
+# Run with streaming
+./start.sh --stream
 ```
 
 Access the model:

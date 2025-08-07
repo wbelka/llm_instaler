@@ -274,11 +274,14 @@ Note: This is a large package and may take some time to install.
             from transformers import AutoModelForCausalLM
             import torch
 
+            # Extract cpu_offload parameter
+            cpu_offload = kwargs.get('cpu_offload', False)
+
             # Load processor
             processor = VLChatProcessor.from_pretrained(model_path)
 
             # Use base handler's quantization config
-            quant_config, torch_dtype = self.get_quantization_config(dtype, load_in_8bit, load_in_4bit)
+            quant_config, torch_dtype = self.get_quantization_config(dtype, load_in_8bit, load_in_4bit, cpu_offload)
 
             # Load model with trust_remote_code
             model_kwargs = {
@@ -289,6 +292,10 @@ Note: This is a large package and may take some time to install.
 
             # Merge quantization config
             model_kwargs.update(quant_config)
+            
+            # Use base handler's memory config
+            memory_config = self.get_memory_config(device, memory_fraction=0.95, cpu_offload=cpu_offload)
+            model_kwargs.update(memory_config)
             
             # Add Flash Attention 2 support
             use_flash_attention_2 = kwargs.get('use_flash_attention_2', False)

@@ -114,6 +114,13 @@ if [ "$STREAM_MODE" = "true" ]; then
     echo "Streaming mode enabled"
 fi
 
+# Add cpu-offload flag if enabled
+if [ "$CPU_OFFLOAD" = "true" ]; then
+    CPU_OFFLOAD_FLAG="--cpu-offload"
+else
+    CPU_OFFLOAD_FLAG=""
+fi
+
 python serve_api.py \
     --port "$PORT" \
     --host "$HOST" \
@@ -121,6 +128,7 @@ python serve_api.py \
     --device "$DEVICE" \
     --stream-mode "$STREAM_MODE" \
     --ui-file "$UI_FILE" \
+    $CPU_OFFLOAD_FLAG \
     $EXTRA_ARGS &
 
 API_PID=$!

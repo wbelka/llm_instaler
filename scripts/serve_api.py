@@ -336,6 +336,8 @@ async def startup_event():
         parser.add_argument("--ui-file", type=str, default="serve_terminal.html", 
                             help="Path to the HTML file for the UI, relative to the script directory.")
         parser.add_argument("--allow-all-origins", action="store_true", help="Allow all CORS origins (development only)")
+        parser.add_argument("--cpu-offload", action="store_true", 
+                            help="Enable CPU offloading for large models (allows using GPU+CPU memory)")
         args, _ = parser.parse_known_args()
         
         # Set UI file path
@@ -393,7 +395,8 @@ async def startup_event():
             device=args.device,
             dtype=args.dtype,
             lora_path=args.load_lora,
-            load_lora=True
+            load_lora=True,
+            cpu_offload=args.cpu_offload
         )
         
         # Update MODEL_INFO with LoRA status
@@ -921,6 +924,8 @@ def main():
     parser.add_argument("--ui-file", type=str, default="serve_terminal.html", 
                         help="Path to the HTML file for the UI, relative to the script directory.")
     parser.add_argument("--allow-all-origins", action="store_true")
+    parser.add_argument("--cpu-offload", action="store_true", 
+                        help="Enable CPU offloading for large models (allows using GPU+CPU memory)")
     args = parser.parse_args()
     
     # Security warning

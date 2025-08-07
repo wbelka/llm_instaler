@@ -10,6 +10,7 @@ import logging
 import os
 from handlers.base import BaseHandler
 from core.checker import ModelRequirements
+from core.dependencies import get_base_dependencies, get_model_specific_dependencies, combine_dependencies
 
 logger = logging.getLogger(__name__)
 
@@ -89,14 +90,17 @@ class TransformerHandler(BaseHandler):
         Returns:
             List of required pip packages.
         """
-        base_deps = [
-            'transformers>=4.36.0',
-            'torch>=2.6.0',
-            'accelerate>=0.25.0',
+        # Get base dependencies
+        base_deps = get_base_dependencies('torch', 'transformers')
+        
+        # Add transformer-specific dependencies
+        additional = [
             'sentencepiece>=0.1.99',  # For many tokenizers
             'protobuf>=3.20.0',       # For some models
             'tokenizers>=0.15.0'      # Fast tokenizers
         ]
+        
+        base_deps = combine_dependencies(base_deps, additional)
 
         # Add special dependencies based on model architecture
         special_reqs = self.model_info.get('special_requirements', [])
@@ -142,9 +146,10 @@ class TransformerHandler(BaseHandler):
         dtype = kwargs.get('dtype', 'auto')
         load_in_8bit = kwargs.get('load_in_8bit', False)
         load_in_4bit = kwargs.get('load_in_4bit', False)
+        cpu_offload = kwargs.get('cpu_offload', False)
 
         # Use base handler's quantization config
-        quant_config, torch_dtype = self.get_quantization_config(dtype, load_in_8bit, load_in_4bit)
+        quant_config, torch_dtype = self.get_quantization_config(dtype, load_in_8bit, load_in_4bit, cpu_offload)
 
         # Load configuration
         model_kwargs = {
@@ -156,20 +161,9 @@ class TransformerHandler(BaseHandler):
         # Merge quantization config
         model_kwargs.update(quant_config)
 
-        # Device map for multi-GPU or CPU offloading
-        if device == 'auto':
-            model_kwargs['device_map'] = 'auto'
-            # Add offload settings for better memory management
-            model_kwargs['offload_folder'] = 'offload'
-            model_kwargs['offload_state_dict'] = True
-
-            # For very large models, use sequential device map
-            model_size = self.model_info.get('model_size_b', 0)
-            if model_size > 30:  # 30B+ models
-                model_kwargs['device_map'] = 'sequential'
-                model_kwargs['max_memory'] = {0: '20GiB', 'cpu': '100GiB'}
-        elif device != 'cpu':
-            model_kwargs['device_map'] = {'': device}
+        # Use base handler's memory config
+        memory_config = self.get_memory_config(device, memory_fraction=0.95, cpu_offload=cpu_offload)
+        model_kwargs.update(memory_config)
 
         # Check if flash attention should be disabled
         disable_flash_attn = (

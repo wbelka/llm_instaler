@@ -101,7 +101,7 @@ class BaseHandler(ABC):
         raise NotImplementedError("Subclasses must implement validate_model_files()")
     
     def get_quantization_config(self, dtype: str, load_in_8bit: bool = False, 
-                               load_in_4bit: bool = False) -> Tuple[Dict[str, Any], Any]:
+                               load_in_4bit: bool = False, cpu_offload: bool = False) -> Tuple[Dict[str, Any], Any]:
         """Get quantization configuration based on dtype.
         
         This is a common method that can be used by all handlers to setup
@@ -111,6 +111,7 @@ class BaseHandler(ABC):
             dtype: Requested dtype ('auto', 'int8', 'int4', 'float16', 'float32', 'bfloat16')
             load_in_8bit: Force 8-bit quantization
             load_in_4bit: Force 4-bit quantization
+            cpu_offload: Enable CPU offloading for quantization and model layers
             
         Returns:
             Tuple of (model_kwargs, torch_dtype) where model_kwargs contains
@@ -173,7 +174,7 @@ class BaseHandler(ABC):
                 else:
                     model_kwargs['quantization_config'] = BitsAndBytesConfig(
                         load_in_8bit=True,
-                        llm_int8_enable_fp32_cpu_offload=True,  # Enable CPU offloading for large models
+                        llm_int8_enable_fp32_cpu_offload=cpu_offload,  # Controlled by cpu_offload parameter
                         bnb_4bit_compute_dtype=torch_dtype if torch_dtype != torch.float32 else None,
                     )
                 # Add bitsandbytes to dependencies if not present
@@ -189,12 +190,14 @@ class BaseHandler(ABC):
         
         return model_kwargs, torch_dtype
     
-    def get_memory_config(self, device: str = 'auto', memory_fraction: float = 0.95) -> Dict[str, Any]:
+    def get_memory_config(self, device: str = 'auto', memory_fraction: float = 0.95, 
+                         cpu_offload: bool = False) -> Dict[str, Any]:
         """Get memory configuration for model loading.
         
         Args:
             device: Device to use ('auto', 'cuda', 'cpu', etc.)
             memory_fraction: Fraction of GPU memory to use (0.0-1.0)
+            cpu_offload: Enable CPU offloading for model layers
             
         Returns:
             Dictionary with device_map and max_memory settings
@@ -202,18 +205,34 @@ class BaseHandler(ABC):
         config = {}
         
         if device == 'auto':
-            config['device_map'] = 'auto'
-            # Calculate available GPU memory
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    gpu_memory = torch.cuda.get_device_properties(0).total_memory
-                    usable_memory = int(gpu_memory * memory_fraction)
-                    memory_gb = usable_memory / (1024**3)
-                    config['max_memory'] = {0: f"{memory_gb:.1f}GB"}
-                    logger.info(f"Using {memory_gb:.1f}GB of GPU memory for model loading")
-            except ImportError:
-                pass
+            if cpu_offload:
+                # Allow using both GPU and CPU
+                config['device_map'] = 'auto'
+                config['offload_folder'] = './offload'  # Folder for disk offloading if needed
+                # Calculate available GPU memory
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        gpu_memory = torch.cuda.get_device_properties(0).total_memory
+                        usable_memory = int(gpu_memory * memory_fraction)
+                        memory_gb = usable_memory / (1024**3)
+                        config['max_memory'] = {0: f"{memory_gb:.1f}GB", "cpu": "50GB"}  # Allow CPU usage
+                        logger.info(f"Using {memory_gb:.1f}GB GPU + CPU offloading for model loading")
+                except ImportError:
+                    pass
+            else:
+                # GPU only, no CPU offloading
+                config['device_map'] = 'balanced'  # Balanced across GPUs only
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        gpu_memory = torch.cuda.get_device_properties(0).total_memory
+                        usable_memory = int(gpu_memory * memory_fraction)
+                        memory_gb = usable_memory / (1024**3)
+                        config['max_memory'] = {0: f"{memory_gb:.1f}GB"}
+                        logger.info(f"Using {memory_gb:.1f}GB of GPU memory (no CPU offload)")
+                except ImportError:
+                    pass
         elif device != 'cpu':
             config['device_map'] = {'': device}
             

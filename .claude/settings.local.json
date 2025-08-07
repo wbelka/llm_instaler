@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(python3:*)",
+      "Bash(source:*)",
+      "Bash(pip install:*)",
+      "Bash(flake8:*)",
+      "Bash(autopep8:*)",
+      "Bash(grep:*)",
+      "Bash(awk:*)",
+      "Bash(chmod:*)",
+      "Bash(./llm-installer:*)",
+      "Bash(find:*)",
+      "Bash(rg:*)",
+      "Bash(git add:*)",
+      "Bash(git reset:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(/home/wblk/LLM/models/FreedomIntelligence_Janus-4o-7B/.venv/bin/pip install git+https://github.com/deepseek-ai/Janus.git)",
+      "Bash(echo:*)",
+      "Bash(touch:*)",
+      "Bash(sed:*)",
+      "Bash(rm:*)",
+      "Bash(mv:*)",
+      "Bash(python test_subprocess_fix.py:*)",
+      "Bash(python:*)",
+      "Bash(jq:*)",
+      "Bash(true)"
+    ],
+    "deny": []
+  }
+}
