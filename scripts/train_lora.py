@@ -13,6 +13,7 @@ import torch
 import logging
 import argparse
 import subprocess
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
@@ -463,6 +464,37 @@ class SmartTrainer:
             pad_to_multiple_of=8
         )
         
+        # Handle custom optimizers
+        optimizer = None
+        scheduler = None
+        if self.training_config['optimizer'] == 'dadapt_adam':
+            from dadaptation import DAdaptAdam
+            from transformers import get_scheduler
+
+            optimizer = DAdaptAdam(
+                self.model.parameters(),
+                lr=self.training_config['learning_rate'],
+                weight_decay=self.training_config['weight_decay']
+            )
+            logger.info("Using DAdaptAdam optimizer.")
+
+            # When using a custom optimizer, we must also provide a scheduler.
+            # Calculate total training steps
+            num_update_steps_per_epoch = math.ceil(len(self.train_dataset) / training_args.gradient_accumulation_steps)
+            max_steps = math.ceil(training_args.num_train_epochs * num_update_steps_per_epoch)
+
+            scheduler = get_scheduler(
+                name=training_args.lr_scheduler_type,
+                optimizer=optimizer,
+                num_warmup_steps=int(max_steps * training_args.warmup_ratio),
+                num_training_steps=max_steps,
+            )
+
+            logger.info(f"Using '{training_args.lr_scheduler_type}' scheduler.")
+
+            # Set a standard optimizer in args to prevent issues, it won't be used.
+            training_args.optim = "adamw_torch"
+
         # Create trainer with custom callback
         auto_stop_callback = AutoStopCallback(self)
         self.trainer = Trainer(
@@ -471,8 +503,9 @@ class SmartTrainer:
             train_dataset=self.train_dataset,
             eval_dataset=self.val_dataset,
             data_collator=data_collator,
-            processing_class=self.tokenizer,  # Changed from tokenizer to processing_class
+            processing_class=self.tokenizer,
             callbacks=[auto_stop_callback._callback],
+            optimizers=(optimizer, scheduler) if optimizer else (None, None),
         )
     
     def train(self):
@@ -1089,7 +1122,7 @@ def main():
     parser.add_argument("--overfitting-threshold", type=float, help="Overfitting detection threshold")
 
     # Optimization
-    parser.add_argument("--optimizer", type=str, help="Optimizer to use (e.g., adamw_torch, adamw_bnb_8bit)")
+    parser.add_argument("--optimizer", type=str, help="Optimizer to use (e.g., adamw_torch, adamw_bnb_8bit, dadapt_adam)")
     
     # Hardware parameters
     parser.add_argument("--device", type=str, help="Device (auto/cuda/cpu)")
