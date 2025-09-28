@@ -1087,6 +1087,9 @@ def main():
     # Auto-stop parameters
     parser.add_argument("--patience", type=int, help="Early stopping patience")
     parser.add_argument("--overfitting-threshold", type=float, help="Overfitting detection threshold")
+
+    # Optimization
+    parser.add_argument("--optimizer", type=str, help="Optimizer to use (e.g., adamw_torch, adamw_bnb_8bit)")
     
     # Hardware parameters
     parser.add_argument("--device", type=str, help="Device (auto/cuda/cpu)")
@@ -1163,6 +1166,9 @@ def main():
 
     training_config = TrainingConfig.from_model_info(model_info, **config_kwargs)
 
+    # Explicitly set optimizer if provided via CLI to satisfy static analysis
+    if 'optimizer' in cli_args:
+        training_config.optimizer = cli_args['optimizer']
     
     # Print configuration
     print("\n" + "="*60)

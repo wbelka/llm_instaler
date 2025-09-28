@@ -19,3 +19,4 @@ cd "$MODEL_DIR" && ./train.sh \
   --patience 10 \
   --min-evaluations 10 \
   --output "./lora_enhanced"
+  # --optimizer "adamw_bnb_8bit" # Optional: Uncomment to use a memory-efficient optimizer
