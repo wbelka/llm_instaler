@@ -147,6 +147,9 @@ class TrainingConfig:
         # Mixed precision based on hardware
         if self.mixed_precision == "auto":
             self.mixed_precision = self._get_mixed_precision()
+
+        if self.training_mode == "ultra":
+            self.lr_scheduler_type = "cosine_with_restarts"
     
     def _get_optimal_lora_rank(self) -> int:
         """Get optimal LoRA rank based on model size."""
@@ -197,7 +200,8 @@ class TrainingConfig:
             "fast": 2.0,
             "circle": 0.8,
             "non-stop": 0.3,
-            "adaptive": 1.0
+            "adaptive": 1.0,
+            "ultra": 0.25
         }
         
         lr *= mode_multipliers.get(self.training_mode, 1.0)
@@ -251,7 +255,8 @@ class TrainingConfig:
             "fast": 8,
             "circle": 4,
             "non-stop": 32,
-            "adaptive": 16
+            "adaptive": 16,
+            "ultra": 64
         }
         
         target_batch = target_batch_sizes.get(self.training_mode, 16)
@@ -269,7 +274,8 @@ class TrainingConfig:
             "fast": 1,
             "circle": -1,  # Determined by circular training
             "non-stop": -1,  # No limit
-            "adaptive": 3  # Start with 3, adapt as needed
+            "adaptive": 3,  # Start with 3, adapt as needed
+            "ultra": 8
         }
         
         return epochs.get(self.training_mode, 3)
@@ -315,7 +321,8 @@ class TrainingConfig:
                 "fast": 0.02,      # 50 evaluations per epoch
                 "circle": 0.01,    # 100 evaluations per epoch (for small datasets)
                 "non-stop": 0.20,  # 5 evaluations per epoch
-                "adaptive": 0.05   # 20 evaluations per epoch
+                "adaptive": 0.05,   # 20 evaluations per epoch
+                "ultra": 0.10
             }
             
             percentage = eval_percentages.get(self.training_mode, 0.05)

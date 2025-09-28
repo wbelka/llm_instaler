@@ -23,6 +23,12 @@ aiofiles>=23.0.0
 # Additional utilities
 python-dotenv>=1.0.0
 
+# Training & Fine-tuning
+transformers>=4.36.0
+accelerate>=0.25.0
+bitsandbytes>=0.42.0
+dadaptation>=3.2
+
 # Development dependencies (optional)
 pytest>=7.0.0
 pytest-cov>=4.0.0
