@@ -83,6 +83,7 @@ FORCE_EPOCHS=false
 CIRCULAR_BATCH_MULTIPLIER=""
 VALIDATION_SPLIT=""
 HELP=false
+OPTIMIZER=""
 
 # Show help if requested
 if [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]]; then
@@ -195,6 +196,10 @@ while [[ $# -gt 0 ]]; do
             VALIDATION_SPLIT="$2"
             shift 2
             ;;
+        --optimizer)
+            OPTIMIZER="$2"
+            shift 2
+            ;;
         *)
             echo "Unknown option: $1"
             exit 1
@@ -230,6 +235,7 @@ if [ "$HELP" = true ] || [ -z "$DATA_PATH" ]; then
     echo "  --batch-size N                 Batch size (auto-detected if not set)"
     echo "  --learning-rate RATE           Learning rate (auto-detected if not set)"
     echo "  --max-seq-length N             Maximum sequence length (model default if not set)"
+    echo "  --optimizer OPTIMIZER          Optimizer to use (e.g., adamw_torch, adamw_bnb_8bit)"
     echo ""
     echo "LORA PARAMETERS:"
     echo "  --lora-r N                     LoRA rank (auto-detected: 8-64 based on model)"
@@ -436,6 +442,7 @@ CMD="python train_lora.py --data \"$DATA_PATH\" --output \"$OUTPUT_PATH\""
 [ ! -z "$MODE" ] && CMD="$CMD --mode $MODE"
 [ "$FORCE_EPOCHS" = true ] && CMD="$CMD --force-epochs"
 [ ! -z "$VALIDATION_SPLIT" ] && CMD="$CMD --validation-split $VALIDATION_SPLIT"
+[ ! -z "$OPTIMIZER" ] && CMD="$CMD --optimizer $OPTIMIZER"
 
 # Function to cleanup on exit
 cleanup() {

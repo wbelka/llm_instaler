@@ -317,6 +317,24 @@ For large models with limited VRAM:
   --epochs 5
 ```
 
+### Optimizer Selection
+
+By default, the training script uses `adamw_torch`. You can specify a different optimizer using the `--optimizer` argument. This is useful for experimenting with more advanced or memory-efficient optimizers.
+
+```bash
+# Use an 8-bit optimizer to save memory
+./train.sh --data dataset.json --optimizer adamw_bnb_8bit
+```
+
+#### Recommended Optimizers
+
+-   **`adamw_torch`** (Default): Standard AdamW optimizer from PyTorch. A safe and reliable choice for most scenarios.
+-   **`adamw_bnb_8bit`**: 8-bit quantized optimizer from `bitsandbytes`. Significantly reduces memory usage (VRAM), making it ideal for training larger models or on GPUs with less memory. Highly recommended when using `--method qlora`.
+-   **`paged_adamw_8bit`**: Another 8-bit optimizer from `bitsandbytes` that uses paged memory management for even greater memory efficiency. A good alternative to `adamw_bnb_8bit` if you are still facing memory issues.
+-   **`adafactor`**: An adaptive learning rate optimizer that can be faster and use less memory than Adam, especially for very large models. It does not use momentum, so its convergence behavior can differ.
+
+**Note on Dependencies:** To use the `..._bnb_8bit` optimizers, you must have the `bitsandbytes` library correctly installed and configured for your system. If you encounter issues, running the installer's fix command can often resolve them: `./llm-installer fix . --fix-cuda`
+
 ### Data Limiting
 
 ```bash
